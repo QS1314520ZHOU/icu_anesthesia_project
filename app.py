@@ -74,6 +74,7 @@ from routes.report_routes import report_bp
 from routes.risk_simulation_routes import risk_bp
 from routes.collaboration_routes import collab_bp
 from routes.operational_routes import operational_bp
+from routes.interface_spec_routes import spec_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
@@ -95,6 +96,7 @@ app.register_blueprint(report_bp)
 app.register_blueprint(risk_bp)
 app.register_blueprint(collab_bp)
 app.register_blueprint(operational_bp)
+app.register_blueprint(spec_bp)
 
 # thread executor for async tasks
 executor = ThreadPoolExecutor(max_workers=4)
@@ -247,7 +249,7 @@ def init_db():
         )
     ''')
 
-    # 3.5. 里程碑表 (补录)
+    # 3.5. 里程碑表
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS milestones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -256,8 +258,10 @@ def init_db():
             target_date DATE,
             is_completed BOOLEAN DEFAULT 0,
             completed_date DATE,
+            is_celebrated BOOLEAN DEFAULT 0,
             remark TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
+            FOREIGN KEY (project_id) REFERENCES projects(id),
+            UNIQUE(project_id, name)
         )
     ''')
     
@@ -332,19 +336,6 @@ def init_db():
             week_end DATE,
             content TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 9. 里程碑表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS milestones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            name TEXT NOT NULL,
-            target_date DATE,
-            is_completed BOOLEAN DEFAULT 0,
-            completed_date DATE,
             FOREIGN KEY (project_id) REFERENCES projects(id)
         )
     ''')
@@ -541,6 +532,20 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id),
             FOREIGN KEY (stage_id) REFERENCES project_stages(id)
+        )
+    ''')
+    
+    # 17.5 项目收入表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS project_revenue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            amount REAL NOT NULL,
+            revenue_date DATE,
+            revenue_type TEXT, -- 合同款, 阶段款, 验收款, 维保费 等
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
         )
     ''')
 
@@ -758,6 +763,103 @@ def init_db():
         )
     ''')
 
+    # ========== V3.0 接口文档智能对照模块 ==========
+    
+    # 31. 接口规范库（解析后的结构化接口定义）
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interface_specs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            doc_id INTEGER,
+            spec_source TEXT NOT NULL DEFAULT 'vendor',
+            category TEXT, -- 新增：分类（如：手麻标准、重症标准）
+            vendor_name TEXT,
+            system_type TEXT NOT NULL DEFAULT '',
+            interface_name TEXT NOT NULL DEFAULT '',
+            transcode TEXT,
+            protocol TEXT,
+            description TEXT,
+            request_sample TEXT,
+            response_sample TEXT,
+            endpoint_url TEXT,
+            action_name TEXT,
+            view_name TEXT,
+            data_direction TEXT DEFAULT 'pull',
+            raw_text TEXT,
+            parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id),
+            FOREIGN KEY (doc_id) REFERENCES project_documents(id)
+        )
+    ''')
+    try:
+        cursor.execute("ALTER TABLE interface_specs ADD COLUMN category TEXT")
+    except:
+        pass
+
+    # 32. 接口字段明细
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interface_spec_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spec_id INTEGER NOT NULL,
+            field_name TEXT NOT NULL DEFAULT '',
+            field_name_cn TEXT,
+            field_type TEXT,
+            field_length TEXT,
+            is_required INTEGER DEFAULT 0,
+            is_primary_key INTEGER DEFAULT 0,
+            description TEXT,
+            remark TEXT,
+            default_value TEXT,
+            enum_values TEXT,
+            sample_value TEXT,
+            field_order INTEGER DEFAULT 0,
+            FOREIGN KEY (spec_id) REFERENCES interface_specs(id) ON DELETE CASCADE
+        )
+    ''')
+
+    # 33. 接口对照结果
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interface_comparisons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            our_spec_id INTEGER NOT NULL,
+            vendor_spec_id INTEGER,
+            match_type TEXT DEFAULT 'auto',
+            match_confidence REAL DEFAULT 0,
+            comparison_result TEXT,
+            summary TEXT,
+            gap_count INTEGER DEFAULT 0,
+            transform_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            reviewed_by TEXT,
+            reviewed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id),
+            FOREIGN KEY (our_spec_id) REFERENCES interface_specs(id),
+            FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
+        )
+    ''')
+
+    # 34. 字段级映射关系
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS field_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            comparison_id INTEGER NOT NULL,
+            our_field_id INTEGER,
+            vendor_field_id INTEGER,
+            our_field_name TEXT,
+            vendor_field_name TEXT,
+            mapping_status TEXT NOT NULL DEFAULT 'pending',
+            transform_rule TEXT,
+            ai_suggestion TEXT,
+            is_confirmed INTEGER DEFAULT 0,
+            remark TEXT,
+            FOREIGN KEY (comparison_id) REFERENCES interface_comparisons(id) ON DELETE CASCADE,
+            FOREIGN KEY (our_field_id) REFERENCES interface_spec_fields(id),
+            FOREIGN KEY (vendor_field_id) REFERENCES interface_spec_fields(id)
+        )
+    ''')
+
     # ========== 数据库升级：添加缺失的列 ==========
     columns_to_add = [
         ('priority', "TEXT DEFAULT '普通'"),
@@ -838,6 +940,11 @@ def init_db():
         ("idx_task_deps_depends_on", "task_dependencies", "depends_on_task_id"),
         ("idx_snapshots_project_id", "progress_snapshots", "project_id"),
         ("idx_standup_project_id", "standup_minutes", "project_id"),
+        ("idx_interface_specs_project", "interface_specs", "project_id"),
+        ("idx_interface_specs_source", "interface_specs", "spec_source"),
+        ("idx_spec_fields_spec", "interface_spec_fields", "spec_id"),
+        ("idx_comparisons_project", "interface_comparisons", "project_id"),
+        ("idx_field_mappings_comp", "field_mappings", "comparison_id"),
     ]
     for idx_name, table_name, column_name in indexes:
         try:

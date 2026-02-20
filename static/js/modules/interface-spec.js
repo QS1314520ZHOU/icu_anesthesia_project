@@ -1,0 +1,634 @@
+/**
+ * 接口文档智能对照 - 前端模块
+ * 依赖：全局 api (ApiClient), openModal, closeModal, showToast, marked
+ */
+
+const InterfaceSpec = {
+    // 缓存数据
+    _ourSpecs: [],
+    _vendorSpecs: [],
+    _comparisons: [],
+    _currentProjectId: null,
+
+    // ========== 入口：渲染整个 Tab 内容 ==========
+    async renderTab(projectId) {
+        this._currentProjectId = projectId;
+        const container = document.getElementById('tabInterfaceSpec');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="interface-spec-module">
+                <!-- 顶部操作栏 -->
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-primary btn-sm" onclick="InterfaceSpec.showUploadModal('our_standard')">
+                            📤 上传我方标准文档
+                        </button>
+                        <button class="btn btn-info btn-sm" onclick="InterfaceSpec.showUploadModal('vendor')">
+                            📥 上传对方接口文档
+                        </button>
+                        <select id="compareCategory" class="form-control" style="width:130px;height:32px;padding:0 8px;font-size:12px;border-radius:6px;border-color:var(--gray-200);">
+                            <option value="手麻标准">手麻标准</option>
+                            <option value="重症标准">重症标准</option>
+                            <option value="其他">其他</option>
+                        </select>
+                        <button class="btn btn-ai btn-sm" onclick="InterfaceSpec.runComparison()" id="btnRunComparison">
+                            🔍 一键智能对照
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.generateReport()">
+                            📊 生成对照报告
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 统计概览 -->
+                <div id="specOverview" style="margin-bottom:20px;"></div>
+
+                <!-- 三栏内容 -->
+                <div class="spec-sub-tabs" style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px;margin-bottom:16px;">
+                    <div class="spec-sub-tab active" onclick="InterfaceSpec.switchSubTab('comparison')" data-subtab="comparison"
+                         style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
+                        🔍 对照结果
+                    </div>
+                    <div class="spec-sub-tab" onclick="InterfaceSpec.switchSubTab('our')" data-subtab="our"
+                         style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
+                        📋 我方标准接口
+                    </div>
+                    <div class="spec-sub-tab" onclick="InterfaceSpec.switchSubTab('vendor')" data-subtab="vendor"
+                         style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
+                        🏥 对方接口
+                    </div>
+                </div>
+
+                <div id="specSubContent">
+                    <div id="specComparisonView"></div>
+                    <div id="specOurView" style="display:none;"></div>
+                    <div id="specVendorView" style="display:none;"></div>
+                </div>
+
+                <!-- AI 报告容器 -->
+                <div id="specAiReport" style="display:none;margin-top:20px;"></div>
+            </div>
+        `;
+
+        // 加载数据
+        await this.loadAll();
+    },
+
+    async loadAll() {
+        await Promise.all([
+            this.loadOurSpecs(),
+            this.loadVendorSpecs(),
+            this.loadComparisons()
+        ]);
+        this.renderOverview();
+        this.renderComparisonView();
+    },
+
+    switchSubTab(name) {
+        // 切换高亮
+        document.querySelectorAll('.spec-sub-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.subtab === name);
+            t.style.background = t.dataset.subtab === name ? 'white' : 'transparent';
+            t.style.color = t.dataset.subtab === name ? 'var(--primary)' : 'var(--gray-600)';
+            t.style.boxShadow = t.dataset.subtab === name ? '0 1px 3px rgba(0,0,0,0.1)' : 'none';
+        });
+        // 切换内容
+        document.getElementById('specComparisonView').style.display = name === 'comparison' ? 'block' : 'none';
+        document.getElementById('specOurView').style.display = name === 'our' ? 'block' : 'none';
+        document.getElementById('specVendorView').style.display = name === 'vendor' ? 'block' : 'none';
+
+        if (name === 'our') this.renderSpecList(this._ourSpecs, 'specOurView', 'our_standard');
+        if (name === 'vendor') this.renderSpecList(this._vendorSpecs, 'specVendorView', 'vendor');
+    },
+
+    // ========== 数据加载 ==========
+    async loadOurSpecs() {
+        try {
+            this._ourSpecs = await api.get(`/projects/${this._currentProjectId}/interface-specs?source=our_standard`, { silent: true });
+        } catch { this._ourSpecs = []; }
+    },
+
+    async loadVendorSpecs() {
+        try {
+            this._vendorSpecs = await api.get(`/projects/${this._currentProjectId}/interface-specs?source=vendor`, { silent: true });
+        } catch { this._vendorSpecs = []; }
+    },
+
+    async loadComparisons() {
+        try {
+            this._comparisons = await api.get(`/projects/${this._currentProjectId}/interface-comparisons`, { silent: true });
+        } catch { this._comparisons = []; }
+    },
+
+    // ========== 统计概览 ==========
+    renderOverview() {
+        const el = document.getElementById('specOverview');
+        if (!el) return;
+
+        const ourCount = this._ourSpecs.length;
+        const vendorCount = this._vendorSpecs.length;
+        const compCount = this._comparisons.length;
+        const gapCount = this._comparisons.reduce((s, c) => s + (c.gap_count || 0), 0);
+        const transformCount = this._comparisons.reduce((s, c) => s + (c.transform_count || 0), 0);
+        const missingCount = this._comparisons.filter(c => !c.vendor_spec_id).length;
+
+        el.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
+                <div style="background:var(--gray-50);border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:var(--primary);">${ourCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">我方标准接口</div>
+                </div>
+                <div style="background:var(--gray-50);border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:var(--info);">${vendorCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">对方接口</div>
+                </div>
+                <div style="background:${compCount > 0 ? '#f0fdf4' : 'var(--gray-50)'};border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:var(--success);">${compCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">已对照</div>
+                </div>
+                <div style="background:${gapCount > 0 ? '#fef2f2' : 'var(--gray-50)'};border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:${gapCount > 0 ? 'var(--danger)' : 'var(--success)'};">${gapCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">字段差异</div>
+                </div>
+                <div style="background:${transformCount > 0 ? '#fffbeb' : 'var(--gray-50)'};border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:${transformCount > 0 ? 'var(--warning)' : 'var(--success)'};">${transformCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">需转换</div>
+                </div>
+                <div style="background:${missingCount > 0 ? '#fef2f2' : 'var(--gray-50)'};border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:${missingCount > 0 ? 'var(--danger)' : 'var(--success)'};">${missingCount}</div>
+                    <div style="font-size:11px;color:var(--gray-500);margin-top:4px;">对方缺失接口</div>
+                </div>
+            </div>
+        `;
+    },
+
+    // ========== 对照结果视图 ==========
+    renderComparisonView() {
+        const el = document.getElementById('specComparisonView');
+        if (!el) return;
+
+        if (this._comparisons.length === 0) {
+            el.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔍</div>
+                    <div class="empty-state-text">暂无对照结果</div>
+                    <div class="empty-state-hint">请先上传我方标准文档和对方接口文档，然后点击"一键智能对照"</div>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '<div class="table-container"><table class="table"><thead><tr>';
+        html += '<th>系统</th><th>我方接口</th><th>对方接口</th><th>匹配度</th>';
+        html += '<th>差异</th><th>需转换</th><th>状态</th><th>操作</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const c of this._comparisons) {
+            const isGood = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0;
+            const isMissing = !c.vendor_spec_id;
+            const statusBadge = isMissing
+                ? '<span class="badge badge-danger">对方缺失</span>'
+                : isGood
+                    ? '<span class="badge badge-success">完全匹配</span>'
+                    : (c.gap_count || 0) > 0
+                        ? '<span class="badge badge-danger">有差异</span>'
+                        : '<span class="badge badge-warning">需转换</span>';
+
+            const confidenceBar = c.match_confidence != null
+                ? `<div style="display:flex;align-items:center;gap:6px;">
+                     <div style="width:60px;height:6px;background:var(--gray-200);border-radius:3px;overflow:hidden;">
+                       <div style="height:100%;width:${(c.match_confidence * 100)}%;background:${c.match_confidence >= 0.8 ? 'var(--success)' : c.match_confidence >= 0.5 ? 'var(--warning)' : 'var(--danger)'};border-radius:3px;"></div>
+                     </div>
+                     <span style="font-size:11px;color:var(--gray-500);">${Math.round(c.match_confidence * 100)}%</span>
+                   </div>`
+                : '-';
+
+            html += `<tr>
+                <td><span class="badge badge-info">${c.system_type || '-'}</span></td>
+                <td>
+                    <div style="font-weight:600;font-size:13px;">${c.our_name || '-'}</div>
+                    <div style="font-size:11px;color:var(--gray-400);">${c.our_transcode || ''}</div>
+                </td>
+                <td>
+                    ${isMissing ? '<span style="color:var(--danger);font-size:13px;">❌ 未找到</span>'
+                    : `<div style="font-weight:500;font-size:13px;">${c.vendor_name || '-'}</div>
+                       <div style="font-size:11px;color:var(--gray-400);">${c.vendor_transcode || ''}</div>`}
+                </td>
+                <td>${confidenceBar}</td>
+                <td style="font-weight:600;color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--success)'};">${c.gap_count || 0}</td>
+                <td style="font-weight:600;color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--success)'};">${c.transform_count || 0}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    ${!isMissing ? `<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">查看字段</button>` : ''}
+                </td>
+            </tr>`;
+        }
+
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    },
+
+    // ========== 接口规范列表 ==========
+    renderSpecList(specs, containerId, source) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+
+        if (specs.length === 0) {
+            const label = source === 'our_standard' ? '我方标准' : '对方';
+            el.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">${source === 'our_standard' ? '📋' : '🏥'}</div>
+                    <div class="empty-state-text">暂未上传${label}接口文档</div>
+                    <div class="empty-state-hint">请点击上方按钮上传文档，AI 将自动解析</div>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        // 按 system_type 分组
+        const groups = {};
+        for (const s of specs) {
+            const key = s.system_type || '其他';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(s);
+        }
+
+        for (const [sysType, items] of Object.entries(groups)) {
+            html += `<div style="margin-bottom:16px;">
+                <div style="font-weight:600;font-size:14px;color:var(--gray-700);margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                    <span class="badge badge-info">${sysType}</span>
+                    <span style="font-size:12px;color:var(--gray-400);">${items.length} 个接口</span>
+                </div>`;
+
+            for (const spec of items) {
+                html += `
+                <div class="stage-item" style="margin-bottom:8px;">
+                    <div class="stage-header" onclick="InterfaceSpec.toggleSpecFields(this)" style="padding:10px 14px;">
+                        <div class="stage-info">
+                            <span class="stage-arrow">▶</span>
+                            <span style="font-weight:600;font-size:13px;">${spec.interface_name}</span>
+                            ${spec.category ? `<span class="badge badge-outline" style="font-size:10px;padding:1px 4px;margin-left:4px;">${spec.category}</span>` : ''}
+                            <span style="font-size:11px;color:var(--gray-400);">${spec.transcode || ''}</span>
+                            <span class="badge badge-gray" style="font-size:10px;">${spec.protocol || ''}</span>
+                            <span style="font-size:11px;color:var(--gray-500);">${spec.field_count || 0} 字段</span>
+                        </div>
+                        <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();InterfaceSpec.deleteSpec(${spec.id})">删除</button>
+                    </div>
+                    <div class="stage-body" style="padding:0;max-height:0;overflow:hidden;">
+                        ${spec.description ? `<div style="font-size:12px;color:var(--gray-500);margin-bottom:10px;padding:8px 14px 0;">${spec.description}</div>` : ''}
+                        ${spec.fields && spec.fields.length > 0 ? this._renderFieldsTable(spec.fields) : '<div style="padding:14px;color:var(--gray-400);font-size:12px;">无字段定义</div>'}
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        el.innerHTML = html;
+    },
+
+    _renderFieldsTable(fields) {
+        let html = '<div class="table-container" style="padding:0 14px 14px;"><table class="table" style="font-size:12px;min-width:500px;">';
+        html += '<thead><tr><th>#</th><th>字段名</th><th>中文名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>';
+        for (const f of fields) {
+            html += `<tr>
+                <td style="color:var(--gray-400);">${f.field_order + 1}</td>
+                <td style="font-weight:600;font-family:monospace;">${f.field_name}</td>
+                <td>${f.field_name_cn || '-'}</td>
+                <td><span class="badge badge-gray">${f.field_type || '-'}</span></td>
+                <td>${f.is_required ? '<span style="color:var(--danger);font-weight:700;">✱ 必填</span>' : f.is_primary_key ? '<span style="color:var(--primary);font-weight:700;">🔑 主键</span>' : '-'}</td>
+                <td style="color:var(--gray-500);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(f.description || '') + ' ' + (f.remark || '')}">${f.description || f.remark || '-'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        return html;
+    },
+
+    toggleSpecFields(headerEl) {
+        const item = headerEl.parentElement;
+        item.classList.toggle('expanded');
+        const body = item.querySelector('.stage-body');
+        if (item.classList.contains('expanded')) {
+            body.style.maxHeight = body.scrollHeight + 'px';
+            body.style.padding = '0';
+        } else {
+            body.style.maxHeight = '0';
+            body.style.padding = '0';
+        }
+    },
+
+    // ========== 字段对照详情弹窗 ==========
+    async showFieldDetail(comparisonId) {
+        openModal('fieldDetailModal');
+        const body = document.getElementById('fieldDetailBody');
+        body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-500);"><div class="spinner" style="margin:0 auto 12px;"></div>加载字段对照...</div>';
+
+        try {
+            const data = await api.get(`/interface-comparisons/${comparisonId}/detail`);
+            this._renderFieldDetail(data);
+        } catch (e) {
+            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">加载失败: ${e.message}</div>`;
+        }
+    },
+
+    _renderFieldDetail(data) {
+        const body = document.getElementById('fieldDetailBody');
+        const mappings = data.mappings || [];
+
+        // 状态颜色/标签映射
+        const statusMap = {
+            'matched': { label: '✅ 完全匹配', color: '#10b981', bg: '#f0fdf4' },
+            'name_different': { label: '🔄 名称不同', color: '#f59e0b', bg: '#fffbeb' },
+            'type_mismatch': { label: '⚠️ 类型不匹配', color: '#ef4444', bg: '#fef2f2' },
+            'needs_transform': { label: '🔧 需转换', color: '#f59e0b', bg: '#fffbeb' },
+            'missing_in_vendor': { label: '❌ 对方缺失', color: '#ef4444', bg: '#fef2f2' },
+            'extra_in_vendor': { label: 'ℹ️ 对方额外', color: '#6b7280', bg: '#f9fafb' },
+        };
+
+        // 统计
+        const stats = {};
+        for (const m of mappings) {
+            stats[m.mapping_status] = (stats[m.mapping_status] || 0) + 1;
+        }
+
+        let html = `
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+                ${Object.entries(stats).map(([k, v]) => {
+            const s = statusMap[k] || { label: k, color: '#6b7280', bg: '#f9fafb' };
+            return `<span style="background:${s.bg};color:${s.color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;">${s.label}: ${v}</span>`;
+        }).join('')}
+            </div>
+            <div class="table-container">
+            <table class="table" style="font-size:12px;">
+                <thead><tr>
+                    <th>状态</th>
+                    <th>我方字段</th>
+                    <th>→</th>
+                    <th>对方字段</th>
+                    <th>我方类型</th>
+                    <th>对方类型</th>
+                    <th>转换规则</th>
+                    <th>确认</th>
+                </tr></thead>
+                <tbody>
+        `;
+
+        for (const m of mappings) {
+            const s = statusMap[m.mapping_status] || { label: m.mapping_status, color: '#6b7280', bg: '#f9fafb' };
+            html += `<tr style="background:${m.is_confirmed ? '#f0fdf4' : s.bg};">
+                <td><span style="color:${s.color};font-size:11px;font-weight:600;">${s.label}</span></td>
+                <td>
+                    <div style="font-family:monospace;font-weight:600;">${m.our_field_name || '-'}</div>
+                </td>
+                <td style="color:var(--gray-300);">→</td>
+                <td>
+                    <div style="font-family:monospace;font-weight:500;">${m.vendor_field_name || '-'}</div>
+                </td>
+                <td><span class="badge badge-gray">${m.our_type || '-'}</span></td>
+                <td><span class="badge badge-gray">${m.vendor_type || '-'}</span></td>
+                <td style="font-size:11px;color:var(--gray-600);max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="${m.transform_rule || ''}">${m.transform_rule || '-'}</td>
+                <td>
+                    ${m.is_confirmed
+                    ? '<span style="color:var(--success);font-weight:600;">✓ 已确认</span>'
+                    : `<button class="btn btn-success btn-xs" onclick="InterfaceSpec.confirmMapping(${m.id})">确认</button>`
+                }
+                </td>
+            </tr>`;
+        }
+
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    },
+
+    async confirmMapping(mappingId) {
+        try {
+            await api.put(`/field-mappings/${mappingId}/confirm`, {});
+            showToast('已确认');
+            // 找到按钮所在行，更新 UI
+            const btn = event.target;
+            btn.outerHTML = '<span style="color:var(--success);font-weight:600;">✓ 已确认</span>';
+        } catch (e) {
+            showToast('确认失败: ' + e.message, 'error');
+        }
+    },
+
+    // ========== 上传解析 ==========
+    showUploadModal(source) {
+        this._uploadSource = source;
+        const title = source === 'our_standard' ? '上传我方标准接口文档' : '上传对方接口文档';
+        const showVendor = source === 'vendor';
+
+        document.getElementById('specUploadTitle').textContent = title;
+        document.getElementById('specVendorNameGroup').style.display = showVendor ? 'block' : 'none';
+
+        // 分类选择逻辑
+        const categoryGroup = document.getElementById('specCategoryGroup');
+        if (categoryGroup) {
+            categoryGroup.style.display = 'block'; // 总是显示分类
+            const categorySelect = document.getElementById('specCategory');
+            if (categorySelect) categorySelect.value = source === 'our_standard' ? '手麻标准' : '接口文档';
+        }
+
+        document.getElementById('specDocText').value = '';
+        document.getElementById('specVendorName').value = '';
+        document.getElementById('specFileInput').value = '';
+        document.getElementById('specParseResult').innerHTML = '';
+        document.getElementById('specParseResult').style.display = 'none';
+
+        openModal('specUploadModal');
+    },
+
+    async handleFileSelect() {
+        const input = document.getElementById('specFileInput');
+        const textarea = document.getElementById('specDocText');
+        if (!input.files || !input.files[0]) return;
+
+        const file = input.files[0];
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        if (ext === 'txt') {
+            const reader = new FileReader();
+            reader.onload = (e) => { textarea.value = e.target.result; };
+            reader.readAsText(file);
+        } else {
+            // PDF/Word 需要后端提取文本，先给提示
+            textarea.value = '';
+            textarea.placeholder = `已选择文件: ${file.name}\n将通过后端提取文本...`;
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                const res = await fetch(`/api/extract-text`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                if (data.success && data.data && data.data.text) {
+                    textarea.value = data.data.text;
+                    showToast(`文本提取成功，${data.data.text.length} 字符`);
+                } else {
+                    showToast('文本提取失败，请手动粘贴文档内容', 'error');
+                }
+            } catch (e) {
+                showToast('文件解析失败，请手动粘贴文档内容', 'error');
+            }
+        }
+    },
+
+    async submitParse() {
+        const docText = document.getElementById('specDocText').value.trim();
+        if (!docText) {
+            showToast('请粘贴或上传文档内容', 'error');
+            return;
+        }
+
+        const source = this._uploadSource;
+        const vendorName = document.getElementById('specVendorName').value.trim();
+        const category = document.getElementById('specCategory').value;
+        const resultEl = document.getElementById('specParseResult');
+        const btn = document.getElementById('btnSpecParse');
+
+        btn.disabled = true;
+        btn.textContent = '⏳ AI 正在解析...';
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = '<div style="text-align:center;padding:20px;"><div class="spinner" style="margin:0 auto 10px;"></div><div style="color:var(--gray-500);font-size:13px;">AI 正在解析接口文档，请稍候（可能需要 30-60 秒）...</div></div>';
+
+        try {
+            const endpoint = source === 'our_standard'
+                ? '/api/interface-specs/parse-standard'
+                : `/api/projects/${this._currentProjectId}/interface-specs/parse`;
+
+            const body = {
+                doc_text: docText,
+                spec_source: source,
+                category: category,
+                vendor_name: vendorName,
+                as_global: source === 'our_standard'
+            };
+
+            const data = await api.post(endpoint, body);
+
+            resultEl.innerHTML = `
+                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;">
+                    <div style="font-weight:700;color:#047857;margin-bottom:10px;">✅ 解析成功！共识别 ${data.parsed_count} 个接口</div>
+                    ${(data.interfaces || []).map(i => `
+                        <div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #dcfce7;">
+                            <span class="badge badge-info" style="font-size:10px;">${i.system_type || '?'}</span>
+                            <span style="font-weight:600;font-size:13px;">${i.name}</span>
+                            <span style="font-size:11px;color:var(--gray-400);font-family:monospace;">${i.transcode || ''}</span>
+                            <span style="font-size:11px;color:var(--gray-500);">${i.fields_count} 字段</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+
+            // 刷新数据
+            await this.loadAll();
+            showToast(`解析完成，识别 ${data.parsed_count} 个接口`);
+        } catch (e) {
+            resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;color:#dc2626;">❌ 解析失败: ${e.message}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🤖 开始 AI 解析';
+        }
+    },
+
+    // ========== 一键对照 ==========
+    async runComparison() {
+        if (this._ourSpecs.length === 0) {
+            showToast('请先上传我方标准接口文档', 'error');
+            return;
+        }
+        if (this._vendorSpecs.length === 0) {
+            showToast('请先上传对方接口文档', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('btnRunComparison');
+        const category = document.getElementById('compareCategory').value;
+        btn.disabled = true;
+        btn.innerHTML = '⏳ 对照中...';
+
+        try {
+            const result = await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, {
+                category: category
+            });
+            showToast(`对照完成！${result.comparison_count} 个接口已对照`);
+            await this.loadAll();
+        } catch (e) {
+            showToast('对照失败: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 一键智能对照';
+        }
+    },
+
+    // ========== AI 报告 ==========
+    async generateReport() {
+        if (this._comparisons.length === 0) {
+            showToast('请先执行接口对照', 'error');
+            return;
+        }
+
+        const container = document.getElementById('specAiReport');
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div style="background:white;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+                <div style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:20px 24px;color:white;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div style="width:44px;height:44px;background:rgba(255,255,255,0.2);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;">🤖</div>
+                        <div>
+                            <div style="font-size:17px;font-weight:700;">AI 接口对照分析报告</div>
+                            <div style="font-size:12px;opacity:0.8;">正在生成...</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="padding:40px;text-align:center;">
+                    <div class="spinner" style="margin:0 auto 16px;"></div>
+                    <div style="color:var(--gray-500);font-size:13px;">AI 正在综合分析所有接口对照结果...</div>
+                </div>
+            </div>
+        `;
+
+        try {
+            const data = await api.get(`/projects/${this._currentProjectId}/interface-comparison/report`);
+            const htmlContent = typeof marked !== 'undefined' ? marked.parse(data.report || '') : `<pre>${data.report}</pre>`;
+
+            container.innerHTML = `
+                <div style="background:white;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
+                    <div style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:20px 24px;color:white;display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <div style="width:44px;height:44px;background:rgba(255,255,255,0.2);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;">🤖</div>
+                            <div>
+                                <div style="font-size:17px;font-weight:700;">AI 接口对照分析报告</div>
+                                <div style="font-size:12px;opacity:0.8;">生成时间: ${new Date().toLocaleString()}</div>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('specAiReport').style.display='none'" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;">✕ 收起</button>
+                    </div>
+                    <div style="padding:24px 28px;line-height:1.85;font-size:14px;" class="report-content">
+                        ${htmlContent}
+                    </div>
+                </div>
+            `;
+        } catch (e) {
+            container.innerHTML = `<div style="background:#fef2f2;padding:20px;border-radius:12px;text-align:center;color:var(--danger);">报告生成失败: ${e.message}</div>`;
+        }
+    },
+
+    // ========== 删除接口规范 ==========
+    async deleteSpec(specId) {
+        if (!confirm('确定删除该接口规范？（字段数据也会一并删除）')) return;
+        try {
+            await api.delete(`/interface-specs/${specId}`);
+            showToast('已删除');
+            await this.loadAll();
+            // 重新渲染当前子 tab
+            const activeSubTab = document.querySelector('.spec-sub-tab.active');
+            if (activeSubTab) this.switchSubTab(activeSubTab.dataset.subtab);
+        } catch (e) {
+            showToast('删除失败: ' + e.message, 'error');
+        }
+    }
+};

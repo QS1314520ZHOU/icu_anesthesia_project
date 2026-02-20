@@ -1,4 +1,5 @@
 import requests
+import json
 from datetime import datetime, timedelta
 from ai_config import ai_manager, TaskType
 from database import DatabasePool
@@ -147,6 +148,15 @@ class AIService:
                                 risk_score += 15 # 给语义匹配增加一定风险分
                 except Exception as e:
                     print(f"RAG Scan Failed: {e}")
+
+                # 3. 持久化风险评估结果到数据库 (性能关键点)
+                analysis_json = json.dumps(detected_risks, ensure_ascii=False)
+                conn.execute('''
+                    UPDATE projects 
+                    SET risk_score = ?, risk_analysis = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                ''', (risk_score, analysis_json, project_id))
+                conn.commit()
 
                 return detected_risks, risk_score
         except Exception as e:

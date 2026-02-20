@@ -14,6 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="/api/force_static/js/modules/interface-spec.js"></script>
     <style>
         :root {
             --primary: #4f46e5;
@@ -4289,6 +4290,54 @@
         </div>
     </div>
 
+    <!-- 收入录入模态框 -->
+    <div class="modal" id="revenueModal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #10b981, #059669); color: white;">
+                <h3 style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:24px;">💰</span> 录入项目收入
+                </h3>
+                <button class="modal-close" onclick="closeModal('revenueModal')"
+                    style="color:white;opacity:0.8;background:transparent;border:none;font-size:24px;cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <form id="revenueForm" onsubmit="submitRevenue(event)">
+                    <input type="hidden" id="revenueProjectId">
+                    <div class="form-group" style="margin-bottom:15px;">
+                        <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">收入金额 (元)</label>
+                        <input type="number" id="revenueAmount" step="0.01" required placeholder="0.00"
+                            style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:15px;">
+                        <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">收入日期</label>
+                        <input type="date" id="revenueDate" required
+                            style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:15px;">
+                        <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">收入类型</label>
+                        <select id="revenueType"
+                            style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                            <option value="合同款">合同款</option>
+                            <option value="阶段款">阶段款</option>
+                            <option value="验收款">验收款</option>
+                            <option value="维保费">维保费</option>
+                            <option value="其他">其他</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:20px;">
+                        <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">备注说明</label>
+                        <textarea id="revenueDescription" rows="3" placeholder="摘要、备注等..."
+                            style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;"></textarea>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;gap:10px;">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('revenueModal')">取消</button>
+                        <button type="submit" class="btn btn-success">确认录入</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- 周报模态框 -->
     <div class="modal" id="reportModal">
         <div class="modal-content modal-large">
@@ -4299,18 +4348,68 @@
                 <button class="modal-close" onclick="closeModal('reportModal')"
                     style="background:rgba(255,255,255,0.2);color:white;">&times;</button>
             </div>
-            <div class="modal-body" style="padding:0;background:#f9fafb;">
-                <div id="reportLoading" class="loading-spinner" style="padding:60px;">
-                    <div class="spinner"></div>
-                    <p>正在生成周报...</p>
-                </div>
-                <div id="reportContent" style="display:none;padding:24px;"></div>
+            <div class="modal-body" id="reportContent" style="padding:30px;">
+                <div style="text-align:center;padding:40px;color:var(--gray-500);">加载中...</div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-ai" onclick="generateAiWeeklySummary()">✨ AI 智能总结</button>
-                <button class="btn btn-outline" onclick="refreshWeeklyReport()">🔄 重新生成</button>
-                <button class="btn btn-outline" onclick="copyReportContent('reportContent')">📋 复制</button>
                 <button class="btn btn-outline" onclick="closeModal('reportModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 接口文档上传解析弹窗 -->
+    <div class="modal" id="specUploadModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="specUploadTitle">上传接口文档</h3>
+                <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group" id="specCategoryGroup" style="display:none;">
+                    <label>文档分类</label>
+                    <select id="specCategory">
+                        <option value="手麻标准">🏥 手麻标准</option>
+                        <option value="重症标准">🧪 重症标准</option>
+                        <option value="接口文档">📄 接口文档</option>
+                        <option value="其他">📁 其他</option>
+                    </select>
+                </div>
+                <div class="form-group" id="specVendorNameGroup" style="display:none;">
+                    <label>对方厂商名称</label>
+                    <input type="text" id="specVendorName" placeholder="如：卫宁健康、东软、创业慧康...">
+                </div>
+                <div class="form-group">
+                    <label>选择文件（PDF/Word/TXT）</label>
+                    <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt"
+                        onchange="InterfaceSpec.handleFileSelect()">
+                </div>
+                <div class="form-group">
+                    <label>文档内容（可直接粘贴）</label>
+                    <textarea id="specDocText" rows="12"
+                        placeholder="将接口文档内容粘贴到此处，或通过上方文件选择器上传文件自动提取...&#10;&#10;支持格式：PDF、Word、纯文本&#10;AI 将自动识别并结构化提取所有接口定义、字段、类型、必填项等信息。"
+                        style="font-family:monospace;font-size:13px;"></textarea>
+                </div>
+                <div id="specParseResult" style="display:none;margin-top:16px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
+                <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 字段对照详情弹窗 -->
+    <div class="modal" id="fieldDetailModal">
+        <div class="modal-content modal-xl">
+            <div class="modal-header">
+                <h3>📋 字段对照详情</h3>
+                <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
+            </div>
+            <div class="modal-body" id="fieldDetailBody">
+                <div style="text-align:center;padding:40px;color:var(--gray-500);">加载中...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
             </div>
         </div>
     </div>

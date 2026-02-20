@@ -171,13 +171,21 @@ class AIInsightService:
                 if not text_corpus.strip():
                     return {'scores': {'client': 8, 'team': 8, 'tech': 8, 'progress': 8}, 'signals': []}
 
-                system_prompt = """你是一个情感分析引擎。请分析项目日志和问题，评分以下维度(0-10分，10最好)：
+                system_prompt = """你是一个专业的项目风险分析引擎。请基于项目日志和当前问题，对项目的健康度进行多维度评估 (0-10分，10最好)。
+
+评估维度：
 1. 客户满意度 (Client Satisfaction)
 2. 团队士气 (Team Morale)
 3. 技术稳定性 (Technical Stability)
 4. 进度信心 (Progress Confidence)
 
-请严格返回如下格式的合法 JSON，不要在 JSON 内部添加任何注释文字。提取最多5个负面关键词放入 signals 数组，如果没有则为空数组：
+严重等级判定规则 (Severity)：
+- Critical: 涉及“停止履行合同”、“主动退场”、“核心团队解散”、“项目中止”等致命风险。
+- High: 存在多个高优先级 Bug，或关键路径里程碑已严重失控。
+- Medium: 进度有所滞后，或存在沟通摩擦。
+- Low: 风险可控，仅有琐碎问题。
+
+请严格返回如下格式的合法 JSON：
 {
     "scores": {
         "client": 8.5,
@@ -185,7 +193,9 @@ class AIInsightService:
         "tech": 6.0,
         "progress": 5.0
     },
-    "signals": ["频繁宕机", "客户投诉"]
+    "severity": "High/Critical/Medium/Low",
+    "summary": "1-2句对当前局势的精炼总结",
+    "signals": ["信号1", "信号2", ...] 
 }"""
                 # 调用AI进行分析
                 import json

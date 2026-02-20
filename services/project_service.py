@@ -85,7 +85,7 @@ class ProjectService:
             if is_stage_done:
                 if not milestone:
                     # 如果里程碑不存在则创建（补齐逻辑）
-                    cursor.execute('INSERT INTO milestones (project_id, name, is_completed, target_date) VALUES (?, ?, 1, ?)', 
+                    cursor.execute('INSERT OR IGNORE INTO milestones (project_id, name, is_completed, target_date) VALUES (?, ?, 1, ?)', 
                                  (project_id, milestone_name, current_date))
                 elif not milestone['is_completed']:
                     # 如果里程碑未完成，则更新为完成并记录完成时间
@@ -113,9 +113,9 @@ class ProjectService:
             projects = []
             for row in rows:
                 p_dict = dict(row)
-                # 获取实时风险分 (新版语义增强)
-                _, risk_score = ai_service.analyze_project_risks(p_dict['id'])
-                p_dict['risk_score'] = risk_score
+                # 性能优化：不再在列表循环中执行昂贵的 AI 风险分析
+                # 风险分改为从 projects 表中读取缓存值
+                # p_dict['risk_score'] = p_dict.get('risk_score', 0) 
                 
                 # 获取实时逾期里程碑数
                 overdue_count = conn.execute('''
@@ -133,6 +133,9 @@ class ProjectService:
                 total = progress_row['total'] if progress_row['total'] else 0
                 done = progress_row['done'] if progress_row['done'] else 0
                 p_dict['progress'] = round(done / total * 100) if total > 0 else 0
+                
+                # 获取风险分析内容 (从数据库)
+                p_dict['risk_analysis'] = p_dict.get('risk_analysis', '')
                 
                 projects.append(p_dict)
             return projects

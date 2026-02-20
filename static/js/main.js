@@ -420,7 +420,22 @@ function renderProjectList() {
                 'AI预测严重延期: +40分',
                 'AI预测轻微延期: +15分'
             ];
-            riskTooltipData = encodeURIComponent(tips.join('|') + (p.risk_analysis ? '||' + p.risk_analysis : ''));
+
+            let formattedAnalysis = '';
+            if (p.risk_analysis) {
+                try {
+                    const analysis = typeof p.risk_analysis === 'string' ? JSON.parse(p.risk_analysis) : p.risk_analysis;
+                    if (Array.isArray(analysis)) {
+                        formattedAnalysis = analysis.map(r => r.content || r.keyword).join('；');
+                    } else {
+                        formattedAnalysis = p.risk_analysis;
+                    }
+                } catch (e) {
+                    formattedAnalysis = p.risk_analysis;
+                }
+            }
+
+            riskTooltipData = encodeURIComponent(tips.join('|') + (formattedAnalysis ? '||' + formattedAnalysis : ''));
         }
 
         const riskHtml = p.risk_score !== undefined ? `
@@ -597,11 +612,25 @@ function displayRiskResult(score, analysis) {
         color = '#ef4444'; label = '🔴 高风险';
     }
 
+    let formattedAnalysis = '';
+    if (analysis) {
+        try {
+            const parsed = typeof analysis === 'string' ? JSON.parse(analysis) : analysis;
+            if (Array.isArray(parsed)) {
+                formattedAnalysis = parsed.map(r => `• ${r.content || r.keyword}`).join('<br>');
+            } else {
+                formattedAnalysis = analysis;
+            }
+        } catch (e) {
+            formattedAnalysis = analysis;
+        }
+    }
+
     scoreEl.textContent = score + '%';
     scoreEl.style.color = color;
     labelEl.textContent = label;
     labelEl.style.color = color;
-    textEl.textContent = analysis || '暂无详细分析';
+    textEl.innerHTML = formattedAnalysis || '暂无详细分析';
 
     document.getElementById('riskLoading').style.display = 'none';
     document.getElementById('riskContent').style.display = 'block';
@@ -934,10 +963,10 @@ async function loadProjectDetail(projectId, preserveTab = false) {
         setTimeout(() => {
             const tabMap = {
                 'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
-                'interfaces': 5, 'flow': 6, 'devices': 7, 'issues': 8, 'departures': 9,
-                'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13,
-                'acceptance': 14, 'satisfaction': 15, 'communications': 16,
-                'dependencies': 17, 'standup': 18, 'deviation': 19
+                'interfaces': 5, 'flow': 6, 'devices': 7, 'issues': 8, 'communications': 9,
+                'departures': 10, 'worklogs': 11, 'documents': 12, 'expenses': 13, 'changes': 14,
+                'acceptance': 15, 'satisfaction': 16, 'dependencies': 17, 'standup': 18, 'deviation': 19,
+                'interfaceSpec': 20, 'financials': 21
             };
             const tabs = document.querySelectorAll('.tabs .tab');
             const tabIndex = tabMap[previousTab];
@@ -968,7 +997,20 @@ function renderProjectDetail(project) {
                             ${project.risk_score !== undefined ? `
                                 <div class="risk-info-panel" style="display:inline-flex; align-items:center; gap:8px; background:${getRiskColor(project.risk_score)}15; border:1px solid ${getRiskColor(project.risk_score)}; padding:4px 12px; border-radius:16px; font-size:12px;">
                                     <span style="color:${getRiskColor(project.risk_score)}; font-weight:700;">🚩 风险分: ${project.risk_score}</span>
-                                    <span style="color:#475569; border-left:1px solid #cbd5e1; padding-left:8px;">${project.risk_analysis || ''}</span>
+                                    <span style="color:#475569; border-left:1px solid #cbd5e1; padding-left:8px;">
+                                        ${(() => {
+                if (!project.risk_analysis) return '暂无风险分析';
+                try {
+                    const analysis = typeof project.risk_analysis === 'string' ? JSON.parse(project.risk_analysis) : project.risk_analysis;
+                    if (Array.isArray(analysis)) {
+                        return analysis.map(r => r.content || r.keyword).join('；');
+                    }
+                    return project.risk_analysis;
+                } catch (e) {
+                    return project.risk_analysis;
+                }
+            })()}
+                                    </span>
                                 </div>
                             ` : ''}
                         </div>
@@ -1236,10 +1278,15 @@ function renderProjectDetail(project) {
                     <div class="tab" onclick="switchTab(this, 'dependencies'); loadDependencies(${project.id})">🔗 依赖</div>
                     <div class="tab" onclick="switchTab(this, 'standup'); loadStandupData(${project.id})">📋 站会</div>
                     <div class="tab" onclick="switchTab(this, 'deviation'); loadDeviationAnalysis(${project.id})">📊 偏差</div>
+                    <div class="tab" onclick="switchTab(this, 'interfaceSpec'); InterfaceSpec.renderTab(currentProjectId)">📑 接口对照</div>
                     <div class="tab" onclick="switchTab(this, 'financials'); loadProjectFinancials(${project.id})">💰 财务看板</div>
                 </div>
 
                 <!-- Tab内容 -->
+                <div class="tab-content" id="tab-interfaceSpec">
+                    <div id="tabInterfaceSpec"></div>
+                </div>
+
                 <div class="tab-content" id="tab-financials">
                     <div class="panel">
                         <div class="panel-header">
@@ -1553,6 +1600,7 @@ function renderProjectDetail(project) {
     loadAcceptances(project.id);
     loadSatisfaction(project.id);
     loadDependencies(project.id);
+    enableTabDragging();
 }
 
 async function loadAiDailyInsight(projectId, isRefresh = false) {
@@ -1682,6 +1730,9 @@ function switchTab(el, tabName) {
     }
     if (tabName === 'dependencies' && currentProjectId) {
         loadDependencies(currentProjectId);
+    }
+    if (tabName === 'interfaceSpec' && currentProjectId) {
+        InterfaceSpec.renderTab(currentProjectId);
     }
 }
 
@@ -5847,14 +5898,25 @@ async function loadSentimentAnalysis(projectId) {
     if (document.getElementById('sentimentSection')) return;
 
     const sectionHtml = `
-        <div id="sentimentSection" style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
-            <h4>📡 AI 情感雷达 (Sentiment Radar)</h4>
-            <div style="display: flex; gap: 20px; align-items: center;">
-                <div id="sentimentRadarChart" style="width: 400px; height: 300px;"></div>
-                <div id="sentimentInsights" style="flex: 1;">
-                    <button class="btn btn-sm btn-outline" onclick="fetchSentiment(${projectId})">🔄 重新分析</button>
-                    <div id="sentimentLoading" style="display:none; color: #666; margin-top: 10px;">正在扫描项目日志与沟通记录...</div>
-                    <div id="sentimentResult" style="margin-top: 15px;"></div>
+        <div id="sentimentSection" style="margin-top: 30px; border-top: 1px solid #eef2f6; padding-top: 25px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h4 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 20px;">📡</span> AI 情感雷达 (Sentiment Radar)
+                </h4>
+                <button class="btn btn-sm btn-outline" onclick="fetchSentiment(${projectId})">🔄 重新分析</button>
+            </div>
+            
+            <div id="sentimentLoading" style="display:none; text-align: center; padding: 40px; color: #64748b;">
+                <div class="loading-spinner" style="margin: 0 auto 10px;"></div>
+                正在深度扫描项目日志与风险记录...
+            </div>
+            
+            <div id="sentimentResult" class="sentiment-container" style="display: none;">
+                <div class="sentiment-chart-box">
+                    <div id="sentimentRadarChart" style="width: 100%; height: 320px;"></div>
+                </div>
+                <div id="sentimentInsights" class="sentiment-info-box">
+                    <!-- Insights will be injected here -->
                 </div>
             </div>
         </div>
@@ -5872,8 +5934,8 @@ async function fetchSentiment(projectId) {
     try {
         const res = await api.post(`/projects/${projectId}/sentiment-analysis`);
         document.getElementById('sentimentLoading').style.display = 'none';
+        document.getElementById('sentimentResult').style.display = 'flex';
 
-        // api.js unwraps data.data, so `res` IS the actual data object
         if (res && res.scores) {
             renderSentimentRadar(res);
             renderSentimentInsights(res);
@@ -5904,7 +5966,17 @@ function renderSentimentRadar(data) {
             ],
             splitArea: {
                 areaStyle: {
-                    color: ['#fff', '#f5f5f5', '#fff', '#f5f5f5']
+                    color: ['#f8fafc', '#fff']
+                }
+            },
+            axisLine: {
+                lineStyle: {
+                    color: '#e2e8f0'
+                }
+            },
+            splitLine: {
+                lineStyle: {
+                    color: '#e2e8f0'
                 }
             }
         },
@@ -5916,10 +5988,19 @@ function renderSentimentRadar(data) {
                     value: [scores.client || 0, scores.team || 0, scores.tech || 0, scores.progress || 0],
                     name: '当前状态',
                     areaStyle: {
-                        color: 'rgba(59, 130, 246, 0.2)'
+                        color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
+                            { color: 'rgba(99, 102, 241, 0.1)', offset: 0 },
+                            { color: 'rgba(99, 102, 241, 0.4)', offset: 1 }
+                        ])
                     },
                     lineStyle: {
-                        color: '#3b82f6'
+                        color: '#6366f1',
+                        width: 2
+                    },
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    itemStyle: {
+                        color: '#6366f1'
                     }
                 }
             ]
@@ -5929,19 +6010,47 @@ function renderSentimentRadar(data) {
 }
 
 function renderSentimentInsights(data) {
-    const container = document.getElementById('sentimentResult');
+    const container = document.getElementById('sentimentInsights');
     const signals = data.signals || [];
+    const severity = data.severity || 'Medium';
+    const summary = data.summary || '暂无分析总结';
 
-    let html = '';
+    const sevClass = `severity-${severity.toLowerCase()}`;
+    const sevLabel = {
+        'Critical': '🔴 极高风险',
+        'High': '🟠 高风险',
+        'Medium': '🟡 中等风险',
+        'Low': '🟢 低风险'
+    }[severity] || severity;
+
+    let signalsHtml = '';
     if (signals.length > 0) {
-        html += '<p><strong>⚠️ 风险信号检测:</strong></p><ul style="color: #ef4444;">';
-        signals.forEach(s => html += `<li>${s}</li>`);
-        html += '</ul>';
+        signalsHtml = `<div class="sentiment-signals-grid">`;
+        signals.forEach(s => {
+            signalsHtml += `
+            <div class="sentiment-signal-card">
+                <span class="icon">⚠️</span>
+                <span>${s}</span>
+            </div>`;
+        });
+        signalsHtml += `</div>`;
     } else {
-        html += '<p style="color: #10b981;">✅ 未检测到明显负面信号</p>';
+        signalsHtml = `<div class="sentiment-empty">✅ 未检测到明显负面信号</div>`;
     }
 
-    container.innerHTML = html;
+    container.innerHTML = `
+        <div class="sentiment-severity-row">
+            <span class="severity-badge ${sevClass}">${sevLabel}</span>
+            <span style="font-size: 13px; color: #64748b;">综合评价</span>
+        </div>
+        <div class="sentiment-summary-box">
+            ${summary}
+        </div>
+        <div style="margin-top: 10px;">
+            <p style="font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 10px;">重点风险信号：</p>
+            ${signalsHtml}
+        </div>
+    `;
 }
 
 // ========== AI 智能填报功能 ==========
@@ -6625,7 +6734,78 @@ async function loadMemberCosts(projectId) {
 }
 
 function showRevenueModal(projectId) {
-    alert('Revenue entry feature coming soon! Please use database tools for now.');
+    const pIdEl = document.getElementById('revenueProjectId');
+    if (pIdEl) pIdEl.value = projectId;
+
+    document.getElementById('revenueAmount').value = '';
+    document.getElementById('revenueDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('revenueDescription').value = '';
+    openModal('revenueModal');
+}
+
+async function submitRevenue(event) {
+    event.preventDefault();
+    const projectId = document.getElementById('revenueProjectId').value;
+    const amount = document.getElementById('revenueAmount').value;
+    const revenueDate = document.getElementById('revenueDate').value;
+    const revenueType = document.getElementById('revenueType').value;
+    const description = document.getElementById('revenueDescription').value;
+
+    try {
+        const res = await api.post(`/projects/${projectId}/revenue`, {
+            amount: parseFloat(amount),
+            revenue_date: revenueDate,
+            revenue_type: revenueType,
+            description: description
+        });
+
+        if (res.success) {
+            alert('收入录入成功');
+            closeModal('revenueModal');
+            if (typeof loadProjectFinancials === 'function') {
+                loadProjectFinancials(projectId); // 刷新财务看板
+            }
+        } else {
+            alert('录入失败: ' + res.message);
+        }
+    } catch (e) {
+        console.error(e);
+        alert('系统错误');
+    }
+}
+
+function enableTabDragging() {
+    const tabs = document.querySelector('.tabs');
+    if (!tabs) return;
+
+    let isDown = false;
+    let startX;
+    let scrollLeft;
+
+    tabs.addEventListener('mousedown', (e) => {
+        isDown = true;
+        startX = e.pageX - tabs.offsetLeft;
+        scrollLeft = tabs.scrollLeft;
+        tabs.style.cursor = 'grabbing';
+    });
+    tabs.addEventListener('mouseleave', () => {
+        isDown = false;
+        tabs.style.cursor = 'grab';
+    });
+    tabs.addEventListener('mouseup', () => {
+        isDown = false;
+        tabs.style.cursor = 'grab';
+    });
+    tabs.addEventListener('mousemove', (e) => {
+        if (!isDown) return;
+        e.preventDefault();
+        const x = e.pageX - tabs.offsetLeft;
+        const walk = (x - startX) * 2;
+        tabs.scrollLeft = scrollLeft - walk;
+    });
+
+    // Set initial cursor
+    tabs.style.cursor = 'grab';
 }
 async function openPmoDashboard() {
     openModal('pmoModal');

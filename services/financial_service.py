@@ -64,4 +64,18 @@ class FinancialService:
             logger.error(f"Error getting member costs for project {project_id}: {e}")
             return []
 
+    @staticmethod
+    def add_revenue(project_id, amount, revenue_date, revenue_type, description):
+        """添加项目收入记录"""
+        try:
+            with DatabasePool.get_connection() as conn:
+                conn.execute('''
+                    INSERT INTO project_revenue (project_id, amount, revenue_date, revenue_type, description)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (project_id, amount, revenue_date, revenue_type, description))
+                return {"success": True}
+        except Exception as e:
+            logger.error(f"Error adding revenue for project {project_id}: {e}")
+            return {"error": str(e)}
+
 financial_service = FinancialService()
