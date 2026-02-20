@@ -1,0 +1,654 @@
+/* ========== 增强的报告样式 ========== */
+.report-container {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.report-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 30px;
+    position: relative;
+    overflow: hidden;
+}
+
+.report-header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 100%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 60%);
+    pointer-events: none;
+}
+
+.report-header.ai-report {
+    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+}
+
+.report-header.weekly-report {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.report-header-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    position: relative;
+    z-index: 1;
+}
+
+.report-header-title .icon {
+    font-size: 36px;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 12px;
+    border-radius: 12px;
+}
+
+.report-header-title h2 {
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.report-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 1;
+}
+
+.report-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    transition: all 0.2s;
+}
+
+.report-meta-item:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateY(-2px);
+}
+
+.report-meta-item .meta-icon {
+    font-size: 18px;
+}
+
+.report-meta-item .meta-label {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.report-meta-item .meta-value {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* 评分卡片增强 */
+.score-card {
+    background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+    border: 1px solid #bae6fd;
+    border-radius: 16px;
+    padding: 24px;
+    margin: 24px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+
+.score-card.score-high {
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    border-color: #86efac;
+}
+
+.score-card.score-medium {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fcd34d;
+}
+
+.score-card.score-low {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fca5a5;
+}
+
+.score-circle {
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: white;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+    position: relative;
+}
+
+.score-circle::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    padding: 4px;
+    background: linear-gradient(135deg, currentColor, transparent);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+}
+
+.score-card.score-high .score-circle::before {
+    color: #10b981;
+}
+
+.score-card.score-medium .score-circle::before {
+    color: #f59e0b;
+}
+
+.score-card.score-low .score-circle::before {
+    color: #ef4444;
+}
+
+.score-value {
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.score-card.score-high .score-value {
+    color: #10b981;
+}
+
+.score-card.score-medium .score-value {
+    color: #f59e0b;
+}
+
+.score-card.score-low .score-value {
+    color: #ef4444;
+}
+
+.score-label {
+    font-size: 14px;
+    color: var(--gray-500);
+    margin-top: 4px;
+}
+
+.score-info {
+    flex: 1;
+}
+
+.score-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--gray-800);
+    margin-bottom: 8px;
+}
+
+.score-desc {
+    font-size: 14px;
+    color: var(--gray-600);
+    line-height: 1.6;
+}
+
+/* 报告章节样式增强 */
+.report-section {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    margin: 0 24px 20px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    transition: box-shadow 0.2s;
+}
+
+.report-section:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.report-section-header {
+    background: linear-gradient(to right, var(--gray-50), white);
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--gray-200);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.report-section-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.report-section-icon.risk {
+    background: linear-gradient(135deg, #fee2e2, #fecaca);
+}
+
+.report-section-icon.suggestion {
+    background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+}
+
+.report-section-icon.focus {
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+}
+
+.report-section-icon.progress {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+}
+
+.report-section-icon.overview {
+    background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+}
+
+.report-section-icon.success {
+    background: linear-gradient(135deg, #d1fae5, #6ee7b7);
+}
+
+.report-section-icon.resource {
+    background: linear-gradient(135deg, #fce7f3, #fbcfe8);
+}
+
+.report-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gray-800);
+}
+
+.report-section-body {
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.8;
+    color: var(--gray-700);
+}
+
+.report-section-body ul,
+.report-section-body ol {
+    padding-left: 20px;
+    margin: 12px 0;
+}
+
+.report-section-body li {
+    margin-bottom: 8px;
+    position: relative;
+}
+
+.report-section-body li::marker {
+    color: var(--primary);
+}
+
+.report-section-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13px;
+}
+
+.report-section-body table th,
+.report-section-body table td {
+    padding: 12px 14px;
+    border: 1px solid var(--gray-200);
+    text-align: left;
+}
+
+.report-section-body table th {
+    background: linear-gradient(to bottom, var(--gray-50), var(--gray-100));
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.report-section-body table tr:hover {
+    background: var(--gray-50);
+}
+
+.report-section-body table tr:nth-child(even) {
+    background: #fafafa;
+}
+
+.report-section-body strong {
+    color: var(--gray-800);
+    font-weight: 600;
+}
+
+.report-section-body code {
+    background: var(--gray-100);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--primary);
+}
+
+/* 报告页脚 */
+.report-footer {
+    margin: 24px;
+    padding: 16px 20px;
+    background: var(--gray-50);
+    border-radius: 10px;
+    border: 1px dashed var(--gray-300);
+}
+
+.report-footer-info {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--gray-500);
+}
+
+/* 缓存提示样式增强 */
+.cache-hint {
+    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+    border: 1px solid #86efac;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: #166534;
+}
+
+.cache-hint .icon {
+    font-size: 20px;
+    background: white;
+    padding: 6px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .report-header {
+        padding: 20px;
+    }
+
+    .report-header-title h2 {
+        font-size: 20px;
+    }
+
+    .report-meta {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .report-meta-item {
+        width: 100%;
+    }
+
+    .score-card {
+        flex-direction: column;
+        text-align: center;
+        margin: 16px;
+        padding: 20px;
+    }
+
+    .report-section {
+        margin: 0 16px 16px;
+    }
+
+    .report-footer {
+        margin: 16px;
+    }
+
+    .cache-hint {
+        margin: 16px;
+    }
+}
+
+/* ========== UI Refactor: Strict Layout Implementation ========== */
+
+/* 第一层：主按钮行 */
+.btn-group.main-actions {
+    display: flex;
+    justify-content: flex-start;
+    /* 左对齐 */
+    gap: 12px;
+    margin-bottom: 8px;
+    /* 第一层和第二层之间 */
+}
+
+/* 主按钮样式 (Ask AI, AI风险评估) */
+.btn-primary-purple {
+    background-color: #6B4EE6 !important;
+    /* 实心填充 */
+    color: #FFFFFF !important;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 8px !important;
+    border: none !important;
+    font-size: 14px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: none !important;
+    /* 移除其他阴影 */
+}
+
+.btn-primary-purple:hover {
+    filter: brightness(1.1);
+}
+
+/* 第二层：次级按钮行 */
+.btn-group.secondary-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    /* 左对齐 */
+    flex-wrap: wrap;
+    gap: 0;
+    /* 由 margin 或 separator 控制间距 */
+}
+
+/* 次级按钮样式 */
+.btn-secondary-text {
+    background: transparent !important;
+    border: none !important;
+    color: #37352F;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+    height: 28px;
+}
+
+.btn-secondary-text:hover {
+    background: #F1F1F0 !important;
+}
+
+/* 分隔点 */
+.dot-separator {
+    color: #C0C0C0;
+    font-weight: bold;
+    margin: 0 4px;
+    user-select: none;
+}
+
+/* 「更多」下拉菜单 */
+.action-dropdown {
+    position: relative;
+    display: inline-block;
+    margin-left: 4px;
+}
+
+.dropdown-menu {
+    display: none;
+    /* 默认隐藏 */
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 4px;
+    width: 220px !important;
+    background: #FFFFFF;
+    border: 1px solid #E8E8E8;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    padding: 8px 0;
+    z-index: 2000;
+    flex-direction: column;
+    /* 严格竖排 */
+}
+
+/* 显示状态 (.show 由 JS 控制) */
+.dropdown-menu.show {
+    display: flex !important;
+}
+
+.dropdown-group-title {
+    font-size: 12px;
+    color: #9B9A97;
+    padding: 4px 16px;
+    font-weight: normal;
+    text-transform: none;
+    /* 取消大写强制 */
+}
+
+.dropdown-item {
+    display: block !important;
+    /* 独占一行 */
+    width: 100%;
+    padding: 8px 16px;
+    font-size: 14px;
+    color: #37352F;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.dropdown-item:hover {
+    background: #F1F1F0;
+    color: #37352F;
+    /* 保持文字颜色 */
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #E8E8E8;
+    /* 更浅的分隔线 */
+    margin: 4px 0;
+    width: 100%;
+}
+
+.dropdown-item.danger {
+    color: #EB5757 !important;
+}
+
+.dropdown-item.danger:hover {
+    background: #FDF2F2;
+    /* 浅红背景 */
+}
+
+/* 第三层分隔线 */
+.section-divider {
+    border-bottom: 1px solid #E8E8E8;
+    margin: 24px 16px;
+    height: 1px;
+}
+
+/* ========== AI 沟通分析报告内嵌样式 ========== */
+.comm-ai-report h2,
+.comm-ai-report h3 {
+    color: #1e293b;
+    margin: 20px 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+.comm-ai-report h2 {
+    font-size: 17px;
+}
+
+.comm-ai-report h3 {
+    font-size: 15px;
+    border-bottom-width: 1px;
+}
+
+.comm-ai-report ul,
+.comm-ai-report ol {
+    padding-left: 20px;
+    margin: 10px 0;
+}
+
+.comm-ai-report li {
+    margin-bottom: 6px;
+}
+
+.comm-ai-report li::marker {
+    color: #6366f1;
+}
+
+.comm-ai-report strong {
+    color: #0f172a;
+}
+
+.comm-ai-report table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0;
+    font-size: 13px;
+}
+
+.comm-ai-report th,
+.comm-ai-report td {
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+    text-align: left;
+}
+
+.comm-ai-report th {
+    background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+    font-weight: 600;
+    color: #475569;
+}
+
+.comm-ai-report tr:hover {
+    background: #f8fafc;
+}
+
+.comm-ai-report blockquote {
+    border-left: 3px solid #8b5cf6;
+    padding: 8px 14px;
+    background: #f5f3ff;
+    margin: 12px 0;
+    border-radius: 0 6px 6px 0;
+    color: #4c1d95;
+    font-size: 13px;
+}
+
+.comm-ai-report p {
+    margin: 8px 0;
+}
+
+.comm-ai-report code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #6366f1;
+}

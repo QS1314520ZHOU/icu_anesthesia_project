@@ -1,0 +1,121 @@
+import os
+import time
+import hashlib
+from flask import Flask, request, redirect, jsonify, session
+import jwt
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("JWT_SECRET", "outline-gateway-session-secret-key")
+
+OUTLINE_URL = os.environ.get("OUTLINE_URL", "http://192.168.10.195:3000")
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://192.168.10.195:8080")
+OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "outline-sso-client")
+OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET", "outline-sso-secret-change-me")
+JWT_SECRET = os.environ.get("JWT_SECRET", "outline-gateway-jwt-secret-key")
+
+user_sessions = {}
+auth_codes = {}
+
+@app.route("/sso")
+def sso_login():
+    uid = request.args.get("uid", "").strip()
+    name = request.args.get("name", "").strip()
+    if not uid:
+        return "missing uid", 400
+    if not name:
+        name = uid
+    session_id = hashlib.md5(f"{uid}-{time.time()}".encode()).hexdigest()
+    user_sessions[session_id] = {
+        "uid": uid,
+        "name": name,
+        "email": f"{uid}@icu.local",
+        "created_at": time.time()
+    }
+    session["session_id"] = session_id
+    session["uid"] = uid
+    session["name"] = name
+    return redirect(f"{OUTLINE_URL}/auth/oidc")
+
+@app.route("/.well-known/openid-configuration")
+def openid_configuration():
+    return jsonify({
+        "issuer": GATEWAY_URL,
+        "authorization_endpoint": f"{GATEWAY_URL}/authorize",
+        "token_endpoint": f"{GATEWAY_URL}/token",
+        "userinfo_endpoint": f"{GATEWAY_URL}/userinfo",
+        "jwks_uri": f"{GATEWAY_URL}/jwks",
+        "response_types_supported": ["code"],
+        "subject_types_supported": ["public"],
+        "id_token_signing_alg_values_supported": ["HS256"],
+        "scopes_supported": ["openid", "profile", "email"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+        "claims_supported": ["sub", "name", "email", "preferred_username"]
+    })
+
+@app.route("/authorize")
+def authorize():
+    redirect_uri = request.args.get("redirect_uri")
+    state = request.args.get("state", "")
+    session_id = session.get("session_id")
+    if session_id and session_id in user_sessions:
+        code = hashlib.md5(f"{session_id}-{time.time()}".encode()).hexdigest()
+        auth_codes[code] = {
+            "session_id": session_id,
+            "redirect_uri": redirect_uri,
+            "created_at": time.time()
+        }
+        sep = "&" if "?" in redirect_uri else "?"
+        return redirect(f"{redirect_uri}{sep}code={code}&state={state}")
+    else:
+        return '<html><head><meta charset="utf-8"><title>登录</title></head><body style="font-family:sans-serif;text-align:center;padding-top:80px;"><h2>临床知识库登录</h2><form method="GET" action="/sso" style="margin-top:30px;"><input type="text" name="uid" placeholder="请输入工号" style="padding:10px;font-size:16px;width:200px;border:1px solid #ccc;border-radius:4px;" required><br><br><button type="submit" style="padding:10px 40px;font-size:16px;background:#4A90D9;color:white;border:none;border-radius:4px;cursor:pointer;">登录</button></form><p style="color:#999;font-size:14px;margin-top:20px;">也可从重症系统直接进入</p></body></html>', 200
+
+@app.route("/token", methods=["POST"])
+def token():
+    code = request.form.get("code")
+    if not code or code not in auth_codes:
+        return jsonify({"error": "invalid_grant"}), 400
+    code_data = auth_codes.pop(code)
+    session_id = code_data["session_id"]
+    if session_id not in user_sessions:
+        return jsonify({"error": "invalid_grant"}), 400
+    user = user_sessions[session_id]
+    now = int(time.time())
+    id_token = jwt.encode({"iss": GATEWAY_URL, "sub": user["uid"], "aud": OIDC_CLIENT_ID, "exp": now + 28800, "iat": now, "name": user["name"], "email": user["email"], "preferred_username": user["name"]}, JWT_SECRET, algorithm="HS256")
+    access_token = jwt.encode({"iss": GATEWAY_URL, "sub": user["uid"], "exp": now + 28800, "iat": now, "scope": "openid profile email"}, JWT_SECRET, algorithm="HS256")
+    return jsonify({"access_token": access_token, "token_type": "Bearer", "expires_in": 28800, "id_token": id_token, "scope": "openid profile email"})
+
+@app.route("/userinfo")
+def userinfo():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return jsonify({"error": "invalid_token"}), 401
+    token_str = auth_header.replace("Bearer ", "")
+    try:
+        payload = jwt.decode(token_str, JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
+        uid = payload.get("sub")
+        for sid, user in user_sessions.items():
+            if user["uid"] == uid:
+                return jsonify({"sub": user["uid"], "name": user["name"], "email": user["email"], "preferred_username": user["name"]})
+        return jsonify({"sub": uid, "name": uid, "email": f"{uid}@icu.local", "preferred_username": uid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 401
+
+@app.route("/jwks")
+def jwks():
+    return jsonify({"keys": []})
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+@app.before_request
+def cleanup():
+    now = time.time()
+    for k in [k for k, v in user_sessions.items() if now - v["created_at"] > 86400]:
+        user_sessions.pop(k, None)
+    for k in [k for k, v in auth_codes.items() if now - v["created_at"] > 300]:
+        auth_codes.pop(k, None)
+
+if __name__ == "__main__":
+    print("Gateway started at " + GATEWAY_URL)
+    app.run(host="0.0.0.0", port=8080, debug=False)

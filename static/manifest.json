@@ -1,0 +1,41 @@
+{
+    "name": "ICU 麻醉项目管理系统",
+    "short_name": "ICU 项目管理",
+    "description": "ICU 麻醉信息化项目全周期管理平台",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1e293b",
+    "theme_color": "#3b82f6",
+    "orientation": "portrait-primary",
+    "icons": [
+        {
+            "src": "/static/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/static/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "categories": [
+        "business",
+        "productivity"
+    ],
+    "lang": "zh-CN",
+    "shortcuts": [
+        {
+            "name": "新建项目",
+            "url": "/?action=new",
+            "description": "快速创建新项目"
+        },
+        {
+            "name": "提醒中心",
+            "url": "/?view=reminders",
+            "description": "查看所有待办提醒"
+        }
+    ]
+}

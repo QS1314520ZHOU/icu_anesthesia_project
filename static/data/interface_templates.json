@@ -1,0 +1,352 @@
+[
+    {
+        "id": "icu_patient",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "病人信息表(病人数据)",
+        "view_name": "vi_icu_zybr",
+        "protocol": "视图/WebService",
+        "remark": "同步病人ID、姓名、性别、年龄、病区、床位号等基础信息",
+        "important": false
+    },
+    {
+        "id": "icu_patoper",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "病人手术信息",
+        "view_name": "vi_icu_patoper",
+        "protocol": "视图",
+        "remark": "同步患者手术相关信息",
+        "important": false
+    },
+    {
+        "id": "icu_order",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "医嘱读取",
+        "view_name": "vi_icu_zyyz",
+        "protocol": "视图",
+        "remark": "下传ICU相关医嘱，同步医嘱状态",
+        "important": true
+    },
+    {
+        "id": "icu_order_exec",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "医嘱执行分解表",
+        "view_name": "vi_icu_hsz_yzzxjl",
+        "protocol": "视图",
+        "remark": "医嘱执行明细记录",
+        "important": false
+    },
+    {
+        "id": "icu_drug_dict",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "药品字典表(药库)",
+        "view_name": "vi_icu_ypxx",
+        "protocol": "视图",
+        "remark": "药品基础信息字典",
+        "important": false
+    },
+    {
+        "id": "icu_drug_usage",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "药物用法字典",
+        "view_name": "vi_icu_ywyf",
+        "protocol": "视图",
+        "remark": "药物使用方法字典",
+        "important": false
+    },
+    {
+        "id": "icu_drug_freq",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "用药频次字典",
+        "view_name": "vi_icu_yypc",
+        "protocol": "视图",
+        "remark": "用药频次信息",
+        "important": false
+    },
+    {
+        "id": "icu_dept_dict",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "科室信息字典",
+        "view_name": "vi_icu_ksxx",
+        "protocol": "视图",
+        "remark": "科室基础信息",
+        "important": false
+    },
+    {
+        "id": "icu_staff_dict",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "职工信息字典",
+        "view_name": "vi_icu_zgxx",
+        "protocol": "视图",
+        "remark": "医护人员信息",
+        "important": false
+    },
+    {
+        "id": "icu_lis_item",
+        "category": "icu",
+        "system_name": "LIS",
+        "interface_name": "检验项目",
+        "view_name": "vi_icu_hydxx",
+        "protocol": "视图",
+        "remark": "检验项目定义",
+        "important": true
+    },
+    {
+        "id": "icu_lis_result",
+        "category": "icu",
+        "system_name": "LIS",
+        "interface_name": "检验结果项目",
+        "view_name": "vi_icu_hydjg",
+        "protocol": "视图",
+        "remark": "检验结果数据，包含血气、生化、血常规等",
+        "important": true
+    },
+    {
+        "id": "icu_report",
+        "category": "icu",
+        "system_name": "PACS/RIS",
+        "interface_name": "检查报告",
+        "view_name": "vi_icu_report",
+        "protocol": "视图",
+        "remark": "影像及检查报告数据",
+        "important": false
+    },
+    {
+        "id": "icu_emr",
+        "category": "icu",
+        "system_name": "EMR",
+        "interface_name": "电子病历EMR病程记录",
+        "view_name": "",
+        "protocol": "WebService/视图",
+        "remark": "病程记录、护理记录等文书同步",
+        "important": false
+    },
+    {
+        "id": "icu_icd",
+        "category": "icu",
+        "system_name": "HIS",
+        "interface_name": "ICD诊断",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "ICD-10诊断编码数据",
+        "important": false
+    },
+    {
+        "id": "anes_drug_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "药物字典",
+        "view_name": "",
+        "protocol": "视图/WebService",
+        "remark": "麻醉用药字典信息",
+        "important": false
+    },
+    {
+        "id": "anes_user_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "用户字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "系统用户信息字典",
+        "important": true
+    },
+    {
+        "id": "anes_dept_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "科室字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "科室信息字典",
+        "important": true
+    },
+    {
+        "id": "anes_method_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "麻醉方式字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "麻醉方式编码定义",
+        "important": false
+    },
+    {
+        "id": "anes_drug_method",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "用药方式字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "给药途径字典",
+        "important": false
+    },
+    {
+        "id": "anes_diagnosis_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "临床诊断字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "临床诊断ICD编码",
+        "important": false
+    },
+    {
+        "id": "anes_surgery_dict",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "手术编码字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "手术操作ICD-9-CM编码",
+        "important": false
+    },
+    {
+        "id": "anes_lis_dict",
+        "category": "anesthesia",
+        "system_name": "LIS",
+        "interface_name": "检验编码字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "检验项目编码字典",
+        "important": false
+    },
+    {
+        "id": "anes_exam_dict",
+        "category": "anesthesia",
+        "system_name": "PACS",
+        "interface_name": "检查编码字典",
+        "view_name": "",
+        "protocol": "视图",
+        "remark": "检查项目编码字典",
+        "important": false
+    },
+    {
+        "id": "anes_surgery_apply",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "手术申请单",
+        "view_name": "",
+        "protocol": "视图/WebService",
+        "remark": "手术申请信息，包含患者、术式、术者等核心数据",
+        "important": true
+    },
+    {
+        "id": "anes_patient",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "患者基本信息",
+        "view_name": "",
+        "protocol": "WebService",
+        "remark": "根据病人标识与住院号查询病人基本信息",
+        "important": false
+    },
+    {
+        "id": "anes_lis_result",
+        "category": "anesthesia",
+        "system_name": "LIS",
+        "interface_name": "患者检验",
+        "view_name": "",
+        "protocol": "视图/WebService",
+        "remark": "患者检验结果数据",
+        "important": true
+    },
+    {
+        "id": "anes_exam_report",
+        "category": "anesthesia",
+        "system_name": "PACS",
+        "interface_name": "患者检查报告",
+        "view_name": "",
+        "protocol": "视图/URL Link",
+        "remark": "患者影像检查报告",
+        "important": false
+    },
+    {
+        "id": "anes_schedule_writeback",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "手术排班与取消信息回写",
+        "view_name": "",
+        "protocol": "WebService/存储过程",
+        "remark": "回写手术排班信息（根据医院要求是否做）",
+        "important": false
+    },
+    {
+        "id": "anes_complete_writeback",
+        "category": "anesthesia",
+        "system_name": "HIS",
+        "interface_name": "手术完成信息回写",
+        "view_name": "",
+        "protocol": "存储过程",
+        "remark": "HIS提供存储过程回写手术完成信息（根据医院需求是否做）",
+        "important": false
+    },
+    {
+        "id": "his_patient",
+        "category": "common",
+        "system_name": "HIS",
+        "interface_name": "患者基本信息查询 (ADT)",
+        "view_name": "",
+        "protocol": "WebService/REST",
+        "remark": "同步患者ID、姓名、性别、年龄、病区、床位号。通常使用 HL7 V2 或医院自定义 WebService。",
+        "important": false
+    },
+    {
+        "id": "his_order",
+        "category": "common",
+        "system_name": "HIS",
+        "interface_name": "医嘱信息同步 (ORM)",
+        "view_name": "",
+        "protocol": "WebService",
+        "remark": "下传手麻/ICU相关医嘱，同步医嘱状态。",
+        "important": false
+    },
+    {
+        "id": "lis_report",
+        "category": "common",
+        "system_name": "LIS",
+        "interface_name": "检验报告调取 (ORU)",
+        "view_name": "",
+        "protocol": "RESTful API",
+        "remark": "采集血气、生化、血常规等实验室检查结果。",
+        "important": false
+    },
+    {
+        "id": "pacs_link",
+        "category": "common",
+        "system_name": "PACS",
+        "interface_name": "影像调阅接口",
+        "view_name": "",
+        "protocol": "URL Link / DICOM",
+        "remark": "在系统内嵌入超声、X光、CT等影像查阅链接。",
+        "important": false
+    },
+    {
+        "id": "emr_sync",
+        "category": "common",
+        "system_name": "EMR",
+        "interface_name": "病历文书同步",
+        "view_name": "",
+        "protocol": "DB Direct / WebService",
+        "remark": "同步术前访视、术后总结等文书内容。",
+        "important": false
+    },
+    {
+        "id": "schedule",
+        "category": "common",
+        "system_name": "手术排班",
+        "interface_name": "手术排班数据采集",
+        "view_name": "",
+        "protocol": "WebService / View",
+        "remark": "获取当日及次日手术排班表，包括手术间、术者、麻醉医生。",
+        "important": false
+    }
+]

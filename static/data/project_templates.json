@@ -1,0 +1,53 @@
+[
+    {
+        "id": "standard_icu",
+        "name": "标准ICU项目 (90天/10阶段)",
+        "description": "适用于三甲医院新建重症监护室的完整实施周期，包含详细的需求调研、定制开发、接口对接与试运行流程。",
+        "estimated_days": 90,
+        "stages": [
+            { "name": "项目启动", "days": 5 },
+            { "name": "需求调研", "days": 10 },
+            { "name": "方案设计", "days": 7 },
+            { "name": "基础环境搭建", "days": 5 },
+            { "name": "系统部署", "days": 5 },
+            { "name": "接口开发与对接", "days": 15 },
+            { "name": "表单与文书制作", "days": 10 },
+            { "name": "系统联调与培训", "days": 10 },
+            { "name": "试运行", "days": 14 },
+            { "name": "项目验收", "days": 9 }
+        ]
+    },
+    {
+        "id": "quick_deploy",
+        "name": "快速部署项目 (30天/3阶段)",
+        "description": "适用于小型医院或标准版产品的快速交付，省略深度定制开发环节。",
+        "estimated_days": 30,
+        "stages": [
+            { "name": "部署准备", "days": 5 },
+            { "name": "系统安装与培训", "days": 10 },
+            { "name": "试运行与验收", "days": 15 }
+        ]
+    },
+    {
+        "id": "equipment_upgrade",
+        "name": "设备升级项目 (21天/3阶段)",
+        "description": "针对既有系统的硬件设备更新或采集服务器升级。",
+        "estimated_days": 21,
+        "stages": [
+            { "name": "设备采购与到货", "days": 10 },
+            { "name": "安装调试", "days": 5 },
+            { "name": "运行监测", "days": 6 }
+        ]
+    },
+    {
+        "id": "maintenance",
+        "name": "运维保障项目 (365天/3阶段)",
+        "description": "年度运维服务合同管理。",
+        "estimated_days": 365,
+        "stages": [
+            { "name": "第一季度巡检", "days": 90 },
+            { "name": "半年总结与巡检", "days": 90 },
+            { "name": "年度总结与续签", "days": 185 }
+        ]
+    }
+]
