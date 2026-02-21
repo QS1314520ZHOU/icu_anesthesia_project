@@ -681,10 +681,23 @@ class AIInsightService:
             return None
 
     @staticmethod
-    def get_recommended_actions(project_id):
-        """基于风险、滞后项、异动和进度生成决策建议"""
-        actions = []
+    def get_recommended_actions(project_id, force_refresh=False):
+        """基于风险、滞后项、异动和进度生成决策建议（支持缓存）"""
         try:
+            today_date = datetime.now().strftime('%Y-%m-%d')
+            
+            # 1. 检查缓存
+            if not force_refresh:
+                with DatabasePool.get_connection() as conn:
+                    cache = conn.execute('''
+                        SELECT content FROM ai_report_cache 
+                        WHERE project_id = ? AND report_type = 'recommended_actions'
+                        AND date(created_at) = ?
+                    ''', (project_id, today_date)).fetchone()
+                    if cache:
+                        return json.loads(cache['content'])
+
+            actions = []
             # 0. 异常检测 (优先展示)
             anomalies = AIInsightService.detect_anomalies(project_id)
             actions.extend(anomalies)
@@ -779,6 +792,20 @@ class AIInsightService:
             priority_map = {"High": 0, "Medium": 1, "Low": 2}
             actions.sort(key=lambda x: priority_map.get(x['priority'], 99))
 
+            # 4. 更新缓存
+            with DatabasePool.get_connection() as conn:
+                conn.execute('''
+                    DELETE FROM ai_report_cache 
+                    WHERE project_id = ? AND report_type = 'recommended_actions'
+                    AND date(created_at) = ?
+                ''', (project_id, today_date))
+                
+                conn.execute('''
+                    INSERT INTO ai_report_cache (project_id, report_type, content, created_at)
+                    VALUES (?, ?, ?, ?)
+                ''', (project_id, 'recommended_actions', json.dumps(actions, ensure_ascii=False), datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                conn.commit()
+
             return actions
 
         except Exception as e:
@@ -799,7 +826,7 @@ class AIInsightService:
 
             # 2. 调用 AI 进行多维评估
             prompt = f"""
-            你是一个资深的交付总监和 PMO 专家。现有项目“{project['name']}”面临一项需求变更。
+            你是一个资深的交付总监和 PMO 专家。现有项目“{project['project_name']}”面临一项需求变更。
             
             变更描述：
             {description}

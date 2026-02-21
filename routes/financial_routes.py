@@ -13,6 +13,12 @@ def get_project_financials(project_id):
         return api_response(success=False, message=data['error'])
     return api_response(success=True, data=data)
 
+@financial_bp.route('/projects/<int:project_id>/financial-costs', methods=['GET'])
+def get_member_costs(project_id):
+    """获取项目成员成本分布"""
+    data = financial_service.get_member_costs(project_id)
+    return jsonify(data)
+
 @financial_bp.route('/projects/<int:project_id>/revenue', methods=['POST'])
 def add_revenue(project_id):
     """录入项目收入"""

@@ -176,9 +176,8 @@ class AnalyticsService:
         
         for row in rows:
             p_dict = dict(row)
-            # 获取实时风险评分
-            _, risk_score = ai_service.analyze_project_risks(p_dict['id'])
-            p_dict['risk_score'] = risk_score
+            # Use cached risk score instead of recalculating in real-time
+            # p_dict['risk_score'] already exists from the SELECT query
             
             # 判定阶段
             if p_dict['status'] in ['暂停', '离场待返']: p_dict['phase'] = '离场'

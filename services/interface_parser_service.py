@@ -5,6 +5,7 @@
 import re
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from database import DatabasePool
 from services.ai_service import ai_service
 
@@ -30,16 +31,41 @@ class InterfaceParserService:
                                 vendor_name: str = None) -> list:
         """
         用 AI 将文档全文解析为结构化接口定义列表。
-        对于大文档，会自动分段解析后合并。
+        使用线程池并行处理分段，显著提升大文档解析速度。
         """
-        # 大文档分段（每段约 12000 字符，留余量给 prompt）
         chunks = self._split_by_interface_section(doc_text)
         all_interfaces = []
 
-        for chunk in chunks:
-            parsed = self._parse_single_chunk(chunk, spec_source, vendor_name)
-            if parsed:
-                all_interfaces.extend(parsed)
+        if not chunks:
+            return []
+
+        logger.info(f"开始并行解析文档，共 {len(chunks)} 个分段")
+        
+        # 使用并发执行提升速度
+        # 限制最大线程数为 5，避免瞬时并发过高导致 AI 端点限流或超时
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # 提交任务
+            future_to_chunk = {
+                executor.submit(self._parse_single_chunk, chunk, spec_source, vendor_name): i 
+                for i, chunk in enumerate(chunks)
+            }
+            
+            # 收集结果
+            results = [None] * len(chunks)
+            import concurrent.futures
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                chunk_index = future_to_chunk[future]
+                try:
+                    parsed_result = future.result()
+                    if parsed_result:
+                        results[chunk_index] = parsed_result
+                except Exception as e:
+                    logger.error(f"分段 {chunk_index} 解析异常: {e}")
+
+            # 合并结果
+            for res in results:
+                if res:
+                    all_interfaces.extend(res)
 
         logger.info(f"文档解析完成，共提取 {len(all_interfaces)} 个接口定义")
         return all_interfaces
@@ -144,21 +170,31 @@ class InterfaceParserService:
         return []
 
     def save_parsed_specs(self, project_id, doc_id, parsed_interfaces: list,
-                           spec_source: str, vendor_name: str = None, category: str = None) -> list:
+                               spec_source: str, vendor_name: str = None, category: str = None, raw_text: str = None) -> list:
         """
         持久化解析结果到数据库，返回创建的 spec_id 列表。
-        project_id 为 None 时表示全局标准模板。
+        使用单一连接和事务，大幅提升大量数据保存性能。
         """
         created_ids = []
+        
         with DatabasePool.get_connection() as conn:
+            if project_id and raw_text and not doc_id:
+                # 自动存入项目文档库
+                doc_title = f"{category or '接口文档'}_{vendor_name or '解析内容'}"
+                cursor = conn.execute('''
+                    INSERT INTO project_documents (project_id, doc_name, doc_type, doc_category, remark)
+                    VALUES (?, ?, 'txt', '接口对接', ?)
+                ''', (project_id, doc_title, f"AI解析自: {vendor_name or '未知'}"))
+                doc_id = cursor.lastrowid
+
             for iface in parsed_interfaces:
                 cursor = conn.execute('''
                     INSERT INTO interface_specs
                     (project_id, doc_id, spec_source, category, vendor_name, system_type,
                      interface_name, transcode, protocol, description,
                      request_sample, response_sample, endpoint_url,
-                     action_name, view_name, data_direction)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     action_name, view_name, data_direction, raw_text)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     project_id, doc_id, spec_source, category, vendor_name,
                     iface.get('system_type', ''),
@@ -171,7 +207,8 @@ class InterfaceParserService:
                     iface.get('endpoint_url', ''),
                     iface.get('action_name', ''),
                     iface.get('view_name', ''),
-                    iface.get('data_direction', 'pull')
+                    iface.get('data_direction', 'pull'),
+                    raw_text
                 ))
                 spec_id = cursor.lastrowid
                 created_ids.append(spec_id)
@@ -197,6 +234,7 @@ class InterfaceParserService:
                         idx
                     ))
             conn.commit()
+            
         logger.info(f"已保存 {len(created_ids)} 个接口规范到数据库")
         return created_ids
 

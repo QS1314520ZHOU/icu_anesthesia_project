@@ -16,44 +16,36 @@ class ProjectService:
         # 计算各阶段进度
         stage_progress = {}
         for stage in stages:
-            stage_id_row = cursor.execute('SELECT id FROM project_stages WHERE project_id = ? AND stage_name = ?', (project_id, stage['stage_name'])).fetchone()
-            if not stage_id_row: continue
-            
-            s_id = stage_id_row['id']
-            total = cursor.execute('SELECT COUNT(*) as c FROM tasks WHERE stage_id = ?', (s_id,)).fetchone()['c']
-            done = cursor.execute('SELECT COUNT(*) as c FROM tasks WHERE stage_id = ? AND is_completed = 1', (s_id,)).fetchone()['c']
+            s_name = stage['stage_name']
+            total = cursor.execute('SELECT COUNT(*) as c FROM tasks t JOIN project_stages ps ON t.stage_id = ps.id WHERE ps.project_id = ? AND ps.stage_name = ?', (project_id, s_name)).fetchone()['c']
+            done = cursor.execute('SELECT COUNT(*) as c FROM tasks t JOIN project_stages ps ON t.stage_id = ps.id WHERE ps.project_id = ? AND ps.stage_name = ? AND t.is_completed = 1', (project_id, s_name)).fetchone()['c']
             progress = (done / total * 100) if total > 0 else 0
-            stage_progress[stage['stage_name']] = progress
+            stage_progress[s_name] = progress
 
         # 逻辑判断
-        new_status = None
+        new_status = '待启动'
+        has_any_progress = any(p > 0 for p in stage_progress.values())
         
-        # 1. 待启动: 所有阶段进度均为0
-        if all(p == 0 for p in stage_progress.values()):
-            new_status = '待启动'
-        
-        # 2. 已验收: “验收上线”阶段100%
-        elif stage_progress.get('验收上线', 0) == 100:
-            new_status = '已验收'
-            cursor.execute('UPDATE projects SET actual_end_date = ? WHERE id = ? AND actual_end_date IS NULL', 
-                         (datetime.now().strftime('%Y-%m-%d'), project_id))
-        
-        # 3. 验收中: “验收上线”阶段有进度但未满100%
-        elif 0 < stage_progress.get('验收上线', 0) < 100:
-            new_status = '验收中'
-            
-        # 4. 试运行: “试运行”阶段有进度
-        elif 0 < stage_progress.get('试运行', 0) < 100:
-            new_status = '试运行'
-            
-        # 5. 进行中: 其他情况（有进度但没到试运行或验收中，或者试运行已完成但未到验收中）
-        else:
+        if has_any_progress:
             new_status = '进行中'
             # 记录实际开始日期
             cursor.execute('UPDATE projects SET actual_start_date = ? WHERE id = ? AND actual_start_date IS NULL', 
                          (datetime.now().strftime('%Y-%m-%d'), project_id))
 
-        if new_status:
+        # 优先级判断：特定的关键阶段进度
+        if stage_progress.get('验收上线', 0) == 100:
+            new_status = '已验收'
+            cursor.execute('UPDATE projects SET actual_end_date = ? WHERE id = ? AND actual_end_date IS NULL', 
+                         (datetime.now().strftime('%Y-%m-%d'), project_id))
+        elif 0 < stage_progress.get('验收上线', 0) < 100:
+            new_status = '验收中'
+        elif 0 < stage_progress.get('试运行', 0) < 100:
+            new_status = '试运行'
+
+        # 获取当前数据库中的状态，避免无谓的更新
+        current_status = cursor.execute('SELECT status FROM projects WHERE id = ?', (project_id,)).fetchone()
+        if current_status and current_status['status'] != new_status:
+            print(f"[DEBUG] Project {project_id} status changing: {current_status['status']} -> {new_status}")
             cursor.execute('UPDATE projects SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
                          (new_status, project_id))
 
@@ -560,9 +552,8 @@ class ProjectService:
             ''', (project_id,)).fetchall()
             project_dict['dependencies'] = [dict(d) for d in deps]
 
-            # Fetch health score and risk analysis
-            _, risk_score = ai_service.analyze_project_risks(project_id)
-            project_dict['risk_score'] = risk_score
+            # Health score and risk analysis are already in project_dict from 'SELECT *'
+            # No longer doing synchronous analysis here for performance
             
             return project_dict
 

@@ -831,6 +831,7 @@ def init_db():
             gap_count INTEGER DEFAULT 0,
             transform_count INTEGER DEFAULT 0,
             status TEXT DEFAULT 'pending',
+            category TEXT, -- 新增：分类（如：手麻标准、重症标准）
             reviewed_by TEXT,
             reviewed_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -839,6 +840,9 @@ def init_db():
             FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
         )
     ''')
+    try:
+        cursor.execute("ALTER TABLE interface_comparisons ADD COLUMN category TEXT")
+    except: pass
 
     # 34. 字段级映射关系
     cursor.execute('''
@@ -1376,6 +1380,46 @@ def analyze_communications(project_id):
     except Exception as e:
         return jsonify({'error': f'AI分析失败: {str(e)}'}), 500
 
+@app.route('/api/extract-text', methods=['POST'])
+def extract_text():
+    """从上传的文件中提取文本内容（支持 PDF/Word/TXT 等）"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+    
+    from services.file_parser import is_supported, extract_text_from_file
+    if not is_supported(file.filename):
+        return jsonify({'success': False, 'message': '不支持的文件格式'}), 400
+        
+    # 保存到临时目录
+    temp_dir = os.path.join(app.root_path, 'uploads', 'temp_extract')
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    filepath = os.path.join(temp_dir, f"{int(time.time())}_{secure_filename(file.filename)}")
+    try:
+        file.save(filepath)
+        text = extract_text_from_file(filepath)
+        
+        # 提取完删除临时文件
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            
+        return jsonify({
+            'success': True,
+            'data': {
+                'text': text,
+                'filename': file.filename,
+                'length': len(text)
+            }
+        })
+    except Exception as e:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+        return jsonify({'success': False, 'message': f'文本提取失败: {str(e)}'}), 500
+
 @app.route('/api/projects/<int:project_id>/communications/analyze-file', methods=['POST'])
 def analyze_communication_file(project_id):
     """上传文件并进行AI分析 - 从项目管理/需求分析师视角"""
@@ -1606,17 +1650,18 @@ def ai_task_suggestions(project_id):
         
         result = call_ai(prompt, task_type='analysis')
         
-        # 尝试解析JSON
+        # 尝试解析JSON (增强型解析，提取第一个 [ 和 最后一个 ])
         import json
+        import re
         try:
-            # 提取JSON部分
-            json_start = result.find('[')
-            json_end = result.rfind(']') + 1
-            if json_start >= 0 and json_end > json_start:
-                suggestions = json.loads(result[json_start:json_end])
+            # 查找 JSON 数组部分
+            match = re.search(r'\[.*\]', result, re.DOTALL)
+            if match:
+                json_str = match.group()
+                suggestions = json.loads(json_str)
                 return api_response(True, {'suggestions': suggestions})
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"AI Task Suggestions JSON parse failed: {e}")
         
         return api_response(True, {'suggestions': [], 'raw_response': result})
     except Exception as e:

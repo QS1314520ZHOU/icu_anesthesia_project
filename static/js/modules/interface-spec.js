@@ -9,6 +9,12 @@ const InterfaceSpec = {
     _vendorSpecs: [],
     _comparisons: [],
     _currentProjectId: null,
+    _uploadSource: null,
+    _currentCategory: '手麻标准',
+    _lastCategories: {
+        'our_standard': '手麻标准',
+        'vendor': '接口文档'
+    },
 
     // ========== 入口：渲染整个 Tab 内容 ==========
     async renderTab(projectId) {
@@ -16,35 +22,158 @@ const InterfaceSpec = {
         const container = document.getElementById('tabInterfaceSpec');
         if (!container) return;
 
+        // 加载数据
+        await this.loadAll();
+    },
+
+    async loadAll(forceMainUI = false) {
+        this._isLoading = true;
+
+        // 渲染之前先确保 category 同步
+        const dashCat = document.getElementById('dashOurCategory')?.value;
+        const mainCat = document.getElementById('compareCategory')?.value;
+        if (dashCat) this._currentCategory = dashCat;
+        else if (mainCat) this._currentCategory = mainCat;
+
+        await Promise.all([
+            this.loadOurSpecs(),
+            this.loadVendorSpecs(),
+            this.loadComparisons()
+        ]);
+        this._isLoading = false;
+
+        const container = document.getElementById('tabInterfaceSpec');
+        if (!container) return;
+
+        // 如果两边都没数据，且没有强制进入 MainUI，显示 Dashboard 模式
+        if (!forceMainUI && this._ourSpecs.length === 0 && this._vendorSpecs.length === 0) {
+            this.renderSetupDashboard(container);
+        } else {
+            this.renderMainUI(container);
+        }
+    },
+
+    // ========== 极简 Dashboard 模式 (Setup Portal) ==========
+    renderSetupDashboard(container) {
+        container.innerHTML = `
+            <div class="interface-spec-dashboard" style="padding:20px; animation: fadeIn 0.4s ease-out;">
+                <div style="text-align:center; margin-bottom:40px;">
+                    <h2 style="font-size:28px; font-weight:800; background:linear-gradient(135deg, var(--primary), var(--secondary)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:12px;">
+                        智能接口文档对齐中心
+                    </h2>
+                    <p style="color:var(--gray-500); font-size:15px; max-width:600px; margin:0 auto;">
+                        通过 AI 智能解析，自动识别标准与私有接口差异，为您节省 90% 的文档整理时间。
+                    </p>
+                </div>
+
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap:24px; margin-bottom:40px;">
+                    <!-- 我方标准卡片 -->
+                    <div class="dashboard-card" style="background:white; border-radius:16px; border:1px solid var(--gray-200); padding:24px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.05); transition:transform 0.2s; position:relative; overflow:hidden;">
+                        <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--primary);"></div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+                            <div>
+                                <h3 style="font-size:18px; font-weight:700; color:var(--gray-800); margin-bottom:4px;">我方标准规范</h3>
+                                <p style="font-size:13px; color:var(--gray-500);">选择手麻或重症标准</p>
+                            </div>
+                            <span style="font-size:24px;">📘</span>
+                        </div>
+                        
+                        <div style="margin-bottom:20px;">
+                            <select id="dashOurCategory" class="form-control" onchange="InterfaceSpec.loadAll()" style="width:100%; border-radius:8px; padding:8px 12px; border:1px solid var(--gray-200);">
+                                <option value="手麻标准" ${this._currentCategory === '手麻标准' ? 'selected' : ''}>手麻标准 (V2.0)</option>
+                                <option value="重症标准" ${this._currentCategory === '重症标准' ? 'selected' : ''}>重症标准 (V1.5)</option>
+                            </select>
+                        </div>
+
+                        <div id="dashOurUploadArea" class="upload-dropzone" 
+                             style="border:2px dashed var(--gray-200); border-radius:12px; padding:30px; text-align:center; cursor:pointer; transition:all 0.2s;"
+                             onclick="InterfaceSpec.openQuickUpload('our_standard')">
+                            <div style="font-size:32px; margin-bottom:12px;">📄</div>
+                            <div style="font-weight:600; font-size:14px; color:var(--gray-700);">粘贴文档或点击上传</div>
+                            <div style="font-size:12px; color:var(--gray-400); margin-top:4px;">支持 PDF / Word / TXT</div>
+                        </div>
+
+                        <div id="dashOurStatus" style="margin-top:16px; font-size:13px; display:${this._ourSpecs.length > 0 ? 'block' : 'none'};">
+                            <span style="color:var(--success); font-weight:600;">✓ 标准文档已就绪 (${this._ourSpecs.length} 个接口)</span>
+                        </div>
+                    </div>
+
+                    <!-- 对方接口卡片 -->
+                    <div class="dashboard-card" style="background:white; border-radius:16px; border:1px solid var(--gray-200); padding:24px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.05); transition:transform 0.2s; position:relative; overflow:hidden;">
+                        <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--info);"></div>
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+                            <div>
+                                <h3 style="font-size:18px; font-weight:700; color:var(--gray-800); margin-bottom:4px;">第三方接口文档</h3>
+                                <p style="font-size:13px; color:var(--gray-500);">上传医院或厂家接口说明</p>
+                            </div>
+                            <span style="font-size:24px;">🏥</span>
+                        </div>
+
+                        <div style="margin-bottom:20px;">
+                            <input type="text" id="dashVendorName" class="form-control" placeholder="输入厂家/系统名称 (可选)" 
+                                   style="width:100%; border-radius:8px; padding:8px 12px; border:1px solid var(--gray-200);">
+                        </div>
+
+                        <div id="dashVendorUploadArea" class="upload-dropzone" 
+                             style="border:2px dashed var(--gray-200); border-radius:12px; padding:30px; text-align:center; cursor:pointer; transition:all 0.2s;"
+                             onclick="InterfaceSpec.openQuickUpload('vendor')">
+                            <div style="font-size:32px; margin-bottom:12px;">🔗</div>
+                            <div style="font-weight:600; font-size:14px; color:var(--gray-700);">粘贴文档或点击上传</div>
+                            <div style="font-size:12px; color:var(--gray-400); margin-top:4px;">支持多接口内容批量解析</div>
+                        </div>
+
+                        <div id="dashVendorStatus" style="margin-top:16px; font-size:13px; display:${this._vendorSpecs.length > 0 ? 'block' : 'none'};">
+                            <span style="color:var(--success); font-weight:600;">✓ 接口文档已就绪 (${this._vendorSpecs.length} 个接口)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 核心操作区 -->
+                <div style="text-align:center;">
+                    <button class="btn btn-ai" id="btnDashRun" onclick="InterfaceSpec.runComparisonFromDash()" 
+                            style="padding:16px 48px; border-radius:30px; font-size:18px; font-weight:700; box-shadow:0 10px 25px -5px rgba(99,102,241,0.4);">
+                        🔍 一键智能比对 (AI Sync)
+                    </button>
+                    <div style="margin-top:16px; font-size:13px; color:var(--gray-400);">
+                        AI 将自动分析两份文档，提取字段对应关系并标注差异点
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    // ========== 主应用模式 (原有 Tab 模式) ==========
+    renderMainUI(container) {
         container.innerHTML = `
             <div class="interface-spec-module">
                 <!-- 顶部操作栏 -->
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
                         <button class="btn btn-primary btn-sm" onclick="InterfaceSpec.showUploadModal('our_standard')">
-                            📤 上传我方标准文档
+                            📤 上传我方标准
                         </button>
                         <button class="btn btn-info btn-sm" onclick="InterfaceSpec.showUploadModal('vendor')">
-                            📥 上传对方接口文档
+                            📥 上传对方接口
                         </button>
-                        <select id="compareCategory" class="form-control" style="width:130px;height:32px;padding:0 8px;font-size:12px;border-radius:6px;border-color:var(--gray-200);">
-                            <option value="手麻标准">手麻标准</option>
-                            <option value="重症标准">重症标准</option>
-                            <option value="其他">其他</option>
+                        <select id="compareCategory" class="form-control" onchange="InterfaceSpec.loadAll()" style="width:130px;height:32px;padding:0 8px;font-size:12px;border-radius:6px;border-color:var(--gray-200);">
+                            <option value="手麻标准" ${this._currentCategory === '手麻标准' ? 'selected' : ''}>手麻标准</option>
+                            <option value="重症标准" ${this._currentCategory === '重症标准' ? 'selected' : ''}>重症标准</option>
+                            <option value="接口文档" ${this._currentCategory === '接口文档' ? 'selected' : ''}>接口文档</option>
                         </select>
                         <button class="btn btn-ai btn-sm" onclick="InterfaceSpec.runComparison()" id="btnRunComparison">
                             🔍 一键智能对照
                         </button>
                         <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.generateReport()">
-                            📊 生成对照报告
+                            📊 对照报告
+                        </button>
+                        <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.resetDashboard()" style="color:var(--danger);">
+                            🔄 重新对齐
                         </button>
                     </div>
                 </div>
 
-                <!-- 统计概览 -->
                 <div id="specOverview" style="margin-bottom:20px;"></div>
 
-                <!-- 三栏内容 -->
                 <div class="spec-sub-tabs" style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px;margin-bottom:16px;">
                     <div class="spec-sub-tab active" onclick="InterfaceSpec.switchSubTab('comparison')" data-subtab="comparison"
                          style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
@@ -52,37 +181,35 @@ const InterfaceSpec = {
                     </div>
                     <div class="spec-sub-tab" onclick="InterfaceSpec.switchSubTab('our')" data-subtab="our"
                          style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
-                        📋 我方标准接口
+                        📋 我方标准
                     </div>
                     <div class="spec-sub-tab" onclick="InterfaceSpec.switchSubTab('vendor')" data-subtab="vendor"
                          style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;">
                         🏥 对方接口
                     </div>
+                    <div class="spec-sub-tab" onclick="InterfaceSpec.openChatModal()"
+                         style="flex:1;text-align:center;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;transition:all 0.2s;color:var(--primary);background:rgba(99,102,241,0.05);">
+                        🤖 接口 AI 助手
+                    </div>
                 </div>
-
+ 
                 <div id="specSubContent">
                     <div id="specComparisonView"></div>
                     <div id="specOurView" style="display:none;"></div>
                     <div id="specVendorView" style="display:none;"></div>
                 </div>
-
-                <!-- AI 报告容器 -->
-                <div id="specAiReport" style="display:none;margin-top:20px;"></div>
             </div>
         `;
-
-        // 加载数据
-        await this.loadAll();
-    },
-
-    async loadAll() {
-        await Promise.all([
-            this.loadOurSpecs(),
-            this.loadVendorSpecs(),
-            this.loadComparisons()
-        ]);
         this.renderOverview();
         this.renderComparisonView();
+    },
+
+    resetDashboard() {
+        if (confirm('确认重置吗？这将清空当前页面的统计但不会删除已解析的记录。')) {
+            this._ourSpecs = [];
+            this._vendorSpecs = [];
+            this.renderTab(this._currentProjectId);
+        }
     },
 
     switchSubTab(name) {
@@ -98,6 +225,13 @@ const InterfaceSpec = {
         document.getElementById('specOurView').style.display = name === 'our' ? 'block' : 'none';
         document.getElementById('specVendorView').style.display = name === 'vendor' ? 'block' : 'none';
 
+        const chatView = document.getElementById('specChatView');
+        if (chatView) chatView.style.display = name === 'chat' ? 'block' : 'none';
+
+        if (name === 'chat') {
+            setTimeout(() => document.getElementById('specChatInput')?.focus(), 100);
+        }
+
         if (name === 'our') this.renderSpecList(this._ourSpecs, 'specOurView', 'our_standard');
         if (name === 'vendor') this.renderSpecList(this._vendorSpecs, 'specVendorView', 'vendor');
     },
@@ -105,20 +239,92 @@ const InterfaceSpec = {
     // ========== 数据加载 ==========
     async loadOurSpecs() {
         try {
-            this._ourSpecs = await api.get(`/projects/${this._currentProjectId}/interface-specs?source=our_standard`, { silent: true });
+            const cat = this._currentCategory;
+            // 获取我方标准：同时获取全局标准（project_id is NULL）和本项目特定的标准
+            let url = `/projects/${this._currentProjectId}/interface-specs?source=our_standard`;
+            if (cat) url += `&category=${encodeURIComponent(cat)}`;
+
+            let specs = await api.get(url, { silent: true });
+
+            // 如果本项目下没有，尝试获取全局标准（兜底逻辑，确保标准始终可见）
+            if (specs.length === 0) {
+                let globalUrl = `/interface-specs/standard`;
+                if (cat) globalUrl += `?category=${encodeURIComponent(cat)}`;
+                specs = await api.get(globalUrl, { silent: true });
+            }
+
+            this._ourSpecs = specs;
         } catch { this._ourSpecs = []; }
     },
 
     async loadVendorSpecs() {
         try {
-            this._vendorSpecs = await api.get(`/projects/${this._currentProjectId}/interface-specs?source=vendor`, { silent: true });
+            const cat = this._currentCategory;
+            let url = `/projects/${this._currentProjectId}/interface-specs?source=vendor`;
+            if (cat) url += `&category=${encodeURIComponent(cat)}`;
+            this._vendorSpecs = await api.get(url, { silent: true });
         } catch { this._vendorSpecs = []; }
     },
 
     async loadComparisons() {
         try {
-            this._comparisons = await api.get(`/projects/${this._currentProjectId}/interface-comparisons`, { silent: true });
+            const cat = this._currentCategory;
+            let url = `/projects/${this._currentProjectId}/interface-comparisons`;
+            if (cat) url += `?category=${encodeURIComponent(cat)}`;
+            this._comparisons = await api.get(url, { silent: true });
         } catch { this._comparisons = []; }
+    },
+
+    openChatModal() {
+        const modal = document.getElementById('interfaceChatModal');
+        if (modal) {
+            // 确保不被父容器 overflow 限制，移动到 body 下
+            if (modal.parentElement !== document.body) {
+                document.body.appendChild(modal);
+            }
+            modal.style.zIndex = '9999';
+        }
+        openModal('interfaceChatModal');
+        setTimeout(() => document.getElementById('modalChatInput')?.focus(), 300);
+    },
+
+    async sendChatMessage(isModal = false) {
+        const inputId = isModal ? 'modalChatInput' : 'specChatInput';
+        const msgContainerId = isModal ? 'modalChatMessages' : 'specChatMessages';
+
+        const input = document.getElementById(inputId);
+        const msgContainer = document.getElementById(msgContainerId);
+        if (!input || !input.value.trim()) return;
+
+        const text = input.value.trim();
+        input.value = '';
+
+        // 显示用户消息
+        msgContainer.innerHTML += `<div class="ai-message user">${text}</div>`;
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+
+        // 显示 Loading
+        const loadingId = 'ai-loading-' + Date.now();
+        msgContainer.innerHTML += `<div class="ai-message assistant" id="${loadingId}"><div class="typing-indicator"><span></span><span></span><span></span></div></div>`;
+        msgContainer.scrollTop = msgContainer.scrollHeight;
+
+        try {
+            const res = await api.post(`/projects/${this._currentProjectId}/interface-specs/chat`, {
+                message: text,
+                category: document.getElementById('compareCategory')?.value || '手麻标准'
+            });
+
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) {
+                loadingEl.innerHTML = marked.parse(res.answer || res);
+            }
+        } catch (e) {
+            const loadingEl = document.getElementById(loadingId);
+            if (loadingEl) {
+                loadingEl.innerHTML = `<span style="color:var(--danger);">抱歉，助手暂时无法响应: ${e.message}</span>`;
+            }
+        }
+        msgContainer.scrollTop = msgContainer.scrollHeight;
     },
 
     // ========== 统计概览 ==========
@@ -421,20 +627,28 @@ const InterfaceSpec = {
 
         document.getElementById('specUploadTitle').textContent = title;
         document.getElementById('specVendorNameGroup').style.display = showVendor ? 'block' : 'none';
-
-        // 分类选择逻辑
-        const categoryGroup = document.getElementById('specCategoryGroup');
-        if (categoryGroup) {
-            categoryGroup.style.display = 'block'; // 总是显示分类
-            const categorySelect = document.getElementById('specCategory');
-            if (categorySelect) categorySelect.value = source === 'our_standard' ? '手麻标准' : '接口文档';
-        }
+        document.getElementById('specCategoryGroup').style.display = 'block'; // 始终显示分类，减少误操作
 
         document.getElementById('specDocText').value = '';
+        document.getElementById('specDocText').placeholder = '将接口文档内容粘贴到此处，或通过上方文件选择器上传文件自动提取...\n\n支持格式：PDF、Word、纯文本\nAI 将自动识别并结构化提取所有接口定义、字段、类型、必填项等信息。';
         document.getElementById('specVendorName').value = '';
         document.getElementById('specFileInput').value = '';
         document.getElementById('specParseResult').innerHTML = '';
         document.getElementById('specParseResult').style.display = 'none';
+
+        // 绑定分类变更监听，记录用户选择
+        const categorySelect = document.getElementById('specCategory');
+        if (categorySelect && !categorySelect._hasListener) {
+            categorySelect.addEventListener('change', (e) => {
+                this._lastCategories[this._uploadSource] = e.target.value;
+            });
+            categorySelect._hasListener = true;
+        }
+
+        // 优先使用当前模块内记录的分类
+        if (categorySelect) {
+            categorySelect.value = (source === 'our_standard') ? this._currentCategory : (this._lastCategories[source] || '接口文档');
+        }
 
         openModal('specUploadModal');
     },
@@ -454,7 +668,15 @@ const InterfaceSpec = {
         } else {
             // PDF/Word 需要后端提取文本，先给提示
             textarea.value = '';
-            textarea.placeholder = `已选择文件: ${file.name}\n将通过后端提取文本...`;
+            textarea.placeholder = `已选择文件: ${file.name}\n正在通过后端提取文本，请稍候...`;
+
+            // 提取过程中禁用解析按钮，防止空解析
+            const parseBtn = document.getElementById('btnSpecParse');
+            if (parseBtn) {
+                parseBtn.disabled = true;
+                parseBtn.dataset.originalText = parseBtn.textContent;
+                parseBtn.textContent = '⏳ 正在提取文件文本...';
+            }
 
             try {
                 const formData = new FormData();
@@ -463,23 +685,46 @@ const InterfaceSpec = {
                     method: 'POST',
                     body: formData
                 });
+
+                if (res.status === 404) {
+                    showToast('后端文本提取接口未找到，请联系管理员更新系统', 'error');
+                    textarea.placeholder = '文本提取失败：接口 404，请手动粘贴文档内容';
+                    return;
+                }
+
                 const data = await res.json();
                 if (data.success && data.data && data.data.text) {
                     textarea.value = data.data.text;
                     showToast(`文本提取成功，${data.data.text.length} 字符`);
                 } else {
-                    showToast('文本提取失败，请手动粘贴文档内容', 'error');
+                    const msg = data.message || '文本提取失败，请手动粘贴文档内容';
+                    showToast(msg, 'error');
+                    textarea.placeholder = msg;
                 }
             } catch (e) {
                 showToast('文件解析失败，请手动粘贴文档内容', 'error');
+                textarea.placeholder = '文件解析失败，请检查网络或手动粘贴文档内容';
+            } finally {
+                if (parseBtn) {
+                    parseBtn.disabled = false;
+                    parseBtn.textContent = parseBtn.dataset.originalText || '🤖 开始 AI 解析';
+                }
             }
         }
     },
 
     async submitParse() {
-        const docText = document.getElementById('specDocText').value.trim();
+        const textarea = document.getElementById('specDocText');
+        const docText = textarea.value.trim();
+
+        // 安全检查：如果内容为空或者还是 placeholder 状态（可能是提取中或提取失败）
         if (!docText) {
-            showToast('请粘贴或上传文档内容', 'error');
+            const placeholder = textarea.placeholder;
+            if (placeholder && placeholder.includes('正在通过后端提取')) {
+                showToast('文本提取尚未完成，请稍候...', 'warning');
+            } else {
+                showToast('请粘贴或上传文档内容', 'error');
+            }
             return;
         }
 
@@ -496,8 +741,8 @@ const InterfaceSpec = {
 
         try {
             const endpoint = source === 'our_standard'
-                ? '/api/interface-specs/parse-standard'
-                : `/api/projects/${this._currentProjectId}/interface-specs/parse`;
+                ? '/interface-specs/parse-standard'
+                : `/projects/${this._currentProjectId}/interface-specs/parse`;
 
             const body = {
                 doc_text: docText,
@@ -523,7 +768,13 @@ const InterfaceSpec = {
                 </div>
             `;
 
-            // 刷新数据
+            // 刷新数据并强制同步分类
+            this._currentCategory = category;
+            const dashCat = document.getElementById('dashOurCategory');
+            if (dashCat) dashCat.value = category;
+            const mainCat = document.getElementById('compareCategory');
+            if (mainCat) mainCat.value = category;
+
             await this.loadAll();
             showToast(`解析完成，识别 ${data.parsed_count} 个接口`);
         } catch (e) {
@@ -629,6 +880,41 @@ const InterfaceSpec = {
             if (activeSubTab) this.switchSubTab(activeSubTab.dataset.subtab);
         } catch (e) {
             showToast('删除失败: ' + e.message, 'error');
+        }
+    },
+
+    // ========== Dashboard 专用处理函数 ==========
+    openQuickUpload(source) {
+        this.showUploadModal(source);
+    },
+
+    async runComparisonFromDash() {
+        const ourCat = document.getElementById('dashOurCategory')?.value || this._currentCategory;
+
+        // 如果两边都还没上传数据，给予提示
+        if (this._ourSpecs.length === 0 && this._vendorSpecs.length === 0) {
+            showToast('请先上传至少一份文档内容', 'warning');
+            this.showUploadModal('our_standard');
+            return;
+        }
+
+        const btn = document.getElementById('btnDashRun');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ 正在进行 AI 深度对齐...';
+
+        try {
+            // 设置分类并执行比对
+            await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, {
+                category: ourCat
+            });
+            showToast('比对完成，正在进入分析视图');
+            this._currentCategory = ourCat;
+            await this.loadAll(true); // 强制进入 MainUI
+        } catch (e) {
+            showToast('对齐失败: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🔍 一键智能比对 (AI Sync)';
         }
     }
 };

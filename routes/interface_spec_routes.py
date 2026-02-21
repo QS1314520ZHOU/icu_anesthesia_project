@@ -43,7 +43,7 @@ def parse_interface_doc(project_id):
         return api_response(False, message='AI 解析未能提取到接口定义，请检查文档内容或格式')
 
     # 持久化
-    created_ids = interface_parser.save_parsed_specs(save_project_id, doc_id, parsed, spec_source, vendor_name, category)
+    created_ids = interface_parser.save_parsed_specs(save_project_id, doc_id, parsed, spec_source, vendor_name, category, raw_text=doc_text)
 
     return api_response(True, {
         'parsed_count': len(parsed),
@@ -61,7 +61,6 @@ def parse_interface_doc(project_id):
 def parse_our_standard():
     """
     上传并解析我方标准接口文档（全局标准，不绑定项目）。
-    Body JSON: { "doc_text": "...", "doc_id": 可选 }
     """
     data = request.json or {}
     doc_text = data.get('doc_text', '').strip()
@@ -72,7 +71,7 @@ def parse_our_standard():
     if not parsed:
         return api_response(False, message='解析失败')
 
-    created_ids = interface_parser.save_parsed_specs(None, data.get('doc_id'), parsed, 'our_standard', category=data.get('category'))
+    created_ids = interface_parser.save_parsed_specs(None, data.get('doc_id'), parsed, 'our_standard', category=data.get('category'), raw_text=doc_text)
     return api_response(True, {
         'parsed_count': len(parsed),
         'spec_ids': created_ids,
@@ -123,19 +122,26 @@ def run_comparison(project_id):
 @spec_bp.route('/projects/<int:project_id>/interface-comparisons', methods=['GET'])
 def get_comparisons(project_id):
     """获取项目所有对照结果概览"""
+    category = request.args.get('category')
     with DatabasePool.get_connection() as conn:
-        rows = conn.execute('''
+        query = '''
             SELECT ic.id, ic.our_spec_id, ic.vendor_spec_id, ic.match_type,
                    ic.match_confidence, ic.gap_count, ic.transform_count,
-                   ic.status, ic.summary, ic.created_at,
+                   ic.status, ic.summary, ic.created_at, ic.category,
                    os.interface_name as our_name, os.transcode as our_transcode, os.system_type,
                    vs.interface_name as vendor_name, vs.transcode as vendor_transcode, vs.vendor_name as vendor_company
             FROM interface_comparisons ic
             LEFT JOIN interface_specs os ON ic.our_spec_id = os.id
             LEFT JOIN interface_specs vs ON ic.vendor_spec_id = vs.id
             WHERE ic.project_id = ?
-            ORDER BY ic.gap_count DESC, os.system_type
-        ''', (project_id,)).fetchall()
+        '''
+        params = [project_id]
+        if category:
+            query += ' AND ic.category = ?'
+            params.append(category)
+        
+        query += ' ORDER BY ic.gap_count DESC, os.system_type'
+        rows = conn.execute(query, params).fetchall()
     return api_response(True, [dict(r) for r in rows])
 
 

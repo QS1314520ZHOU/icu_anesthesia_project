@@ -346,13 +346,21 @@ class InterfaceComparisonService:
         summary_stats = {'matched': 0, 'gap': 0, 'transform': 0, 'missing_interface': 0}
 
         with DatabasePool.get_connection() as conn:
-            # 先清除该项目旧的对照数据
-            old_comps = conn.execute(
-                'SELECT id FROM interface_comparisons WHERE project_id = ?', (project_id,)
-            ).fetchall()
+            # 先清除该项目、该分类下的旧对照数据（实现隔离）
+            query_old = 'SELECT id FROM interface_comparisons WHERE project_id = ?'
+            params_old = [project_id]
+            if category:
+                query_old += ' AND category = ?'
+                params_old.append(category)
+            
+            old_comps = conn.execute(query_old, params_old).fetchall()
             for oc in old_comps:
                 conn.execute('DELETE FROM field_mappings WHERE comparison_id = ?', (oc['id'],))
-            conn.execute('DELETE FROM interface_comparisons WHERE project_id = ?', (project_id,))
+            
+            if category:
+                conn.execute('DELETE FROM interface_comparisons WHERE project_id = ? AND category = ?', (project_id, category))
+            else:
+                conn.execute('DELETE FROM interface_comparisons WHERE project_id = ? AND category IS NULL', (project_id,))
 
             for match in matches:
                 our_id = match['our_spec_id']
@@ -368,10 +376,10 @@ class InterfaceComparisonService:
                     conn.execute('''
                         INSERT INTO interface_comparisons
                         (project_id, our_spec_id, vendor_spec_id, match_type, match_confidence,
-                         comparison_result, summary, gap_count, status)
-                        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'pending')
+                         comparison_result, summary, gap_count, status, category)
+                        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?)
                     ''', (project_id, our_id, match['match_type'], match['match_confidence'],
-                          '{}', match['match_reason'], 1))
+                          '{}', match['match_reason'], 1, category))
                     summary_stats['missing_interface'] += 1
                     results.append({
                         'our_interface': our_spec['interface_name'] if our_spec else str(our_id),
@@ -388,13 +396,14 @@ class InterfaceComparisonService:
                 cursor = conn.execute('''
                     INSERT INTO interface_comparisons
                     (project_id, our_spec_id, vendor_spec_id, match_type, match_confidence,
-                     comparison_result, gap_count, transform_count, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                     comparison_result, gap_count, transform_count, status, category)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 ''', (project_id, our_id, vendor_id, match['match_type'],
                       match['match_confidence'],
                       json.dumps({'stats': stats, 'protocol_match': comp['protocol_match']}, ensure_ascii=False),
                       stats['missing_in_vendor'] + stats['type_mismatch'],
-                      stats['needs_transform'] + stats['name_different']))
+                      stats['needs_transform'] + stats['name_different'],
+                      category))
                 comp_id = cursor.lastrowid
 
                 # 保存字段映射

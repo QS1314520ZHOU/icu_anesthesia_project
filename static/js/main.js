@@ -328,16 +328,32 @@ async function showAiRetrospective(projectId) {
     const modal = document.getElementById('aiModal');
     if (!modal) return;
     openModal('aiModal');
-    document.getElementById('aiContent').innerHTML = '<div style="text-align:center;padding:40px;">⏳ 正在生成复盘报告...</div>';
+
+    const loadingEl = document.getElementById('aiLoading');
+    const contentEl = document.getElementById('aiContent');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (contentEl) {
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+    }
+
     try {
         const res = await api.post(`/projects/${projectId}/ai-retrospective`);
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (contentEl) contentEl.style.display = 'block';
+
         if (res.report) {
-            document.getElementById('aiContent').innerHTML = `<div style="padding:20px;"><h2 style="margin-bottom:16px;">📊 AI项目复盘报告</h2><div class="markdown-content">${marked.parse(res.report)}</div></div>`;
+            contentEl.innerHTML = `<div style="padding:20px;"><h2 style="margin-bottom:16px;">📊 AI项目复盘报告</h2><div class="markdown-content">${marked.parse(res.report)}</div></div>`;
         } else {
-            document.getElementById('aiContent').innerHTML = '<div style="padding:20px;color:var(--danger);">生成失败</div>';
+            contentEl.innerHTML = '<div style="padding:20px;color:var(--danger);">生成失败</div>';
         }
     } catch (e) {
-        document.getElementById('aiContent').innerHTML = `<div style="padding:20px;color:var(--danger);">请求失败: ${e.message}</div>`;
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (contentEl) {
+            contentEl.style.display = 'block';
+            contentEl.innerHTML = `<div style="padding:20px;color:var(--danger);">请求失败: ${e.message}</div>`;
+        }
     }
 }
 
@@ -346,28 +362,39 @@ async function showAiTaskSuggestions(projectId) {
     const modal = document.getElementById('aiModal');
     if (!modal) return;
     openModal('aiModal');
-    document.getElementById('aiContent').innerHTML = '<div style="text-align:center;padding:40px;">⏳ 正在生成分配建议...</div>';
+
+    const loadingEl = document.getElementById('aiLoading');
+    const contentEl = document.getElementById('aiContent');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (contentEl) {
+        contentEl.style.display = 'none';
+        contentEl.innerHTML = '';
+    }
+
     try {
         const res = await api.post(`/projects/${projectId}/ai-task-suggestions`);
-        if (res.message) {
-            document.getElementById('aiContent').innerHTML = `<div style="padding:20px;text-align:center;color:var(--gray-500);">${res.message}</div>`;
-            return;
-        }
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (contentEl) contentEl.style.display = 'block';
+
         if (res.suggestions && res.suggestions.length > 0) {
             let html = '<div style="padding:20px;"><h2 style="margin-bottom:16px;">🎯 AI任务分配建议</h2>';
             for (const s of res.suggestions) {
                 html += `<div style="padding:12px;margin-bottom:8px;background:var(--gray-50);border-radius:8px;border-left:4px solid var(--primary);"><div style="font-weight:600;margin-bottom:4px;">📋 ${s.task_name || s.task_id}</div><div style="display:flex;gap:8px;align-items:center;"><span style="background:var(--primary);color:white;padding:2px 8px;border-radius:12px;font-size:12px;">👤 ${s.suggested_member}</span><span style="font-size:12px;color:var(--gray-500);">${s.reason || ''}</span></div></div>`;
             }
             html += '</div>';
-            document.getElementById('aiContent').innerHTML = html;
+            contentEl.innerHTML = html;
         } else if (res.raw_response) {
-            // Fallback for valid AI response but failed JSON parsing
-            document.getElementById('aiContent').innerHTML = `<div style="padding:20px;"><h2 style="margin-bottom:16px;">🎯 AI任务分配建议 (文本模式)</h2><div style="white-space: pre-wrap; line-height: 1.6; color: #374151;">${marked.parse(res.raw_response)}</div></div>`;
+            contentEl.innerHTML = `<div style="padding:20px;"><h2 style="margin-bottom:16px;">🎯 AI任务分配建议 (文本模式)</h2><div style="white-space: pre-wrap; line-height: 1.6; color: #374151;">${marked.parse(res.raw_response)}</div></div>`;
         } else {
-            document.getElementById('aiContent').innerHTML = '<div style="padding:20px;text-align:center;">暂无建议</div>';
+            contentEl.innerHTML = '<div style="padding:20px;text-align:center;">暂无建议</div>';
         }
     } catch (e) {
-        document.getElementById('aiContent').innerHTML = `<div style="padding:20px;color:var(--danger);">请求失败: ${e.message}</div>`;
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (contentEl) {
+            contentEl.style.display = 'block';
+            contentEl.innerHTML = `<div style="padding:20px;color:var(--danger);">请求失败: ${e.message}</div>`;
+        }
     }
 }
 
@@ -995,11 +1022,18 @@ function renderProjectDetail(project) {
                         <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px;">
                             <h1 class="detail-title">${project.project_name}</h1>
                             ${project.risk_score !== undefined ? `
-                                <div class="risk-info-panel" style="display:inline-flex; align-items:center; gap:8px; background:${getRiskColor(project.risk_score)}15; border:1px solid ${getRiskColor(project.risk_score)}; padding:4px 12px; border-radius:16px; font-size:12px;">
-                                    <span style="color:${getRiskColor(project.risk_score)}; font-weight:700;">🚩 风险分: ${project.risk_score}</span>
-                                    <span style="color:#475569; border-left:1px solid #cbd5e1; padding-left:8px;">
-                                        ${(() => {
-                if (!project.risk_analysis) return '暂无风险分析';
+                                <div class="risk-info-panel-premium" onclick="refreshProjectRisk(${project.id})" style="cursor:pointer;">
+                                    <div class="risk-badge" style="background:${getRiskColor(project.risk_score)};">
+                                        <span class="risk-score-value">${project.risk_score}</span>
+                                        <span class="risk-score-label">RISK</span>
+                                    </div>
+                                    <div class="risk-analysis-preview">
+                                        <div class="risk-level-tag" style="color:${getRiskColor(project.risk_score)};">
+                                            ${project.risk_score < 30 ? '🟢 低风险' : project.risk_score < 60 ? '🟡 中等风险' : '🔴 高风险'}
+                                        </div>
+                                        <div class="risk-text-summary">
+                                            ${(() => {
+                if (!project.risk_analysis) return '暂无风险分析，点击刷新评估';
                 try {
                     const analysis = typeof project.risk_analysis === 'string' ? JSON.parse(project.risk_analysis) : project.risk_analysis;
                     if (Array.isArray(analysis)) {
@@ -1010,7 +1044,9 @@ function renderProjectDetail(project) {
                     return project.risk_analysis;
                 }
             })()}
-                                    </span>
+                                        </div>
+                                    </div>
+                                    <div class="risk-action-hint">🔄</div>
                                 </div>
                             ` : ''}
                         </div>
@@ -1025,6 +1061,76 @@ function renderProjectDetail(project) {
                 </div>
 
                 <style>
+                    .risk-info-panel-premium {
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 12px;
+                        background: rgba(255, 255, 255, 0.8);
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(0, 0, 0, 0.05);
+                        padding: 6px 16px 6px 8px;
+                        border-radius: 40px;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+                        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                        max-width: 500px;
+                    }
+                    .risk-info-panel-premium:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+                        border-color: rgba(0, 0, 0, 0.1);
+                    }
+                    .risk-badge {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 50%;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+                    }
+                    .risk-score-value {
+                        font-size: 16px;
+                        font-weight: 800;
+                        line-height: 1;
+                    }
+                    .risk-score-label {
+                        font-size: 8px;
+                        font-weight: 700;
+                        opacity: 0.9;
+                        letter-spacing: 0.5px;
+                    }
+                    .risk-analysis-preview {
+                        flex: 1;
+                        min-width: 0;
+                    }
+                    .risk-level-tag {
+                        font-size: 11px;
+                        font-weight: 700;
+                        margin-bottom: 2px;
+                    }
+                    .risk-text-summary {
+                        font-size: 12px;
+                        color: #64748b;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    .risk-action-hint {
+                        font-size: 14px;
+                        opacity: 0.3;
+                        transition: opacity 0.2s;
+                    }
+                    .risk-info-panel-premium:hover .risk-action-hint {
+                        opacity: 0.8;
+                        animation: spin 2s linear infinite;
+                    }
+                    @keyframes spin {
+                        from { transform: rotate(0deg); }
+                        to { transform: rotate(360deg); }
+                    }
+
                     .action-area {
                         display: flex;
                         flex-direction: column;
@@ -2803,7 +2909,8 @@ async function showDashboard() {
     document.getElementById('dashboardView').style.display = 'block';
 
     // 自动触发提醒检查
-    api.post('/check-and-create-reminders').then(() => updateUnreadCount());
+    // 自动触发提醒检查
+    api.post('/check-and-create-reminders').catch(console.error);
 
     const [statsData, briefingData] = await Promise.all([
         api.get('/dashboard/stats'),
@@ -4420,7 +4527,7 @@ async function showDashboard() {
     document.getElementById('dashboardView').style.display = 'block';
     renderProjectList();
 
-    api.post('/check-and-create-reminders').then(() => updateUnreadCount());
+    api.post('/check-and-create-reminders').catch(console.error);
 
     const data = await api.get('/dashboard/stats');
 
@@ -5788,8 +5895,15 @@ async function showRiskTrend(projectId) {
         modal = document.getElementById('riskTrendModal');
     }
 
+    currentProjectId = projectId;
     openModal('riskTrendModal');
     const chartDom = document.getElementById('riskTrendChart');
+
+    if (!projectId || projectId === 'undefined' || projectId === 'null') {
+        chartDom.innerHTML = `<div class="empty-state"><p class="text-danger">❌ 无效的项目 ID，无法加载趋势分析</p></div>`;
+        return;
+    }
+
     chartDom.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在分析趋势数据...</p></div>';
 
     try {
@@ -5813,148 +5927,174 @@ async function showRiskTrend(projectId) {
     }
 }
 
+// Version: 2.1.3-STABLE (2026-02-20)
 function renderRiskTrendChart(containerId, data) {
     const chartDom = document.getElementById(containerId);
     if (!chartDom) return;
 
-    // 清空Loading
-    chartDom.innerHTML = '';
-    const myChart = echarts.init(chartDom);
+    // 使用 setTimeout 延迟渲染，确保 DOM 已完全可见且尺寸正确
+    setTimeout(() => {
+        // [IMPORTANT] 彻底销毁旧实例并清空容器
+        echarts.dispose(chartDom);
+        chartDom.innerHTML = '';
 
-    const option = {
-        tooltip: {
-            trigger: 'axis',
-            axisPointer: { type: 'cross' }
-        },
-        legend: {
-            data: ['风险评分', '情感评分 (负向)', '交付速度 (Velocity)', '活跃问题']
-        },
-        grid: {
-            left: '3%', right: '4%', bottom: '3%', containLabel: true
-        },
-        xAxis: [
-            {
-                type: 'category',
-                data: data.dates && data.dates.length > 0 ? data.dates : (data.velocity ? data.velocity.map(v => v.week_start) : []),
-                axisPointer: { type: 'shadow' }
-            }
-        ],
-        yAxis: [
-            {
-                type: 'value',
-                name: '评分',
-                min: 0, max: 100,
-                position: 'left',
-                axisLine: { show: true, lineStyle: { color: '#ef4444' } },
-                axisLabel: { formatter: '{value}' }
-            },
-            {
-                type: 'value',
-                name: '计数',
-                min: 0,
-                position: 'right',
-                axisLine: { show: true, lineStyle: { color: '#3b82f6' } },
-                axisLabel: { formatter: '{value}' }
-            }
-        ],
-        series: [
-            {
-                name: '风险评分',
-                type: 'line',
-                data: data.risk_scores || [],
-                smooth: true,
-                itemStyle: { color: '#ef4444' },
-                lineStyle: { width: 3 }
-            },
-            {
-                name: '交付速度 (Velocity)',
-                type: 'bar',
-                yAxisIndex: 1,
-                data: data.velocity ? data.velocity.map(v => v.count) : [],
-                itemStyle: { color: '#3b82f6', opacity: 0.6 },
-                barMaxWidth: 30
-            },
-            {
-                name: '活跃问题',
-                type: 'bar',
-                yAxisIndex: 1,
-                data: data.issue_trend ? data.issue_trend.map(i => i.created - i.resolved) : [], // 简化的活跃数增量
-                itemStyle: { color: '#f59e0b', opacity: 0.6 },
-                barMaxWidth: 30
-            }
-        ]
-    };
+        // 检查容器尺寸，如果为 0 则尝试重新 resize 或报错
+        if (chartDom.clientWidth === 0 || chartDom.clientHeight === 0) {
+            console.warn('Chart container has no dimensions, skipping render');
+            chartDom.innerHTML = '<div class="empty-state"><p>图表尺寸异常，请刷新重试</p></div>';
+            return;
+        }
 
-    myChart.setOption(option);
-    window.addEventListener('resize', () => myChart.resize());
+        const myChart = echarts.init(chartDom);
 
-    // 触发情感分析
-    loadSentimentAnalysis(currentProjectId);
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'cross' }
+            },
+            legend: {
+                data: ['风险评分', '情感评分 (负向)', '交付速度 (Velocity)', '活跃问题']
+            },
+            grid: {
+                left: '3%', right: '4%', bottom: '3%', containLabel: true
+            },
+            xAxis: [
+                {
+                    type: 'category',
+                    data: (data.dates && data.dates.length > 0) ? data.dates : ((data.velocity && Array.isArray(data.velocity)) ? data.velocity.map(v => v.week_start) : []),
+                    axisPointer: { type: 'shadow' }
+                }
+            ],
+            yAxis: [
+                {
+                    type: 'value',
+                    name: '评分',
+                    min: 0, max: 100,
+                    position: 'left',
+                    axisLine: { show: true, lineStyle: { color: '#ef4444' } },
+                    axisLabel: { formatter: '{value}' }
+                },
+                {
+                    type: 'value',
+                    name: '计数',
+                    min: 0,
+                    position: 'right',
+                    axisLine: { show: true, lineStyle: { color: '#3b82f6' } },
+                    axisLabel: { formatter: '{value}' }
+                }
+            ],
+            series: [
+                {
+                    name: '风险评分',
+                    type: 'line',
+                    data: data.risk_scores || [],
+                    smooth: true,
+                    itemStyle: { color: '#ef4444' },
+                    lineStyle: { width: 3 }
+                },
+                {
+                    name: '交付速度 (Velocity)',
+                    type: 'bar',
+                    yAxisIndex: 1,
+                    data: (data.velocity && Array.isArray(data.velocity)) ? data.velocity.map(v => v.count) : [],
+                    itemStyle: { color: '#3b82f6', opacity: 0.6 },
+                    barMaxWidth: 30
+                },
+                {
+                    name: '活跃问题',
+                    type: 'bar',
+                    yAxisIndex: 1,
+                    data: (data.issue_trend && Array.isArray(data.issue_trend)) ? data.issue_trend.map(i => (i.created || 0) - (i.resolved || 0)) : [], // 简化的活跃数增量
+                    itemStyle: { color: '#f59e0b', opacity: 0.6 },
+                    barMaxWidth: 30
+                }
+            ]
+        };
+
+        myChart.setOption(option);
+        window.addEventListener('resize', () => myChart.resize());
+
+        // 触发情感分析
+        loadSentimentAnalysis(currentProjectId || (data && data.project_id));
+    }, 200);
 }
 
 async function loadSentimentAnalysis(projectId) {
-    const container = document.getElementById('riskTrendModal').querySelector('.modal-body');
-    // 检查是否已存在情感分析区域
-    if (document.getElementById('sentimentSection')) return;
+    const container = document.getElementById('riskTrendModal')?.querySelector('.modal-body');
+    if (!container) return;
 
-    const sectionHtml = `
-        <div id="sentimentSection" style="margin-top: 30px; border-top: 1px solid #eef2f6; padding-top: 25px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h4 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 20px;">📡</span> AI 情感雷达 (Sentiment Radar)
-                </h4>
-                <button class="btn btn-sm btn-outline" onclick="fetchSentiment(${projectId})">🔄 重新分析</button>
+    if (!document.getElementById('sentimentSection')) {
+        const sectionHtml = `
+    <div id="sentimentSection" style="margin-top: 30px; border-top: 1px solid #eef2f6; padding-top: 25px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h4 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 20px;">📡</span> AI 情感雷达 (Sentiment Radar)
+            </h4>
+            <button class="btn btn-sm btn-outline" onclick="fetchSentiment(${projectId})">🔄 重新分析</button>
+        </div>
+        
+        <div id="sentimentLoading" style="display:none; text-align: center; padding: 40px; color: #64748b;">
+            <div class="loading-spinner" style="margin: 0 auto 10px;"></div>
+            正在深度扫描项目日志与风险记录...
+        </div>
+        
+        <div id="sentimentResult" class="sentiment-container" style="display: none;">
+            <div class="sentiment-chart-box">
+                <div id="sentimentRadarChart" style="width: 100%; height: 320px;"></div>
             </div>
-            
-            <div id="sentimentLoading" style="display:none; text-align: center; padding: 40px; color: #64748b;">
-                <div class="loading-spinner" style="margin: 0 auto 10px;"></div>
-                正在深度扫描项目日志与风险记录...
-            </div>
-            
-            <div id="sentimentResult" class="sentiment-container" style="display: none;">
-                <div class="sentiment-chart-box">
-                    <div id="sentimentRadarChart" style="width: 100%; height: 320px;"></div>
-                </div>
-                <div id="sentimentInsights" class="sentiment-info-box">
-                    <!-- Insights will be injected here -->
-                </div>
+            <div id="sentimentInsights" class="sentiment-info-box">
+                <!-- Insights will be injected here -->
             </div>
         </div>
-    `;
-    container.insertAdjacentHTML('beforeend', sectionHtml);
+    </div>
+`;
+        container.insertAdjacentHTML('beforeend', sectionHtml);
+    }
 
     // 自动加载一次
     fetchSentiment(projectId);
 }
 
 async function fetchSentiment(projectId) {
-    document.getElementById('sentimentLoading').style.display = 'block';
-    document.getElementById('sentimentResult').innerHTML = '';
+    const loadingEl = document.getElementById('sentimentLoading');
+    const resultEl = document.getElementById('sentimentResult');
+    const insightsEl = document.getElementById('sentimentInsights');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (insightsEl) insightsEl.innerHTML = '';
 
     try {
         const res = await api.post(`/projects/${projectId}/sentiment-analysis`);
-        document.getElementById('sentimentLoading').style.display = 'none';
-        document.getElementById('sentimentResult').style.display = 'flex';
-
-        if (res && res.scores) {
-            renderSentimentRadar(res);
-            renderSentimentInsights(res);
-        } else {
-            document.getElementById('sentimentResult').innerHTML = '<p class="text-danger">分析失败</p>';
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (resultEl) {
+            resultEl.style.display = 'flex';
+            if (res && res.scores) {
+                renderSentimentRadar(res);
+                renderSentimentInsights(res);
+            } else {
+                resultEl.innerHTML = '<p class="text-danger">分析失败</p>';
+            }
         }
     } catch (e) {
-        document.getElementById('sentimentLoading').style.display = 'none';
-        document.getElementById('sentimentResult').innerHTML = `<p class="text-danger">Error: ${e.message}</p>`;
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (resultEl) {
+            resultEl.style.display = 'flex';
+            resultEl.innerHTML = `<p class="text-danger">Error: ${e.message}</p>`;
+        }
     }
 }
 
 function renderSentimentRadar(data) {
     const chartDom = document.getElementById('sentimentRadarChart');
     if (!chartDom) return;
+
+    // 销毁旧实例防止冲突
+    const existing = echarts.getInstanceByDom(chartDom);
+    if (existing) existing.dispose();
+
     const myChart = echarts.init(chartDom);
 
-    // safe get
-    const scores = data.scores || data; // 兼容不同结构
+    const scores = data.scores || data;
 
     const option = {
         radar: {
@@ -5964,46 +6104,27 @@ function renderSentimentRadar(data) {
                 { name: '技术稳定性', max: 10 },
                 { name: '进度信心', max: 10 }
             ],
-            splitArea: {
-                areaStyle: {
-                    color: ['#f8fafc', '#fff']
-                }
-            },
-            axisLine: {
-                lineStyle: {
-                    color: '#e2e8f0'
-                }
-            },
-            splitLine: {
-                lineStyle: {
-                    color: '#e2e8f0'
-                }
-            }
+            splitArea: { areaStyle: { color: ['#f8fafc', '#fff'] } },
+            axisLine: { lineStyle: { color: '#e2e8f0' } },
+            splitLine: { lineStyle: { color: '#e2e8f0' } }
         },
         series: [{
             name: 'Sentiment Score',
             type: 'radar',
-            data: [
-                {
-                    value: [scores.client || 0, scores.team || 0, scores.tech || 0, scores.progress || 0],
-                    name: '当前状态',
-                    areaStyle: {
-                        color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
-                            { color: 'rgba(99, 102, 241, 0.1)', offset: 0 },
-                            { color: 'rgba(99, 102, 241, 0.4)', offset: 1 }
-                        ])
-                    },
-                    lineStyle: {
-                        color: '#6366f1',
-                        width: 2
-                    },
-                    symbol: 'circle',
-                    symbolSize: 6,
-                    itemStyle: {
-                        color: '#6366f1'
-                    }
-                }
-            ]
+            data: [{
+                value: [scores.client || 0, scores.team || 0, scores.tech || 0, scores.progress || 0],
+                name: '当前状态',
+                areaStyle: {
+                    color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
+                        { color: 'rgba(99, 102, 241, 0.1)', offset: 0 },
+                        { color: 'rgba(99, 102, 241, 0.4)', offset: 1 }
+                    ])
+                },
+                lineStyle: { color: '#6366f1', width: 2 },
+                symbol: 'circle',
+                symbolSize: 6,
+                itemStyle: { color: '#6366f1' }
+            }]
         }]
     };
     myChart.setOption(option);
@@ -6011,46 +6132,168 @@ function renderSentimentRadar(data) {
 
 function renderSentimentInsights(data) {
     const container = document.getElementById('sentimentInsights');
+    if (!container) return;
     const signals = data.signals || [];
     const severity = data.severity || 'Medium';
     const summary = data.summary || '暂无分析总结';
 
     const sevClass = `severity-${severity.toLowerCase()}`;
     const sevLabel = {
-        'Critical': '🔴 极高风险',
-        'High': '🟠 高风险',
-        'Medium': '🟡 中等风险',
-        'Low': '🟢 低风险'
+        'Critical': '🔴 极高风险', 'High': '🟠 高风险', 'Medium': '🟡 中等风险', 'Low': '🟢 低风险'
     }[severity] || severity;
 
-    let signalsHtml = '';
-    if (signals.length > 0) {
-        signalsHtml = `<div class="sentiment-signals-grid">`;
-        signals.forEach(s => {
-            signalsHtml += `
-            <div class="sentiment-signal-card">
-                <span class="icon">⚠️</span>
-                <span>${s}</span>
-            </div>`;
-        });
-        signalsHtml += `</div>`;
-    } else {
-        signalsHtml = `<div class="sentiment-empty">✅ 未检测到明显负面信号</div>`;
-    }
+    let signalsHtml = signals.length > 0
+        ? `<div class="sentiment-signals-grid">${signals.map(s => `<div class="sentiment-signal-card"><span class="icon">⚠️</span><span>${s}</span></div>`).join('')}</div>`
+        : `<div class="sentiment-empty">✅ 未检测到明显负面信号</div>`;
 
     container.innerHTML = `
         <div class="sentiment-severity-row">
             <span class="severity-badge ${sevClass}">${sevLabel}</span>
             <span style="font-size: 13px; color: #64748b;">综合评价</span>
         </div>
-        <div class="sentiment-summary-box">
-            ${summary}
-        </div>
+        <div class="sentiment-summary-box">${summary}</div>
         <div style="margin-top: 10px;">
             <p style="font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 10px;">重点风险信号：</p>
             ${signalsHtml}
         </div>
     `;
+}
+
+// ========== 进度偏差分析逻辑 ==========
+async function loadDeviationAnalysis(projectId) {
+    const container = document.getElementById('deviationContainer');
+    if (!container) return;
+
+    if (!projectId || projectId === 'undefined' || projectId === 'null') {
+        container.innerHTML = '<div class="text-danger">❌ 无效项目 ID</div>';
+        return;
+    }
+
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div>正在分析历史进度快照...</div>';
+
+    try {
+        const res = await api.get(`/projects/${projectId}/deviation`);
+        if (renderDeviationCharts && typeof renderDeviationCharts === 'function') {
+            renderDeviationCharts(container, res);
+        } else {
+            // Simple fallback rendering if helper is missing
+            container.innerHTML = `<div style="padding:20px;">
+                <p>已获取到 ${res.snapshots?.length || 0} 个历史快照。</p>
+                <p>预测结论: ${res.prediction || '待多周数据对比'}</p>
+            </div>`;
+        }
+    } catch (e) {
+        container.innerHTML = `<div class="text-danger">偏差分析加载失败: ${e.message}</div>`;
+    }
+}
+
+async function captureSnapshot(projectId) {
+    if (!confirm('确定要拍摄当前的进度快照吗？这将被记录为手动快照。')) return;
+
+    try {
+        if (window.showToast) showToast('正在拍摄快照...', 2000);
+        await api.post(`/projects/${projectId}/snapshots`);
+        if (window.showToast) showToast('✅ 快照拍摄成功', 3000);
+        loadDeviationAnalysis(projectId);
+    } catch (e) {
+        alert('拍摄失败: ' + e.message);
+    }
+}
+
+async function generateDeviationReport(projectId) {
+    const reportEl = document.getElementById('deviationAiReport');
+    if (!reportEl) return;
+
+    reportEl.style.display = 'block';
+    reportEl.innerHTML = '<div class="ai-message assistant"><div class="typing-indicator"><span></span><span></span><span></span></div> AI 正在深度扫描历史快照数据并生成偏差诊断报告...</div>';
+
+    try {
+        const res = await api.post(`/projects/${projectId}/deviation/ai-report`);
+        const reportHtml = typeof marked !== 'undefined' ? marked.parse(res.ai_report || '无内容') : (res.ai_report || '');
+        reportEl.innerHTML = `
+            <div class="panel" style="background:#f8fafc; border-left:4px solid var(--primary);">
+                <div class="panel-body markdown-content">${reportHtml}</div>
+            </div>
+        `;
+    } catch (e) {
+        reportEl.innerHTML = `<div class="ai-message assistant text-danger">⚠️ 诊断报告生成失败: ${e.message}</div>`;
+    }
+}
+
+function renderDeviationCharts(container, res) {
+    if (!res || !res.has_data) {
+        container.innerHTML = `<div class="p-4 text-center text-muted">目前数据不足，请持续拍摄几周快照以获取趋势分析</div>`;
+        return;
+    }
+
+    const { snapshots, weekly_deltas, stage_deviations, stagnant_stages, prediction } = res;
+
+    let html = `
+        <div class="deviation-report-card">
+            <div class="report-header">
+                <span class="trend-icon">${res.avg_daily_rate > 0 ? '📈' : '⚠️'}</span>
+                <div>
+                    <h4>进度偏差实时分析</h4>
+                    <p>日均进度增长: <b style="color:var(--primary)">${res.avg_daily_rate}%</b> | 当前总进度: <b>${res.current_progress}%</b></p>
+                </div>
+            </div>
+            
+            <div class="prediction-banner">
+                <span class="icon">🔮</span>
+                <span>${prediction}</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-top:20px;">
+                <div class="deviation-sub-panel">
+                    <h5>🚨 停滞阶段 (${stagnant_stages.length})</h5>
+                    ${stagnant_stages.length > 0 ? `<div class="stagnant-list">${stagnant_stages.map(s => `<span>${s.stage_name}</span>`).join('')}</div>` : '<p class="text-success" style="font-size:12px;">✅ 所有活跃阶段均有进展</p>'}
+                </div>
+                <div class="deviation-sub-panel">
+                    <h5>📊 本周关键变化</h5>
+                    <div class="dev-item-grid">
+                        ${stage_deviations.slice(0, 4).map(s => `
+                            <div class="dev-item">
+                                <span class="label">${s.stage_name}</span>
+                                <span class="value ${s.delta > 0 ? 'text-success' : (s.delta < 0 ? 'text-danger' : '')}">${s.trend} ${s.delta}%</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+            
+            <div id="deviationTrendLineChart" style="height:200px; margin-top:20px;"></div>
+        </div>
+    `;
+    container.innerHTML = html;
+
+    // Render trend chart
+    const chartDom = document.getElementById('deviationTrendLineChart');
+    if (chartDom) {
+        // 销毁旧实例防止冲突
+        const existing = echarts.getInstanceByDom(chartDom);
+        if (existing) existing.dispose();
+
+        const myChart = echarts.init(chartDom);
+        const dates = snapshots.map(s => s.date);
+        const progresses = snapshots.map(s => s.overall_progress);
+
+        myChart.setOption({
+            grid: { top: 30, right: 30, bottom: 30, left: 40 },
+            xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#e2e8f0' } } },
+            yAxis: { type: 'value', max: 100, splitLine: { lineStyle: { type: 'dashed' } } },
+            series: [{
+                data: progresses,
+                type: 'line',
+                smooth: true,
+                areaStyle: { color: 'rgba(99, 102, 241, 0.1)' },
+                lineStyle: { color: '#6366f1', width: 3 },
+                symbol: 'circle',
+                symbolSize: 8,
+                itemStyle: { color: '#6366f1' }
+            }],
+            tooltip: { trigger: 'axis' }
+        });
+    }
 }
 
 // ========== AI 智能填报功能 ==========
@@ -7370,14 +7613,6 @@ window.toggleActionDropdown = function (event) {
         dropdown.classList.toggle('show');
     }
 };
-
-window.addEventListener('click', function (event) {
-    if (!event.target.closest('.action-dropdown')) {
-        document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
-            menu.classList.remove('show');
-        });
-    }
-});
 
 // Global click listener for 'More' dropdown auto-close
 document.addEventListener('click', function (e) {

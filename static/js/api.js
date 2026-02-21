@@ -16,6 +16,7 @@ class ApiClient {
         options.headers = { ...defaultHeaders, ...options.headers };
 
         try {
+            console.log(`[API] ${options.method || 'GET'} ${url}`, options.body ? 'with body' : '');
             const response = await fetch(url, options);
 
             // Check content type

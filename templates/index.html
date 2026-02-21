@@ -14,7 +14,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    <script src="/api/force_static/js/modules/interface-spec.js"></script>
+    <script src="/api/force_static/js/modules/interface-spec.js?v=3"></script>
     <style>
         :root {
             --primary: #4f46e5;
@@ -967,8 +967,9 @@
         /* ========== Toast ========== */
         .toast-container {
             position: fixed;
-            top: 24px;
-            right: 24px;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 9999;
             display: flex;
             flex-direction: column;
@@ -5234,6 +5235,61 @@
                             style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
                             <!-- 预览条目 -->
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 接口 AI 助手 (Premium Modal) -->
+        <div id="interfaceChatModal" class="modal">
+            <div class="modal-content modal-large"
+                style="height: 85vh; border-radius: 20px; border: none; overflow: hidden;">
+                <div class="modal-header"
+                    style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: white; border: none; padding: 20px 24px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div
+                            style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                            🤖</div>
+                        <div>
+                            <h3 style="margin:0; font-size: 18px; color: white;">接口 AI 助手</h3>
+                            <div style="font-size: 12px; opacity: 0.8;">基于当前文档的接口查询与生成</div>
+                        </div>
+                    </div>
+                    <button class="modal-close" onclick="closeModal('interfaceChatModal')"
+                        style="background: rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 20px;">&times;</button>
+                </div>
+                <div class="modal-body" style="background: #f8fafc; display: flex; flex-direction: column; padding: 0;">
+                    <div id="modalChatMessages" class="ai-chat-messages"
+                        style="flex: 1; padding: 24px; overflow-y: auto; background: #f8fafc; height: calc(85vh - 180px);">
+                        <div class="ai-message assistant">
+                            您好！我是您的接口 AI 特助。我已经加载了当前项目的接口规范。您可以问我：<br>
+                            • “<span style="color:var(--primary);cursor:pointer;"
+                                onclick="document.getElementById('modalChatInput').value='由于重症系统的入参要求，帮我生成一个创建手术申请的 JSON 请求体。';InterfaceSpec.sendChatMessage(true)">帮我生成一个创建手术申请的
+                                JSON 请求体</span>”<br>
+                            • “<span style="color:var(--primary);cursor:pointer;"
+                                onclick="document.getElementById('modalChatInput').value='帮我汇总一下当前已上传文档的所有接口列表。';InterfaceSpec.sendChatMessage(true)">汇总当前所有接口列表</span>”<br>
+                            • “<span style="color:var(--primary);cursor:pointer;"
+                                onclick="document.getElementById('modalChatInput').value='比较一下我方标准和对方在排班接口上的字段差异。';InterfaceSpec.sendChatMessage(true)">比较我方与对方接口差异</span>”
+                        </div>
+                    </div>
+                    <div style="padding: 20px; background: white; border-top: 1px solid #e2e8f0; flex-shrink: 0;">
+                        <div style="display: flex; gap: 12px; align-items: flex-end;">
+                            <textarea id="modalChatInput" placeholder="请输入您的问题..." rows="3"
+                                style="flex: 1; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; font-size: 14px; resize: none; transition: all 0.2s;"
+                                onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.1)'"
+                                onblur="this.style.borderColor='#e2e8f0'; this.style.boxShadow='none'"
+                                onkeydown="if(event.keyCode==13 && !event.shiftKey){event.preventDefault(); InterfaceSpec.sendChatMessage(true);}"></textarea>
+                            <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage(true)"
+                                style="height: 48px; padding: 0 24px; border-radius: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                                <span>发送</span>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                                </svg>
+                            </button>
+                        </div>
+                        <div style="margin-top: 8px; font-size: 12px; color: #94a3b8; text-align: center;">AI
+                            助手基于当前解析的结构化数据 provide 回答</div>
                     </div>
                 </div>
             </div>

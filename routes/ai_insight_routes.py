@@ -59,7 +59,9 @@ def generate_chaser():
 @ai_insight_bp.route('/api/projects/<int:project_id>/recommended-actions', methods=['GET'])
 def get_recommended_actions(project_id):
     """获取项目决策建议"""
-    actions = ai_insight_service.get_recommended_actions(project_id)
+    from flask import request
+    force_refresh = request.args.get('refresh') == '1'
+    actions = ai_insight_service.get_recommended_actions(project_id, force_refresh=force_refresh)
     return api_response(success=True, data=actions)
 
 @ai_insight_bp.route('/api/ai/knowledge/extract', methods=['POST'])
