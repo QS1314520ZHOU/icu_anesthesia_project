@@ -96,7 +96,8 @@ class AIConfigManager:
                 payload = {
                     "model": probe_model,
                     "messages": [{"role": "user", "content": "hi"}],
-                    "max_tokens": 5
+                    "max_tokens": 5,
+                    "stream": True # 使用流式探测
                 }
                 
                 start_time = time.time()
@@ -104,26 +105,28 @@ class AIConfigManager:
                     ep.base_url,
                     headers=headers,
                     data=json.dumps(payload),
-                    timeout=10 # 探测超时设短一点
+                    timeout=10, # 探测超时设短一点
+                    stream=True
                 )
                 duration = time.time() - start_time
 
-                if response.status_code == 200:
-                    # logger.info(f"端点 {ep.name} 自检通过 (耗时: {duration:.2f}s)")
+                # 判断自检是否通过：
+                # 1. 200 OK 是标配成功
+                # 2. 401 Unauthorized 虽然报错但证明鉴权逻辑已通，服务器存活
+                # 3. 405 Method Not Allowed 如果是 POST 探测返回 405，说明 URL 路径配置错误（比如多了或少了 /v1/chat/completions）
+                if response.status_code in [200, 401]:
+                    # logger.info(f"端点 {ep.name} 自检通过 (HTTP {response.status_code})")
                     self.mark_endpoint_success(ep)
+                elif response.status_code == 405:
+                    logger.warning(f"端点 {ep.name} 配置异常 (HTTP 405): 接口路径可能不正确。请检查 Base URL 是否正确包含了 /v1/chat/completions 或其他必要后缀。")
+                    self.mark_endpoint_error(ep)
                 else:
-                    logger.warning(f"端点 {ep.name} 自检失败 (HTTP {response.status_code})")
-                    # 自检失败不增加错误计数，只记录最后错误时间，避免后台检测导致正常使用的端点熔断
-                    # 只有实际业务调用失败才增加 error_count
-                    # ep.error_count += 1 
-                    # ep.last_error_time = time.time()
-                    # 但如果连自检都不过，可以在前端显示状态
-                    pass 
+                    error_body = response.text[:200]
+                    logger.warning(f"端点 {ep.name} 自检失败 (HTTP {response.status_code}): {error_body}")
+                    self.mark_endpoint_error(ep)
 
             except Exception as e:
                 logger.warning(f"端点 {ep.name} 连接自检异常: {str(e)}")
-                # ep.is_available = False # Don't disable immediately on health check fail
-                # ep.error_count += 1
                 ep.last_error_time = time.time()
     
     def _init_endpoints(self):

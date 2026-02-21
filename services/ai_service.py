@@ -45,20 +45,44 @@ class AIService:
                         endpoint.base_url, 
                         headers=headers, 
                         json=payload, 
-                        timeout=ai_manager.timeout
+                        timeout=ai_manager.timeout,
+                        stream=True
                     )
                     
                     if response.status_code == 200:
-                        result = response.json()
-                        content = result['choices'][0]['message']['content']
-                        ai_manager.mark_endpoint_success(endpoint)
-                        return content
+                        full_content = ""
+                        try:
+                            for line in response.iter_lines():
+                                if not line:
+                                    continue
+                                line_decode = line.decode('utf-8').strip()
+                                if line_decode.startswith('data: '):
+                                    data_str = line_decode[6:].strip()
+                                    if data_str == '[DONE]':
+                                        break
+                                    try:
+                                        data = json.loads(data_str)
+                                        content = data.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                                        if not content:
+                                            content = data.get('choices', [{}])[0].get('text', '')
+                                        full_content += content
+                                    except:
+                                        continue
+                            
+                            if full_content:
+                                ai_manager.mark_endpoint_success(endpoint)
+                                return full_content
+                            else:
+                                # Fallback if streaming returned nothing
+                                ai_manager.mark_endpoint_error(endpoint)
+                        except Exception as e:
+                            logger.error(f"解析流式响应异常: {str(e)}")
+                            ai_manager.mark_endpoint_error(endpoint)
                     else:
                         ai_manager.mark_endpoint_error(endpoint)
-                        # ... error handling logic ...
                 except Exception as e:
+                    logger.error(f"AI 调用异常 ({endpoint.name}): {str(e)}")
                     ai_manager.mark_endpoint_error(endpoint)
-                    # ... more error handling ...
         return None
 
     @staticmethod

@@ -38,19 +38,22 @@ def call_ai(prompt: str, task_type: str = 'analysis') -> str:
         
         # 尝试该端点的每一个模型
         for model in models:
-            logger.info(f"正在尝试调用 API: {endpoint.name} | 模型: {model}")
+            logger.info(f"正在尝试调用 API: {endpoint.name} | 模型: {model} | URL: {endpoint.base_url}")
             
             try:
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {endpoint.api_key}"
+                    "Authorization": f"Bearer {endpoint.api_key}",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/event-stream"
                 }
                 
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
-                    "max_tokens": 2000
+                    "max_tokens": 2000,
+                    "stream": True # 强制开启 Stream 以适配 notion 等极其挑剔的端点
                 }
 
                 # 发起请求
@@ -58,24 +61,55 @@ def call_ai(prompt: str, task_type: str = 'analysis') -> str:
                     endpoint.base_url,
                     headers=headers,
                     data=json.dumps(payload),
-                    timeout=ai_manager.timeout
+                    timeout=ai_manager.timeout,
+                    stream=True
                 )
 
                 if response.status_code == 200:
-                    result = response.json()
-                    content = result['choices'][0]['message']['content']
-                    
-                    # 标记成功
-                    ai_manager.mark_endpoint_success(endpoint)
-                    return content
+                    # 处理流式响应并聚合成完整文本
+                    full_content = ""
+                    try:
+                        for line in response.iter_lines():
+                            if not line:
+                                continue
+                            line_decode = line.decode('utf-8').strip()
+                            if line_decode.startswith('data: '):
+                                data_str = line_decode[6:].strip()
+                                if data_str == '[DONE]':
+                                    break
+                                try:
+                                    data = json.loads(data_str)
+                                    # OpenAI 格式：choices[0].delta.content
+                                    content = data.get('choices', [{}])[0].get('delta', {}).get('content', '')
+                                    # 某些 API 可能是 choices[0].text (如果是旧版)
+                                    if not content:
+                                        content = data.get('choices', [{}])[0].get('text', '')
+                                    full_content += content
+                                except:
+                                    continue
+                        
+                        if full_content:
+                            # 标记成功
+                            ai_manager.mark_endpoint_success(endpoint)
+                            return full_content
+                        else:
+                            # 如果流读完了但没内容，可能是不支持流或者格式不对
+                            logger.warning(f"端点 {endpoint.name} 流式读取完成但未获取到内容")
+                            # 尝试非流式兜底（通常不会走到这里，但作为安全措施）
+                    except Exception as e:
+                        logger.error(f"解析流式响应异常: {str(e)}")
+
                 else:
                     error_msg = f"API返回错误 {response.status_code}: {response.text}"
                     logger.warning(error_msg)
                     last_error = error_msg
                     
                     # 严重错误直接熔断该端点，不再尝试该端点的其他模型
-                    # 特别是 401/403 (Auth/Quota) 应该直接换供应商
-                    if response.status_code in [401, 403, 429, 503, 500, 502, 504]:
+                    # 特别是 401/403 (Auth/Quota) 或 405 (Path error) 应该直接换供应商
+                    if response.status_code in [401, 403, 405, 429, 503, 500, 502, 504]:
+                        if response.status_code == 405:
+                             logger.warning(f"端点 {endpoint.name} 返回 405 Method Not Allowed。这通常意味着 Base URL 配置错误（路径不对）。")
+
                         # 特殊处理 OneHub/NewAPI 的 503/404 错误，如果是模型不可用（one_hub_error），则只跳过该模型，不熔断端点
                         is_model_error = False
                         try:

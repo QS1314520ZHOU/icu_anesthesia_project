@@ -36,7 +36,10 @@ class OnboardingService:
 要求：
 - 语言精练、直击痛点。
 - 使用 Markdown 格式。
-- 充满欢迎感但保持专业。"""
+- 充满欢迎感但保持专业。
+- 严禁向用户提问或要求补充信息，请基于现有资料完成编写。
+- 不要出现“如果你有任何问题”之类的套话，直接输出手册正文。"""
+
 
                 context = f"项目名称: {project['project_name']} ({project['hospital_name']})\n"
                 context += f"当前进度: {project['progress']}%\n"

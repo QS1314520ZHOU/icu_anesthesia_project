@@ -796,6 +796,10 @@ def init_db():
         cursor.execute("ALTER TABLE interface_specs ADD COLUMN category TEXT")
     except:
         pass
+    try:
+        cursor.execute("ALTER TABLE interface_specs ADD COLUMN raw_text TEXT")
+    except:
+        pass
 
     # 32. 接口字段明细
     cursor.execute('''
@@ -1647,10 +1651,14 @@ def ai_task_suggestions(project_id):
 
 请按JSON格式返回分配建议：
 [
-  {{"task_id": 任务ID, "task_name": "任务名", "suggested_member": "建议分配人", "reason": "分配原因"}}
+  {{"task_id": 任务ID, "task_name": "任务名", "suggested_member": "建议分配人姓名", "reason": "分配原因"}}
 ]
 
-只返回JSON数组，不要其他说明文字。"""
+注意事项：
+1. "suggested_member" 必须精准匹配上述团队成员列表中的姓名。
+2. 只要返回一个合法的 JSON 数组，严禁附带任何 Markdown 代码块标签(如 ```json)或额外的解释文字。
+3. 如果没有任何建议，返回空数组 []。
+"""
         
         result = call_ai(prompt, task_type='analysis')
         
@@ -3558,12 +3566,15 @@ def test_ai_config(config_id):
         
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {config['api_key']}"
+            "Authorization": f"Bearer {config['api_key']}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/event-stream"
         }
         payload = {
             "model": test_model,
             "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 5
+            "max_tokens": 5,
+            "stream": True
         }
         
         start_time = time.time()
@@ -3571,7 +3582,8 @@ def test_ai_config(config_id):
             config['base_url'],
             headers=headers,
             data=json.dumps(payload),
-            timeout=15
+            timeout=15,
+            stream=True
         )
         duration = time.time() - start_time
         
@@ -3579,6 +3591,18 @@ def test_ai_config(config_id):
             return jsonify({
                 'success': True, 
                 'message': f'连接成功！响应时间: {duration:.2f}s',
+                'duration': round(duration, 2)
+            })
+        elif response.status_code == 401:
+             return jsonify({
+                'success': True, 
+                'message': f'连接存活，但 API Key 错误 (HTTP 401)。\n提示: 请检查该节点的 API 密钥是否有效。',
+                'duration': round(duration, 2)
+            })
+        elif response.status_code == 405:
+            return jsonify({
+                'success': True, 
+                'message': f'连接存活，但接口路径不对 (HTTP 405)。\n提示: 请检查项目的 Base URL。某些服务需要在 URL 后补全 /chat/completions',
                 'duration': round(duration, 2)
             })
         else:

@@ -20,9 +20,10 @@ async function exportProjectPDF(projectId) {
         reportContainer.id = 'pdf-report-container';
         reportContainer.style.position = 'absolute';
         reportContainer.style.top = '0';
-        reportContainer.style.left = '0';
-        reportContainer.style.zIndex = '-9999';
-        reportContainer.style.opacity = '0';  // Must be rendered by browser to be captured
+        reportContainer.style.left = '-9999px';
+        reportContainer.style.zIndex = '-1';
+        reportContainer.style.opacity = '1';  // Must be visible to be captured correctly by some browsers/engines
+
         reportContainer.style.width = '800px'; // A4 width approx
         reportContainer.style.background = 'white';
         reportContainer.style.color = '#333';

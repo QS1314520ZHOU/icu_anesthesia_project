@@ -380,7 +380,25 @@ async function showAiTaskSuggestions(projectId) {
         if (res.suggestions && res.suggestions.length > 0) {
             let html = '<div style="padding:20px;"><h2 style="margin-bottom:16px;">🎯 AI任务分配建议</h2>';
             for (const s of res.suggestions) {
-                html += `<div style="padding:12px;margin-bottom:8px;background:var(--gray-50);border-radius:8px;border-left:4px solid var(--primary);"><div style="font-weight:600;margin-bottom:4px;">📋 ${s.task_name || s.task_id}</div><div style="display:flex;gap:8px;align-items:center;"><span style="background:var(--primary);color:white;padding:2px 8px;border-radius:12px;font-size:12px;">👤 ${s.suggested_member}</span><span style="font-size:12px;color:var(--gray-500);">${s.reason || ''}</span></div></div>`;
+                // Determine membership tag style
+                const memberName = s.suggested_member || '未分配';
+                const memberTag = `<span class="badge badge-primary" style="padding:4px 10px; border-radius:100px; font-size:12px; font-weight:600; box-shadow:0 2px 4px rgba(107, 78, 230, 0.2);"><i class="fas fa-user" style="margin-right:4px;"></i>${memberName}</span>`;
+
+                html += `
+                <div style="padding:16px; margin-bottom:12px; background:white; border-radius:12px; border-left:4px solid #6B4EE6; box-shadow:0 1px 3px rgba(0,0,0,0.05); transition:transform 0.2s;" onmouseover="this.style.transform='translateX(4px)'" onmouseout="this.style.transform='translateX(0)'">
+                    <div style="font-weight:700; font-size:14px; color:#1e293b; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+                        <span style="background:#f1effd; color:#6B4EE6; width:24px; height:24px; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:12px;">📋</span>
+                        ${s.task_name || s.task_id}
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:10px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            ${memberTag}
+                        </div>
+                        <div style="font-size:13px; color:#64748b; line-height:1.5; background:#f8fafc; padding:8px 12px; border-radius:8px;">
+                            <span style="font-weight:600; color:#475569; margin-right:4px;">💡 建议理由:</span>${s.reason || '基于历史表现与当前负载'}
+                        </div>
+                    </div>
+                </div>`;
             }
             html += '</div>';
             contentEl.innerHTML = html;
@@ -689,10 +707,12 @@ async function toggleShare(projectId, enabled) {
             }
 
             if (enabled) {
-                alert('分享已开启！您现在可以复制链接发送给甲方。');
+                const url = `${window.location.origin}/share/${res.share_token}`;
+                alert('✅ 分享已开启！\n\n分享链接: ' + url + '\n\n您可以将此链接发送给甲方查看项目进度。');
             } else {
-                alert('已关闭公开分享。');
+                alert('🔒 已关闭公开分享。');
             }
+
         }
     } catch (e) {
         alert('操作失败: ' + e.message);
@@ -1280,6 +1300,11 @@ function renderProjectDetail(project) {
                                     <button class="menu-item" onclick="toggleShare(${project.id}, ${!project.share_enabled})">
                                         ${project.share_enabled ? '🔗 关闭分享' : '🔗 开启分享'}
                                     </button>
+                                    ${project.share_enabled ? `
+                                        <button class="menu-item" style="color:var(--primary); font-weight:600;" onclick="copyShareLink('${project.share_token}')">
+                                            📋 复制分享链接
+                                        </button>
+                                    ` : ''}
                                     
                                     <div class="menu-group-title">数据导出</div>
                                     <div class="menu-divider"></div>
@@ -1316,10 +1341,8 @@ function renderProjectDetail(project) {
                         <div class="overview-card-title">待解决问题</div>
                         <div class="overview-card-value" style="color:${pendingIssues > 0 ? 'var(--danger)' : 'var(--success)'}">${pendingIssues}</div>
                     </div>
-                    <div class="overview-card">
-                        <div class="overview-card-title">接口完成</div>
-                        <div class="overview-card-value">${completedInterfaces}/${totalInterfaces}</div>
-                    </div>
+
+
                     <div class="overview-card">
                         <div class="overview-card-title">驻场人员</div>
                         <div class="overview-card-value">${onSiteMembers}人</div>
@@ -1369,7 +1392,7 @@ function renderProjectDetail(project) {
                     <div class="tab" onclick="switchTab(this, 'stages')">📋 阶段</div>
                     <div class="tab" onclick="switchTab(this, 'milestones')">🎯 里程碑</div>
                     <div class="tab" onclick="switchTab(this, 'team')">👥 团队</div>
-                    <div class="tab" onclick="switchTab(this, 'interfaces')">🔗 接口</div>
+
                     <div class="tab" onclick="switchTab(this, 'flow')">🎨 流设计器</div>
                     <div class="tab" onclick="switchTab(this, 'devices')">📡 设备</div>
                     <div class="tab" onclick="switchTab(this, 'issues')">⚠️ 问题</div>
@@ -1384,7 +1407,7 @@ function renderProjectDetail(project) {
                     <div class="tab" onclick="switchTab(this, 'dependencies'); loadDependencies(${project.id})">🔗 依赖</div>
                     <div class="tab" onclick="switchTab(this, 'standup'); loadStandupData(${project.id})">📋 站会</div>
                     <div class="tab" onclick="switchTab(this, 'deviation'); loadDeviationAnalysis(${project.id})">📊 偏差</div>
-                    <div class="tab" onclick="switchTab(this, 'interfaceSpec'); InterfaceSpec.renderTab(currentProjectId)">📑 接口对照</div>
+                    <div class="tab" onclick="switchTab(this, 'interfaceSpec'); InterfaceSpec.renderTab(currentProjectId)" style="position:relative;">📑 智能对照 <span style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:white; font-size:10px; padding:1px 4px; border-radius:4px; transform:scale(0.8);">NEW</span></div>
                     <div class="tab" onclick="switchTab(this, 'financials'); loadProjectFinancials(${project.id})">💰 财务看板</div>
                 </div>
 
@@ -2021,6 +2044,9 @@ function renderInterfaces(interfaces) {
     if (!interfaces || interfaces.length === 0) return '<div class="empty-state"><p>暂无接口数据</p></div>';
     const statusMap = { '待开发': 'badge-gray', '开发中': 'badge-info', '联调中': 'badge-warning', '已完成': 'badge-success' };
     return `
+                <div style="background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:8px 16px; border-radius:8px; margin-bottom:12px; font-size:13px; display:flex; align-items:center; gap:8px;">
+                    <i class="fas fa-info-circle"></i> 此处仅用于手工记录接口开发状态，详细文档对照请前往 <b>📑 智能对照</b> 模块（右侧 V2.0 版）。
+                </div>
                 <div class="table-container">
                     <table class="table">
                         <thead><tr><th>系统</th><th>接口名称</th><th>状态</th><th>操作</th></tr></thead>
@@ -5156,14 +5182,26 @@ async function switchReminderTab(type) {
             return;
         }
 
-        container.innerHTML = items.map(item => `
-            <div class="reminder-item ${type === 'overdue' ? 'danger' : type === 'upcoming' ? 'warning' : 'info'}">
-                <div class="reminder-content">
-                    <div class="reminder-title">${item.name || item.project_name || item.description || '未命名'}</div>
-                    <div class="reminder-desc">${item.project_name ? `项目: ${item.project_name}` : ''} ${item.days_overdue ? `逾期 ${item.days_overdue} 天` : ''} ${item.days_until ? `${item.days_until} 天后到期` : ''}</div>
+        container.innerHTML = items.map(item => {
+            const daysOverdue = item.days_overdue || item.days_pending;
+            const daysUntil = item.days_until || item.days_remaining;
+            const title = item.name || item.project_name || item.description || '未命名项目';
+
+            return `
+                <div class="reminder-item ${type === 'overdue' ? 'danger' : type === 'upcoming' ? 'warning' : 'info'}">
+                    <div class="reminder-content">
+                        <div class="reminder-title">${title}</div>
+                        <div class="reminder-desc">
+                            ${item.project_name && item.project_name !== title ? `项目: ${item.project_name} | ` : ''} 
+                            ${daysOverdue ? `超期 ${daysOverdue} 天` : ''} 
+                            ${daysUntil !== undefined ? `${daysUntil} 天后到期` : ''}
+                            ${item.severity ? `<span class="badge ${item.severity === '高' ? 'badge-danger' : 'badge-warning'}">${item.severity}</span>` : ''}
+                        </div>
+                    </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
+
     } catch (e) {
         container.innerHTML = '<div style="color:#ef4444; text-align:center;">加载失败</div>';
     }

@@ -303,8 +303,12 @@ class AIInsightService:
                 
                 for i in issues:
                     try:
-                        created_at = datetime.strptime(i['created_at'], '%Y-%m-%d %H:%M:%S')
+                        # Handle potential space in TIMESTAMP or just DATE
+                        created_at_str = i['created_at'].split(' ')[0] if i['created_at'] else ""
+                        if not created_at_str: continue
+                        created_at = datetime.strptime(created_at_str, '%Y-%m-%d')
                         if created_at < seven_days_ago:
+
                             item = dict(i)
                             item['title'] = f"[{i['severity']}] {i['description'][:20]}..."
                             item['reason'] = f"创建于 {i['created_at']}，已超过7天未解决"
@@ -821,7 +825,12 @@ class AIInsightService:
             # 1. 获取项目基本快照
             with DatabasePool.get_connection() as conn:
                 project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-                tasks = conn.execute('SELECT * FROM tasks WHERE project_id = ? AND is_completed = 0', (project_id,)).fetchall()
+                tasks = conn.execute('''
+                    SELECT t.* FROM tasks t
+                    JOIN project_stages s ON t.stage_id = s.id
+                    WHERE s.project_id = ? AND t.is_completed = 0
+                ''', (project_id,)).fetchall()
+
                 milestones = conn.execute('SELECT * FROM milestones WHERE project_id = ? AND is_completed = 0', (project_id,)).fetchall()
 
             # 2. 调用 AI 进行多维评估

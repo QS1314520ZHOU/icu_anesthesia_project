@@ -105,9 +105,9 @@ class InterfaceParserService:
         """用 AI 解析单段文档"""
         source_label = '我方标准' if spec_source == 'our_standard' else f'对方厂商({vendor_name or "未知"})'
 
-        system_prompt = """你是一名资深医疗信息化系统集成工程师，专精于 HIS/LIS/PACS/ICU/手术麻醉 系统接口对接。
+        system_prompt = """你是一名资深医疗信息化系统集成工程师，专精于 HIS/LIS/PACS/ICU/手术麻醉 系统接口对接（支持 WebService, HL7, RESTful, 数据库视图, 存储过程等）。
 
-任务：从接口文档片段中精确提取每个接口的结构化定义。
+任务：从接口文档片段中精确提取每个接口的结构化定义。无论文档描述的是 JSON、XML、HL7 还是其他私有协议，请统一提取其业务字段并转换为以下格式。
 
 严格按以下 JSON 格式输出，不要添加多余文字，直接输出 JSON 数组：
 
@@ -115,27 +115,27 @@ class InterfaceParserService:
 [
   {
     "interface_name": "接口中文名称",
-    "transcode": "交易码或action名（如 VI_ICU_ZYBR）",
-    "system_type": "HIS/LIS/PACS/EMR/手麻",
+    "transcode": "核心标识（如交易码、Action名、HL7消息类型、视图名等）",
+    "system_type": "HIS/LIS/PACS/EMR/手麻/第三方",
     "protocol": "WebService/HL7/RESTful/View/存储过程",
-    "description": "接口功能一句话描述",
-    "endpoint_url": "WebService地址（如有）",
-    "action_name": "action服务名（如有）",
-    "view_name": "数据库视图名（如有，如 SSMZ.V_SSMZ_YPZD）",
+    "description": "接口描述",
+    "endpoint_url": "访问地址（如有）",
+    "action_name": "服务名/方法名（如有）",
+    "view_name": "数据库视图/表名（如有）",
     "data_direction": "pull/push/writeback",
-    "request_sample": "入参XML样例前200字符（如有）",
-    "response_sample": "出参XML样例前200字符（如有）",
+    "request_sample": "入参样例（如有，前2000字符）",
+    "response_sample": "出参样例（如有，前2000字符）",
     "fields": [
       {
-        "field_name": "英文字段名",
+        "field_name": "英文字段名（若文档只有中文则使用拼音或英文翻译）",
         "field_name_cn": "中文字段名",
-        "field_type": "varchar/dateTime/int/float/C/N/D",
-        "field_length": "长度（如20、100）",
+        "field_type": "数据类型（varchar/int/dateTime/float/C/N/D等）",
+        "field_length": "长度（如有）",
         "is_required": true或false,
         "is_primary_key": true或false,
-        "description": "字段说明",
-        "remark": "备注（包括枚举值、格式要求等）",
-        "sample_value": "示例值（如有）"
+        "description": "说明",
+        "remark": "备注（含枚举值、日期格式如yyyy-MM-dd等）",
+        "sample_value": "示例值"
       }
     ]
   }
@@ -143,12 +143,11 @@ class InterfaceParserService:
 ```
 
 要求：
-1. 每个独立接口提取为一个对象，不要遗漏
-2. 必填性要准确：标注"必填"、"非空"、红色字体的字段 is_required=true
-3. 主键字段标注 is_primary_key=true
-4. 日期格式说明保留在 remark 中（如 yyyy-MM-dd HH:mm:ss）
-5. 字段的枚举值/状态码放在 remark 中
-6. 如果文档片段中没有完整的接口定义，返回空数组 []"""
+1. 精确提取：识别所有接口段落，不要遗漏。
+2. 跨协议识别：即使是 XML 或 HL7 节点，也请映射到 `field_name` 和 `field_name_cn`。
+3. 必填项判定：关键字“必填”、“非空”、“强制”或加粗/红色标注。
+4. **特别要求**：如果接口包含 XML 或 JSON 样例（request_sample/response_sample），请务必对样例内容进行转义（如换行符使用 \\n，引号使用 \\"），确保整个返回结果是一个合法的 JSON 字符串。
+5. 若文档片段无接口定义，返回空数组 []。"""
 
         user_content = f"""文档来源: {source_label}
 ---文档内容--- {chunk} ---文档结束---
@@ -158,15 +157,48 @@ class InterfaceParserService:
         result = ai_service.call_ai_api(system_prompt, user_content, task_type="code")
 
         if result:
-            # 从 AI 响应中提取 JSON
+            # 1. 提取最外层的 JSON 数组
             json_match = re.search(r'\[[\s\S]*\]', result)
             if json_match:
+                json_str = json_match.group()
+                
+                # 尝试解析
                 try:
-                    parsed = json.loads(json_match.group())
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    logger.warning("首轮解析失败，开始深度修复...")
+                    
+                # 2. 深度修复：处理 AI 常见的未转义换行符和引号问题
+                # 处理样例字段中的未转义换行
+                def fix_unescaped_newlines(match):
+                    key = match.group(1)
+                    val = match.group(2)
+                    # 将值中的字面换行替换为 \n
+                    fixed_val = val.replace('\n', '\\n').replace('\r', '\\r')
+                    return f'"{key}": "{fixed_val}"'
+
+                # 针对常见的样例字段进行正则修复
+                sample_keys = ['request_sample', 'response_sample', 'description', 'remark']
+                pattern = f'"({"|".join(sample_keys)})"\s*:\s*"([\s\S]*?)"(?=\s*[,}}])'
+                
+                fixed_json = re.sub(pattern, fix_unescaped_newlines, json_str)
+                
+                # 3. 补齐截断的 JSON
+                if fixed_json.count('[') > fixed_json.count(']'):
+                    last_obj_end = fixed_json.rfind('}')
+                    if last_obj_end != -1:
+                        fixed_json = fixed_json[:last_obj_end+1] + ']'
+                
+                # 4. 移除尾随逗号
+                fixed_json = re.sub(r',\s*\]', ']', fixed_json)
+                fixed_json = re.sub(r',\s*}', '}', fixed_json)
+
+                try:
+                    parsed = json.loads(fixed_json)
                     if isinstance(parsed, list):
                         return parsed
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON解析失败: {e}")
+                except Exception as e:
+                    logger.error(f"深度修复依然失败: {e}\n原始内容片段: {result[:500]}...")
         return []
 
     def save_parsed_specs(self, project_id, doc_id, parsed_interfaces: list,

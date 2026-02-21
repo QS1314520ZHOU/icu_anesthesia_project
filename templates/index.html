@@ -2540,110 +2540,6 @@
         }
     </style>
 </head>
-<!-- 接口文档上传解析弹窗 -->
-<div id="specUploadModal" class="modal">
-    <div class="modal-content modal-large">
-        <div class="modal-header">
-            <h3 id="specUploadTitle">上传接口文档</h3>
-            <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>选择文件（PDF / Word / TXT / XML / JSON）</label>
-                <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl"
-                    onchange="InterfaceSpec.handleFileSelect()" style="width:100%;">
-            </div>
-            <div class="form-group" id="specCategoryGroup">
-                <label>分类</label>
-                <select id="specCategory" class="form-control">
-                    <option value="手麻标准">手麻标准</option>
-                    <option value="重症标准">重症标准</option>
-                    <option value="接口文档">接口文档</option>
-                </select>
-            </div>
-            <div class="form-group" id="specVendorNameGroup" style="display:none;">
-                <label>厂家/系统名称</label>
-                <input type="text" id="specVendorName" class="form-control" placeholder="如：东华HIS、卫宁LIS...">
-            </div>
-            <div class="form-group">
-                <label>文档内容（粘贴或由上方文件自动提取）</label>
-                <textarea id="specDocText" class="form-control" rows="12" placeholder="将接口文档内容粘贴到此处..."></textarea>
-            </div>
-            <div id="specParseResult" style="display:none;"></div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
-            <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
-        </div>
-    </div>
-</div>
-
-<!-- 字段对照详情弹窗 -->
-<div id="fieldDetailModal" class="modal">
-    <div class="modal-content modal-xl">
-        <div class="modal-header">
-            <h3>字段级对照详情</h3>
-            <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
-        </div>
-        <div class="modal-body" id="fieldDetailBody">
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
-        </div>
-    </div>
-</div>
-<!-- 接口文档上传解析弹窗 -->
-<div id="specUploadModal" class="modal">
-    <div class="modal-content modal-large">
-        <div class="modal-header">
-            <h3 id="specUploadTitle">上传接口文档</h3>
-            <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>选择文件（PDF / Word / TXT / XML / JSON）</label>
-                <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl"
-                    onchange="InterfaceSpec.handleFileSelect()" style="width:100%;">
-            </div>
-            <div class="form-group" id="specCategoryGroup">
-                <label>分类</label>
-                <select id="specCategory" class="form-control">
-                    <option value="手麻标准">手麻标准</option>
-                    <option value="重症标准">重症标准</option>
-                    <option value="接口文档">接口文档</option>
-                </select>
-            </div>
-            <div class="form-group" id="specVendorNameGroup" style="display:none;">
-                <label>厂家/系统名称</label>
-                <input type="text" id="specVendorName" class="form-control" placeholder="如：东华HIS、卫宁LIS...">
-            </div>
-            <div class="form-group">
-                <label>文档内容（粘贴或由上方文件自动提取）</label>
-                <textarea id="specDocText" class="form-control" rows="12" placeholder="将接口文档内容粘贴到此处..."></textarea>
-            </div>
-            <div id="specParseResult" style="display:none;"></div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
-            <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
-        </div>
-    </div>
-</div>
-
-<!-- 字段对照详情弹窗 -->
-<div id="fieldDetailModal" class="modal">
-    <div class="modal-content modal-xl">
-        <div class="modal-header">
-            <h3>字段级对照详情</h3>
-            <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
-        </div>
-        <div class="modal-body" id="fieldDetailBody">
-        </div>
-        <div class="modal-footer">
-            <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
-        </div>
-    </div>
-</div>
 
 <body>
     <!-- Header -->
@@ -4463,62 +4359,8 @@
         </div>
     </div>
 
-    <!-- 接口文档上传解析弹窗 -->
-    <div class="modal" id="specUploadModal">
-        <div class="modal-content modal-large">
-            <div class="modal-header">
-                <h3 id="specUploadTitle">上传接口文档</h3>
-                <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group" id="specCategoryGroup" style="display:none;">
-                    <label>文档分类</label>
-                    <select id="specCategory">
-                        <option value="手麻标准">🏥 手麻标准</option>
-                        <option value="重症标准">🧪 重症标准</option>
-                        <option value="接口文档">📄 接口文档</option>
-                        <option value="其他">📁 其他</option>
-                    </select>
-                </div>
-                <div class="form-group" id="specVendorNameGroup" style="display:none;">
-                    <label>对方厂商名称</label>
-                    <input type="text" id="specVendorName" placeholder="如：卫宁健康、东软、创业慧康...">
-                </div>
-                <div class="form-group">
-                    <label>选择文件（PDF/Word/TXT）</label>
-                    <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt"
-                        onchange="InterfaceSpec.handleFileSelect()">
-                </div>
-                <div class="form-group">
-                    <label>文档内容（可直接粘贴）</label>
-                    <textarea id="specDocText" rows="12"
-                        placeholder="将接口文档内容粘贴到此处，或通过上方文件选择器上传文件自动提取...&#10;&#10;支持格式：PDF、Word、纯文本&#10;AI 将自动识别并结构化提取所有接口定义、字段、类型、必填项等信息。"
-                        style="font-family:monospace;font-size:13px;"></textarea>
-                </div>
-                <div id="specParseResult" style="display:none;margin-top:16px;"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
-                <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
-            </div>
-        </div>
-    </div>
 
-    <!-- 字段对照详情弹窗 -->
-    <div class="modal" id="fieldDetailModal">
-        <div class="modal-content modal-xl">
-            <div class="modal-header">
-                <h3>📋 字段对照详情</h3>
-                <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
-            </div>
-            <div class="modal-body" id="fieldDetailBody">
-                <div style="text-align:center;padding:40px;color:var(--gray-500);">加载中...</div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
-            </div>
-        </div>
-    </div>
+
 
     <!-- 沟通记录模态框 -->
     <div class="modal" id="communicationModal">
@@ -5246,159 +5088,220 @@
                 </div>
             </div>
         </div>
-        <!-- 风险链推演 (蝴蝶效应) 弹窗 -->
-        <div id="riskSimulationModal" class="modal">
-            <div class="modal-content modal-lg">
-                <div class="modal-header">
-                    <h3>🦋 风险链推演 (延迟仿真)</h3>
-                    <button class="modal-close" onclick="closeModal('riskSimulationModal')">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div class="simulation-input"
-                        style="display:flex; gap:12px; align-items:center; margin-bottom:20px; background:#f8fafc; padding:16px; border-radius:12px;">
-                        <div>拟模拟任务: <b id="simTaskName">加载中...</b></div>
-                        <div style="flex:1;">假设延期:
-                            <input type="number" id="simDelayDays" value="3" min="1" max="99"
-                                style="width:60px; padding:4px 8px; border:1px solid #cbd5e1; border-radius:6px;"> 天
-                        </div>
-                        <button class="btn btn-primary btn-sm" onclick="runRiskSimulation()">开始推演</button>
+    </div>
+    <!-- 风险链推演 (蝴蝶效应) 弹窗 -->
+    <div id="riskSimulationModal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>🦋 风险链推演 (延迟仿真)</h3>
+                <button class="modal-close" onclick="closeModal('riskSimulationModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="simulation-input"
+                    style="display:flex; gap:12px; align-items:center; margin-bottom:20px; background:#f8fafc; padding:16px; border-radius:12px;">
+                    <div>拟模拟任务: <b id="simTaskName">加载中...</b></div>
+                    <div style="flex:1;">假设延期:
+                        <input type="number" id="simDelayDays" value="3" min="1" max="99"
+                            style="width:60px; padding:4px 8px; border:1px solid #cbd5e1; border-radius:6px;"> 天
                     </div>
+                    <button class="btn btn-primary btn-sm" onclick="runRiskSimulation()">开始推演</button>
+                </div>
 
-                    <div id="simulationResult" style="display:none;">
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
-                            <div class="impact-list-panel">
-                                <h4 style="font-size:14px; color:#64748b; margin-bottom:12px;">受波及的下游任务 (Top 10)</h4>
-                                <div id="impactedTasksList"
-                                    style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px;">
-                                    <!-- 填充列表 -->
-                                </div>
-                            </div>
-                            <div class="ai-narration-panel">
-                                <h4 style="font-size:14px; color:#64748b; margin-bottom:12px;">蝴蝶效应深度分析 (AI)</h4>
-                                <div id="simulationNarration" class="markdown-content"
-                                    style="background:#fff7ed; padding:16px; border-radius:8px; border:1px solid #ffedd5; font-size:13px; line-height:1.6;">
-                                    正在推演逻辑影响...
-                                </div>
+                <div id="simulationResult" style="display:none;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                        <div class="impact-list-panel">
+                            <h4 style="font-size:14px; color:#64748b; margin-bottom:12px;">受波及的下游任务 (Top 10)</h4>
+                            <div id="impactedTasksList"
+                                style="max-height:300px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px;">
+                                <!-- 填充列表 -->
                             </div>
                         </div>
+                        <div class="ai-narration-panel">
+                            <h4 style="font-size:14px; color:#64748b; margin-bottom:12px;">蝴蝶效应深度分析 (AI)</h4>
+                            <div id="simulationNarration" class="markdown-content"
+                                style="background:#fff7ed; padding:16px; border-radius:8px; border:1px solid #ffedd5; font-size:13px; line-height:1.6;">
+                                正在推演逻辑影响...
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- 项目快照 (新人入门) 弹窗 -->
-        <div id="projectSnapshotModal" class="modal">
-            <div class="modal-content modal-lg">
-                <div class="modal-header">
-                    <h3>📸 项目极简快照 (新人手册)</h3>
-                    <button class="modal-close" onclick="closeModal('projectSnapshotModal')">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div id="snapshotContent" class="markdown-content"
-                        style="background:#f8fafc; padding:24px; border-radius:12px; border:1px solid #e2e8f0; line-height:1.7;">
-                        正在调取 AI 汇总项目概况...
-                    </div>
+    <!-- 项目快照 (新人入门) 弹窗 -->
+    <div id="projectSnapshotModal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>📸 项目极简快照 (新人手册)</h3>
+                <button class="modal-close" onclick="closeModal('projectSnapshotModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="snapshotContent" class="markdown-content"
+                    style="background:#f8fafc; padding:24px; border-radius:12px; border:1px solid #e2e8f0; line-height:1.7;">
+                    正在调取 AI 汇总项目概况...
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- 会议助理 (纪要提取) 弹窗 -->
-        <div id="meetingAssistantModal" class="modal">
-            <div class="modal-content modal-lg">
-                <div class="modal-header">
-                    <h3>🎙️ AI 会议助理 (纪要与行动提取)</h3>
-                    <button class="modal-close" onclick="closeModal('meetingAssistantModal')">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <textarea id="meetingTranscript" placeholder="粘贴会议转写文本或速记内容..."
-                        style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
-                    <button class="btn btn-primary" onclick="extractMeetingActions()">提取纪要与待办</button>
-                    <div id="meetingResult" class="markdown-content"
-                        style="margin-top:20px; display:none; background:#f0f9ff; padding:20px; border-radius:12px; border:1px solid #bae6fd;">
-                        <!-- 结果填充 -->
-                    </div>
+    <!-- 会议助理 (纪要提取) 弹窗 -->
+    <div id="meetingAssistantModal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>🎙️ AI 会议助理 (纪要与行动提取)</h3>
+                <button class="modal-close" onclick="closeModal('meetingAssistantModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="meetingTranscript" placeholder="粘贴会议转写文本或速记内容..."
+                    style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
+                <button class="btn btn-primary" onclick="extractMeetingActions()">提取纪要与待办</button>
+                <div id="meetingResult" class="markdown-content"
+                    style="margin-top:20px; display:none; background:#f0f9ff; padding:20px; border-radius:12px; border:1px solid #bae6fd;">
+                    <!-- 结果填充 -->
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- 批量补录 (Chat/Git 导入) 弹窗 -->
-        <div id="multiLogImportModal" class="modal">
-            <div class="modal-content modal-lg">
-                <div class="modal-header">
-                    <h3>📝 批量智能补录 (Git/Chat 导入)</h3>
-                    <button class="modal-close" onclick="closeModal('multiLogImportModal')">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div style="margin-bottom:12px; font-size:13px; color:#64748b;">粘贴一段聊天记录或 Git Log，AI
-                        将自动拆分为多条日报并填充到列表。</div>
-                    <textarea id="multiLogSource" placeholder="粘贴一段长文本..."
-                        style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
-                    <button class="btn btn-primary" onclick="parseMultiLogs()">智能拆解并导入</button>
-                    <div id="multiLogPreview" style="margin-top:20px; display:none;">
-                        <h4 style="font-size:14px; margin-bottom:12px;">提取到的条目 (预览)</h4>
-                        <div id="multiLogItems"
-                            style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
-                            <!-- 预览条目 -->
-                        </div>
+    <!-- 批量补录 (Chat/Git 导入) 弹窗 -->
+    <div id="multiLogImportModal" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>📝 批量智能补录 (Git/Chat 导入)</h3>
+                <button class="modal-close" onclick="closeModal('multiLogImportModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom:12px; font-size:13px; color:#64748b;">粘贴一段聊天记录或 Git Log，AI
+                    将自动拆分为多条日报并填充到列表。</div>
+                <textarea id="multiLogSource" placeholder="粘贴一段长文本..."
+                    style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
+                <button class="btn btn-primary" onclick="parseMultiLogs()">智能拆解并导入</button>
+                <div id="multiLogPreview" style="margin-top:20px; display:none;">
+                    <h4 style="font-size:14px; margin-bottom:12px;">提取到的条目 (预览)</h4>
+                    <div id="multiLogItems"
+                        style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
+                        <!-- 预览条目 -->
                     </div>
                 </div>
             </div>
         </div>
-        <!-- 接口 AI 助手 (Premium Modal) -->
-        <div id="interfaceChatModal" class="modal">
-            <div class="modal-content modal-large"
-                style="height: 85vh; border-radius: 20px; border: none; overflow: hidden;">
-                <div class="modal-header"
-                    style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: white; border: none; padding: 20px 24px;">
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <div
-                            style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px;">
-                            🤖</div>
-                        <div>
-                            <h3 style="margin:0; font-size: 18px; color: white;">接口 AI 助手</h3>
-                            <div style="font-size: 12px; opacity: 0.8;">基于当前文档的接口查询与生成</div>
-                        </div>
+    </div>
+    <!-- 接口 AI 助手 (Premium Modal) -->
+    <div id="interfaceChatModal" class="modal">
+        <div class="modal-content modal-large"
+            style="height: 85vh; border-radius: 20px; border: none; overflow: hidden;">
+            <div class="modal-header"
+                style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); color: white; border: none; padding: 20px 24px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div
+                        style="width: 40px; height: 40px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px;">
+                        🤖</div>
+                    <div>
+                        <h3 style="margin:0; font-size: 18px; color: white;">接口 AI 助手</h3>
+                        <div style="font-size: 12px; opacity: 0.8;">基于当前文档的接口查询与生成</div>
                     </div>
-                    <button class="modal-close" onclick="closeModal('interfaceChatModal')"
-                        style="background: rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 20px;">&times;</button>
                 </div>
-                <div class="modal-body" style="background: #f8fafc; display: flex; flex-direction: column; padding: 0;">
-                    <div id="modalChatMessages" class="ai-chat-messages"
-                        style="flex: 1; padding: 24px; overflow-y: auto; background: #f8fafc; height: calc(85vh - 180px);">
-                        <div class="ai-message assistant">
-                            您好！我是您的接口 AI 特助。我已经加载了当前项目的接口规范。您可以问我：<br>
-                            • “<span style="color:var(--primary);cursor:pointer;"
-                                onclick="document.getElementById('modalChatInput').value='由于重症系统的入参要求，帮我生成一个创建手术申请的 JSON 请求体。';InterfaceSpec.sendChatMessage(true)">帮我生成一个创建手术申请的
-                                JSON 请求体</span>”<br>
-                            • “<span style="color:var(--primary);cursor:pointer;"
-                                onclick="document.getElementById('modalChatInput').value='帮我汇总一下当前已上传文档的所有接口列表。';InterfaceSpec.sendChatMessage(true)">汇总当前所有接口列表</span>”<br>
-                            • “<span style="color:var(--primary);cursor:pointer;"
-                                onclick="document.getElementById('modalChatInput').value='比较一下我方标准和对方在排班接口上的字段差异。';InterfaceSpec.sendChatMessage(true)">比较我方与对方接口差异</span>”
-                        </div>
+                <button class="modal-close" onclick="closeModal('interfaceChatModal')"
+                    style="background: rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-size: 20px;">&times;</button>
+            </div>
+            <div class="modal-body" style="background: #f8fafc; display: flex; flex-direction: column; padding: 0;">
+                <div id="modalChatMessages" class="ai-chat-messages"
+                    style="flex: 1; padding: 24px; overflow-y: auto; background: #f8fafc; height: calc(85vh - 180px);">
+                    <div class="ai-message assistant">
+                        您好！我是您的接口 AI 特助。我已经加载了当前项目的接口规范。您可以问我：<br>
+                        • “<span style="color:var(--primary);cursor:pointer;"
+                            onclick="document.getElementById('modalChatInput').value='由于重症系统的入参要求，帮我生成一个创建手术申请的 JSON 请求体。';InterfaceSpec.sendChatMessage(true)">帮我生成一个创建手术申请的
+                            JSON 请求体</span>”<br>
+                        • “<span style="color:var(--primary);cursor:pointer;"
+                            onclick="document.getElementById('modalChatInput').value='帮我汇总一下当前已上传文档的所有接口列表。';InterfaceSpec.sendChatMessage(true)">汇总当前所有接口列表</span>”<br>
+                        • “<span style="color:var(--primary);cursor:pointer;"
+                            onclick="document.getElementById('modalChatInput').value='比较一下我方标准和对方在排班接口上的字段差异。';InterfaceSpec.sendChatMessage(true)">比较我方与对方接口差异</span>”
                     </div>
-                    <div style="padding: 20px; background: white; border-top: 1px solid #e2e8f0; flex-shrink: 0;">
-                        <div style="display: flex; gap: 12px; align-items: flex-end;">
-                            <textarea id="modalChatInput" placeholder="请输入您的问题..." rows="3"
-                                style="flex: 1; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; font-size: 14px; resize: none; transition: all 0.2s;"
-                                onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.1)'"
-                                onblur="this.style.borderColor='#e2e8f0'; this.style.boxShadow='none'"
-                                onkeydown="if(event.keyCode==13 && !event.shiftKey){event.preventDefault(); InterfaceSpec.sendChatMessage(true);}"></textarea>
-                            <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage(true)"
-                                style="height: 48px; padding: 0 24px; border-radius: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
-                                <span>发送</span>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                                </svg>
-                            </button>
-                        </div>
-                        <div style="margin-top: 8px; font-size: 12px; color: #94a3b8; text-align: center;">AI
-                            助手基于当前解析的结构化数据 provide 回答</div>
+                </div>
+                <div style="padding: 20px; background: white; border-top: 1px solid #e2e8f0; flex-shrink: 0;">
+                    <div style="display: flex; gap: 12px; align-items: flex-end;">
+                        <textarea id="modalChatInput" placeholder="请输入您的问题..." rows="3"
+                            style="flex: 1; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; font-size: 14px; resize: none; transition: all 0.2s;"
+                            onfocus="this.style.borderColor='var(--primary)'; this.style.boxShadow='0 0 0 3px rgba(99,102,241,0.1)'"
+                            onblur="this.style.borderColor='#e2e8f0'; this.style.boxShadow='none'"
+                            onkeydown="if(event.keyCode==13 && !event.shiftKey){event.preventDefault(); InterfaceSpec.sendChatMessage(true);}"></textarea>
+                        <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage(true)"
+                            style="height: 48px; padding: 0 24px; border-radius: 12px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                            <span>发送</span>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
                     </div>
+                    <div style="margin-top: 8px; font-size: 12px; color: #94a3b8; text-align: center;">AI
+                        助手基于当前解析的结构化数据 provide 回答</div>
                 </div>
             </div>
         </div>
+    </div>
+    <!-- 接口文档上传解析弹窗 -->
+    <div id="specUploadModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="specUploadTitle">📤 上传接口文档</h3>
+                <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <div class="form-group">
+                    <label>文档来源</label>
+                    <select id="uploadSpecSource" class="form-control" onchange="InterfaceSpec.onSourceChange()">
+                        <option value="our_standard">我方标准</option>
+                        <option value="vendor">对方/厂商接口</option>
+                    </select>
+                </div>
+                <div class="form-group" id="uploadVendorNameGroup" style="display:none;">
+                    <label>厂商/系统名称</label>
+                    <input type="text" id="uploadVendorName" class="form-control" placeholder="如：东华HIS、金仕达LIS">
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <select id="uploadCategory" class="form-control">
+                        <option value="手麻标准">手麻标准</option>
+                        <option value="重症标准">重症标准</option>
+                        <option value="接口文档">接口文档</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>选择文件（PDF / Word / TXT / XML / JSON）</label>
+                    <input type="file" id="specFileInput" class="form-control"
+                        accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl" onchange="InterfaceSpec.handleFileSelect()">
+                </div>
+                <div class="form-group">
+                    <label>文档内容（粘贴或由上方文件自动提取）</label>
+                    <textarea id="specDocText" class="form-control" rows="10" placeholder="将接口文档内容粘贴到此处..."
+                        style="font-size:13px;line-height:1.6;font-family:monospace;"></textarea>
+                </div>
+                <div id="uploadFileStatus"
+                    style="display:none;padding:10px;border-radius:8px;background:var(--gray-50);font-size:13px;margin-bottom:12px;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
+                <button class="btn btn-ai" id="btnSubmitParse" onclick="InterfaceSpec.submitParse()">🤖 AI
+                    解析</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 字段对照详情弹窗 -->
+    <div id="fieldDetailModal" class="modal">
+        <div class="modal-content modal-xl" style="height:85vh;display:flex;flex-direction:column;">
+            <div class="modal-header">
+                <h3>🔍 字段映射详情</h3><button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
+            </div>
+            <div id="fieldDetailBody" class="modal-body" style="flex:1;overflow-y:auto;padding:16px;"></div>
+            <div class="modal-footer"><button class="btn btn-outline"
+                    onclick="closeModal('fieldDetailModal')">关闭</button></div>
+        </div>
+    </div>
 </body>
 
 </html>

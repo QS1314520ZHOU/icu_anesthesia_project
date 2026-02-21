@@ -371,6 +371,9 @@ class ProjectService:
                 tasks_completed = all_tasks['completed'] or 0
                 overall_progress = round(tasks_completed / tasks_total * 100) if tasks_total > 0 else 0
                 
+                # 一并更新项目主表的总体进度缓存
+                cursor.execute('UPDATE projects SET progress = ? WHERE id = ?', (overall_progress, project_id))
+                
                 # 用 REPLACE 确保每天每项目只有一条记录（取最新状态）
                 cursor.execute('''
                     DELETE FROM progress_history 
@@ -380,6 +383,7 @@ class ProjectService:
                     INSERT INTO progress_history (project_id, record_date, progress, tasks_total, tasks_completed) 
                     VALUES (?, ?, ?, ?, ?)
                 ''', (project_id, today, overall_progress, tasks_total, tasks_completed))
+
             except Exception as e:
                 print(f"Warning: Failed to record progress history: {e}")
             

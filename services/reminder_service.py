@@ -47,9 +47,11 @@ class ReminderService:
         result = []
         for m in milestones:
             try:
-                if not m['target_date'] or not m['target_date'].strip():
+                if not m['target_date'] or not str(m['target_date']).strip():
                     continue
-                days_overdue = (datetime.now() - datetime.strptime(m['target_date'].strip(), '%Y-%m-%d')).days
+                target_date_str = str(m['target_date']).strip().split(' ')[0]
+                days_overdue = (datetime.now() - datetime.strptime(target_date_str, '%Y-%m-%d')).days
+
             except (ValueError, AttributeError):
                 continue
             result.append({
@@ -101,9 +103,11 @@ class ReminderService:
         result = []
         for m in milestones:
             try:
-                if not m['target_date'] or not m['target_date'].strip():
+                if not m['target_date'] or not str(m['target_date']).strip():
                     continue
-                days_remaining = (datetime.strptime(m['target_date'].strip(), '%Y-%m-%d') - datetime.now()).days
+                target_date_str = str(m['target_date']).strip().split(' ')[0]
+                days_remaining = (datetime.strptime(target_date_str, '%Y-%m-%d') - datetime.now()).days
+
             except (ValueError, AttributeError):
                 continue
             result.append({
@@ -120,9 +124,11 @@ class ReminderService:
         
         for s in stages:
             try:
-                if not s['plan_end_date'] or not s['plan_end_date'].strip():
+                if not s['plan_end_date'] or not str(s['plan_end_date']).strip():
                     continue
-                days_remaining = (datetime.strptime(s['plan_end_date'].strip(), '%Y-%m-%d') - datetime.now()).days
+                plan_end_date_str = str(s['plan_end_date']).strip().split(' ')[0]
+                days_remaining = (datetime.strptime(plan_end_date_str, '%Y-%m-%d') - datetime.now()).days
+
             except (ValueError, AttributeError):
                 continue
             result.append({
@@ -168,7 +174,8 @@ class ReminderService:
             "project_id": i['project_id'],
             "project_name": i['project_name'],
             "hospital": i['hospital_name'],
-            "days_pending": (datetime.now() - datetime.strptime(i['created_at'][:10], '%Y-%m-%d')).days,
+            "days_pending": (datetime.now() - datetime.strptime(str(i['created_at']).split(' ')[0], '%Y-%m-%d')).days,
+
             "type": "stale_issue",
             "priority": "high" if i['severity'] == '高' else "medium"
         } for i in issues]
@@ -195,7 +202,8 @@ class ReminderService:
         for p in projects:
             last_activity = p['last_log_date'] or p['updated_at'][:10] if p['updated_at'] else None
             if last_activity and last_activity < cutoff:
-                days_idle = (datetime.now() - datetime.strptime(last_activity, '%Y-%m-%d')).days
+                days_idle = (datetime.now() - datetime.strptime(str(last_activity).split(' ')[0], '%Y-%m-%d')).days
+
                 idle_projects.append({
                     "id": p['id'],
                     "project_name": p['project_name'],

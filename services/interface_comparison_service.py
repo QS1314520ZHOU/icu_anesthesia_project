@@ -162,14 +162,17 @@ class InterfaceComparisonService:
 
         prompt = f"""请匹配以下两组医疗信息系统接口（按功能语义匹配）：
 
-我方接口:
+我方接口 (标准定义):
 {our_str}
 
-对方接口:
+对方接口 (厂商私有内容):
 {vendor_str}
 
-直接输出 JSON 数组: [{{"our_id": 数字, "vendor_id": 数字, "confidence": 0到1, "reason": "理由"}}]
-只输出 confidence >= 0.6 的，不确定的不要输出。"""
+任务说明：
+1. 找出我方接口在对方文档中的对应实现。
+2. 支持“一对多”匹配：如果我方一个接口的功能在对方系统中被拆分为多个接口实现（例如：我方“住院病人信息”对应对方“转入院”+“转科室”），请全部列出。
+3. 直接输出 JSON 数组: [{{"our_id": 数字, "vendor_id": 数字, "confidence": 0到1, "reason": "理由"}}]
+4. 只输出 confidence >= 0.6 的。如果是复合匹配，请在 reason 中注明。"""
 
         result = ai_service.call_ai_api("你是接口匹配专家，只输出JSON。", prompt, task_type="analysis")
         matches = []

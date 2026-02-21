@@ -193,7 +193,18 @@ const InterfaceSpec = {
             const cat = this._currentCategory;
             let url = `/projects/${this._currentProjectId}/interface-specs?source=vendor`;
             if (cat) url += `&category=${encodeURIComponent(cat)}`;
-            this._vendorSpecs = await api.get(url, { silent: true });
+            let specs = await api.get(url, { silent: true });
+
+            // 💡 改进：如果特定分类（如“重症标准”）下没数据，尝试加载通用分类“接口文档”中的数据
+            if (specs.length === 0 && cat && cat !== '接口文档') {
+                let fallbackUrl = `/projects/${this._currentProjectId}/interface-specs?source=vendor&category=${encodeURIComponent('接口文档')}`;
+                const fallbackSpecs = await api.get(fallbackUrl, { silent: true });
+                if (fallbackSpecs.length > 0) {
+                    specs = fallbackSpecs;
+                }
+            }
+
+            this._vendorSpecs = specs;
         } catch (e) { this._vendorSpecs = []; }
     },
 
@@ -248,20 +259,66 @@ const InterfaceSpec = {
             el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-text">暂无对照数据</div><div class="empty-state-hint">请先上传文档并执行智能对照</div></div>';
             return;
         }
-        let html = '<div class="table-container"><table class="table"><thead><tr><th>我方接口</th><th>对方接口</th><th>匹配方式</th><th>差异</th><th>转换</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+
+        // 💡 1. 按我方接口 ID 分组
+        const groups = {};
         this._comparisons.forEach(c => {
-            const statusColor = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? 'var(--success)' : (c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--warning)';
-            const statusText = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? '✅ 匹配' : (c.gap_count || 0) > 0 ? '⚠️ 有差异' : '🔧 需转换';
-            html += `<tr>
-                <td style="font-weight:600;">${c.our_interface_name || c.our_spec_name || '-'}</td>
-                <td>${c.vendor_interface_name || c.vendor_spec_name || '-'}</td>
-                <td><span class="badge badge-info">${c.match_type || 'auto'}</span></td>
-                <td style="color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--gray-400)'};">${c.gap_count || 0}</td>
-                <td style="color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--gray-400)'};">${c.transform_count || 0}</td>
-                <td style="color:${statusColor};font-weight:500;font-size:12px;">${statusText}</td>
-                <td><button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">查看详情</button></td>
-            </tr>`;
+            const id = c.our_spec_id || 'unmatched';
+            if (!groups[id]) groups[id] = [];
+            groups[id].push(c);
         });
+
+        const sortedGroupIds = Object.keys(groups).sort((a, b) => {
+            if (a === 'unmatched') return 1;
+            if (b === 'unmatched') return -1;
+            return 0;
+        });
+
+        let html = '<div class="table-container"><table class="table"><thead><tr>' +
+            '<th style="width:25%">我方标准接口</th>' +
+            '<th style="width:25%">对应厂商实现</th>' +
+            '<th>匹配方式</th>' +
+            '<th>差异</th>' +
+            '<th>转换</th>' +
+            '<th>状态</th>' +
+            '<th>操作</th></tr></thead><tbody>';
+
+        sortedGroupIds.forEach(gid => {
+            const items = groups[gid];
+            items.forEach((c, idx) => {
+                const statusColor = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? 'var(--success)' : (c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--warning)';
+                const statusText = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? '✅ 匹配' : (c.gap_count || 0) > 0 ? '⚠️ 有差异' : '🔧 需转换';
+
+                // 复合映射标识
+                const isComposite = items.length > 1;
+                const compositeBadge = isComposite ? `<span class="badge badge-purple" style="font-size:10px;margin-left:5px;">复合</span>` : '';
+
+                html += `<tr>`;
+
+                // 第一个单元格（我方接口）：如果一个标准对应多个厂商，只显示一次或在此显示合并逻辑
+                if (idx === 0) {
+                    html += `<td rowspan="${items.length}" style="vertical-align:top; border-right: 1px solid var(--gray-100); background: var(--gray-50);">
+                        <div style="font-weight:600; color:var(--gray-900);">${c.our_name || '-'}</div>
+                        <div style="font-size:11px; color:var(--gray-500); margin-top:4px;">${c.our_transcode || ''}</div>
+                        ${compositeBadge}
+                        ${items.length > 1 ? `<div style="font-size:10px; color:var(--primary); margin-top:8px;">需 ${items.length} 个接口协同实现</div>` : ''}
+                    </td>`;
+                }
+
+                html += `
+                    <td>
+                        <div style="font-weight:500;">${c.vendor_name || (c.vendor_spec_id ? '未命名接口' : '<span style="color:var(--danger);">❌ 对方无对应</span>')}</div>
+                        <div style="font-size:11px; color:var(--gray-500);">${c.vendor_transcode || ''}</div>
+                    </td>
+                    <td><span class="badge badge-info">${c.match_type || 'auto'}</span></td>
+                    <td style="color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--gray-400)'};">${c.gap_count || 0}</td>
+                    <td style="color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--gray-400)'};">${c.transform_count || 0}</td>
+                    <td style="color:${statusColor};font-weight:500;font-size:12px;">${statusText}</td>
+                    <td><button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">查看详情</button></td>
+                </tr>`;
+            });
+        });
+
         html += '</tbody></table></div>';
         el.innerHTML = html;
     },
@@ -704,6 +761,17 @@ const InterfaceSpec = {
             if (el2) el2.outerHTML = '<div style="display:flex;justify-content:flex-start;"><div style="background:#fef2f2;border:1px solid #fecaca;padding:10px 16px;border-radius:16px;color:var(--danger);font-size:13px;">请求失败: ' + (e.message || '') + '</div></div>';
         }
         mc.scrollTop = mc.scrollHeight;
-    }
+    },
+    // ==================== 兼容别名（桥接 HTML 中不带下划线的调用）====================
+    handleFileSelect: function () { return this._handleFileSelect(); },
+    submitParse: function () { return this._submitParse(); },
+    onSourceChange: function () { return this._onSourceChange(); },
+    ensureUploadModal: function () { return this._ensureUploadModal(); },
+    loadChatHistory: function () { return this._loadChatHistory(); },
+    saveChatHistory: function () { return this._saveChatHistory(); },
+    renderChatHistory: function () { return this._renderChatHistory(); },
+    ensureChatModal: function () { return this._ensureChatModal(); },
+    escapeHtml: function (str) { return this._escapeHtml(str); }
+
 
 };
