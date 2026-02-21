@@ -1175,5 +1175,9 @@ const InterfaceSpec = {
     _escapeHtml(str) {
         if (!str) return '';
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-}
+    },
+
+    handleFileSelect: function () { return this._handleFileSelect(); },
+    submitParse: function () { return this._submitParse(); },
+    onSourceChange: function () { return this._onSourceChange(); }
+};
