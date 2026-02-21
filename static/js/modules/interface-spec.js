@@ -1,14 +1,7 @@
 /**
- * 接口文档智能对照 - 前端模块 V2.1 (P0 修复版)
- * 修复清单：
- *   1. showUploadModal / openQuickUpload — Cannot set properties of null
- *   2. specUploadModal / fieldDetailModal / reportModal 动态创建
- *   3. runComparison / runComparisonFromDash / generateReport / deleteSpec / confirmMapping 补全
- *   4. _renderFieldDetail 补全（原版被截断）
- *   5. _handleFileSelect 调用 /api/extract-text
- * 依赖：全局 api (ApiClient), openModal, closeModal, showToast, marked
+ * 接口文档智能对照 - 前端模块 V2.2 (完整修复版)
+ * 修复: Modal null 报错、方法缺失、文件截断
  */
-
 const InterfaceSpec = {
     _ourSpecs: [],
     _vendorSpecs: [],
@@ -64,7 +57,6 @@ const InterfaceSpec = {
                     </p>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:24px;margin-bottom:40px;">
-                    <!-- 我方标准 -->
                     <div style="background:white;border-radius:16px;border:1px solid var(--gray-200);padding:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.05);position:relative;overflow:hidden;">
                         <div style="position:absolute;top:0;left:0;right:0;height:4px;background:var(--primary);"></div>
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
@@ -89,7 +81,6 @@ const InterfaceSpec = {
                             <span style="color:var(--success);font-weight:600;">✓ 标准文档已就绪 (${this._ourSpecs.length} 个接口)</span>
                         </div>
                     </div>
-                    <!-- 对方文档 -->
                     <div style="background:white;border-radius:16px;border:1px solid var(--gray-200);padding:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.05);position:relative;overflow:hidden;">
                         <div style="position:absolute;top:0;left:0;right:0;height:4px;background:var(--info);"></div>
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
@@ -196,6 +187,7 @@ const InterfaceSpec = {
             this._ourSpecs = specs;
         } catch (e) { this._ourSpecs = []; }
     },
+
     async loadVendorSpecs() {
         try {
             const cat = this._currentCategory;
@@ -204,6 +196,7 @@ const InterfaceSpec = {
             this._vendorSpecs = await api.get(url, { silent: true });
         } catch (e) { this._vendorSpecs = []; }
     },
+
     async loadComparisons() {
         try {
             const cat = this._currentCategory;
@@ -213,9 +206,89 @@ const InterfaceSpec = {
         } catch (e) { this._comparisons = []; }
     },
 
-    // ================================================================
-    //  上传弹窗（动态创建 + 延迟赋值修复 null 报错）
-    // ================================================================
+    // ==================== 概览 ====================
+    renderOverview() {
+        const el = document.getElementById('specOverview');
+        if (!el) return;
+        const total = this._comparisons.length;
+        const matched = this._comparisons.filter(c => (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0).length;
+        const gaps = this._comparisons.reduce((s, c) => s + (c.gap_count || 0), 0);
+        const transforms = this._comparisons.reduce((s, c) => s + (c.transform_count || 0), 0);
+
+        el.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;">
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--primary);">${this._ourSpecs.length}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">我方标准</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--info);">${this._vendorSpecs.length}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">对方接口</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--success);">${matched}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">完全匹配</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--warning);">${gaps}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">字段差异</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--secondary);">${transforms}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">需转换</div>
+                </div>
+            </div>`;
+    },
+
+    // ==================== 对照结果视图 ====================
+    renderComparisonView() {
+        const el = document.getElementById('specComparisonView');
+        if (!el) return;
+        if (this._comparisons.length === 0) {
+            el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-text">暂无对照数据</div><div class="empty-state-hint">请先上传文档并执行智能对照</div></div>';
+            return;
+        }
+        let html = '<div class="table-container"><table class="table"><thead><tr><th>我方接口</th><th>对方接口</th><th>匹配方式</th><th>差异</th><th>转换</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        this._comparisons.forEach(c => {
+            const statusColor = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? 'var(--success)' : (c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--warning)';
+            const statusText = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? '✅ 匹配' : (c.gap_count || 0) > 0 ? '⚠️ 有差异' : '🔧 需转换';
+            html += `<tr>
+                <td style="font-weight:600;">${c.our_interface_name || c.our_spec_name || '-'}</td>
+                <td>${c.vendor_interface_name || c.vendor_spec_name || '-'}</td>
+                <td><span class="badge badge-info">${c.match_type || 'auto'}</span></td>
+                <td style="color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--gray-400)'};">${c.gap_count || 0}</td>
+                <td style="color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--gray-400)'};">${c.transform_count || 0}</td>
+                <td style="color:${statusColor};font-weight:500;font-size:12px;">${statusText}</td>
+                <td><button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">查看详情</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    },
+
+    // ==================== 规范列表视图 ====================
+    renderSpecList(specs, containerId, source) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        if (specs.length === 0) {
+            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${source === 'our_standard' ? '📋' : '🏥'}</div><div class="empty-state-text">暂无${source === 'our_standard' ? '标准' : '对方'}接口</div></div>`;
+            return;
+        }
+        let html = '<div class="table-container"><table class="table"><thead><tr><th>系统类型</th><th>接口名称</th><th>协议</th><th>方向</th><th>操作</th></tr></thead><tbody>';
+        specs.forEach(s => {
+            html += `<tr>
+                <td><span class="badge badge-info">${s.system_type || '-'}</span></td>
+                <td style="font-weight:600;">${s.interface_name || '-'}</td>
+                <td>${s.protocol || '-'}</td>
+                <td>${s.data_direction || '-'}</td>
+                <td><button class="btn btn-danger btn-xs" onclick="InterfaceSpec.deleteSpec(${s.id})">删除</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
+    },
+
+    // ==================== 上传弹窗 ====================
     _ensureUploadModal() {
         if (document.getElementById('specUploadModal')) return;
         const m = document.createElement('div');
@@ -266,15 +339,10 @@ const InterfaceSpec = {
         document.body.appendChild(m);
     },
 
-    /**
-     * 打开上传弹窗 —— 关键修复：用 requestAnimationFrame 确保 DOM 已渲染再操作内部元素
-     */
     showUploadModal(source) {
         this._uploadSource = source;
         this._ensureUploadModal();
         openModal('specUploadModal');
-
-        // ★ 关键修复：等 modal DOM 被浏览器渲染后再操作内部元素
         requestAnimationFrame(() => {
             const titleEl = document.getElementById('specUploadTitle');
             const srcSelect = document.getElementById('uploadSpecSource');
@@ -282,30 +350,22 @@ const InterfaceSpec = {
             const fileInput = document.getElementById('specFileInput');
             const textArea = document.getElementById('specDocText');
             const statusDiv = document.getElementById('uploadFileStatus');
-
             if (titleEl) titleEl.textContent = source === 'our_standard' ? '📤 上传我方标准文档' : '📥 上传对方接口文档';
             if (srcSelect) srcSelect.value = source;
             if (catSelect) catSelect.value = this._currentCategory || '手麻标准';
             if (fileInput) fileInput.value = '';
             if (textArea) textArea.value = '';
             if (statusDiv) statusDiv.style.display = 'none';
-
             this._onSourceChange();
         });
     },
 
-    /**
-     * Dashboard 快捷上传 —— 同样用 requestAnimationFrame 延迟赋值
-     */
     openQuickUpload(source) {
-        // 先从 Dashboard 读取值（此时 Dashboard DOM 还在）
         const dashVendorName = document.getElementById('dashVendorName')?.value || '';
         const dashCat = document.getElementById('dashOurCategory')?.value || this._currentCategory;
-
         this._uploadSource = source;
         this._ensureUploadModal();
         openModal('specUploadModal');
-
         requestAnimationFrame(() => {
             const titleEl = document.getElementById('specUploadTitle');
             const srcSelect = document.getElementById('uploadSpecSource');
@@ -314,7 +374,6 @@ const InterfaceSpec = {
             const fileInput = document.getElementById('specFileInput');
             const textArea = document.getElementById('specDocText');
             const statusDiv = document.getElementById('uploadFileStatus');
-
             if (titleEl) titleEl.textContent = source === 'our_standard' ? '📤 上传我方标准文档' : '📥 上传对方接口文档';
             if (srcSelect) srcSelect.value = source;
             if (catSelect) catSelect.value = dashCat;
@@ -322,7 +381,6 @@ const InterfaceSpec = {
             if (fileInput) fileInput.value = '';
             if (textArea) textArea.value = '';
             if (statusDiv) statusDiv.style.display = 'none';
-
             this._onSourceChange();
         });
     },
@@ -339,7 +397,6 @@ const InterfaceSpec = {
         const statusDiv = document.getElementById('uploadFileStatus');
         const textArea = document.getElementById('specDocText');
         if (!fileInput || !fileInput.files.length) return;
-
         const file = fileInput.files[0];
         const ext = file.name.split('.').pop().toLowerCase();
 
@@ -348,13 +405,12 @@ const InterfaceSpec = {
             try {
                 const text = await file.text();
                 if (textArea) textArea.value = text;
-                if (statusDiv) { statusDiv.innerHTML = `✅ 已读取 <b>${file.name}</b>（${(text.length / 1024).toFixed(1)} KB）`; statusDiv.style.background = '#f0fdf4'; }
+                if (statusDiv) { statusDiv.innerHTML = `✅ 已读取 <b>${file.name}</b> (${(text.length / 1024).toFixed(1)} KB)`; statusDiv.style.background = '#f0fdf4'; }
             } catch (e) {
                 if (statusDiv) { statusDiv.innerHTML = `❌ 读取失败: ${e.message}`; statusDiv.style.background = '#fef2f2'; }
             }
             return;
         }
-
         if (['pdf', 'doc', 'docx'].includes(ext)) {
             if (statusDiv) { statusDiv.style.display = 'block'; statusDiv.innerHTML = '⏳ 上传并提取文本中...'; statusDiv.style.background = '#eff6ff'; }
             const fd = new FormData();
@@ -364,7 +420,7 @@ const InterfaceSpec = {
                 const json = await resp.json();
                 if (json.success && json.data?.text) {
                     if (textArea) textArea.value = json.data.text;
-                    if (statusDiv) { statusDiv.innerHTML = `✅ 已提取 <b>${json.data.filename}</b>（${(json.data.length / 1024).toFixed(1)} KB）`; statusDiv.style.background = '#f0fdf4'; }
+                    if (statusDiv) { statusDiv.innerHTML = `✅ 已提取 <b>${json.data.filename}</b> (${(json.data.length / 1024).toFixed(1)} KB)`; statusDiv.style.background = '#f0fdf4'; }
                 } else {
                     if (statusDiv) { statusDiv.innerHTML = `❌ 提取失败: ${json.message || '未知错误'}`; statusDiv.style.background = '#fef2f2'; }
                 }
@@ -373,28 +429,23 @@ const InterfaceSpec = {
             }
             return;
         }
-
         if (statusDiv) { statusDiv.style.display = 'block'; statusDiv.innerHTML = `⚠️ 不支持的格式: .${ext}`; statusDiv.style.background = '#fffbeb'; }
     },
 
-    // ==================== AI 解析提交 ====================
+    // ==================== AI 解析 ====================
     async _submitParse() {
         const source = document.getElementById('uploadSpecSource')?.value || this._uploadSource || 'vendor';
         const vendorName = document.getElementById('uploadVendorName')?.value || '';
         const category = document.getElementById('uploadCategory')?.value || this._currentCategory;
         const docText = document.getElementById('specDocText')?.value?.trim();
         const btn = document.getElementById('btnSubmitParse');
-
         if (!docText) { showToast('请先粘贴文档内容或上传文件'); return; }
         if (docText.length < 50) { showToast('文档内容过短，请粘贴完整的接口文档'); return; }
-
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0 6px 0 0;display:inline-block;vertical-align:middle;"></span> AI 解析中...'; }
-
         try {
             const url = (source === 'our_standard' && !this._currentProjectId)
                 ? '/interface-specs/parse-standard'
                 : `/projects/${this._currentProjectId}/interface-specs/parse`;
-
             const res = await api.post(url, { doc_text: docText, spec_source: source, vendor_name: vendorName, category: category });
             showToast(`✅ AI 解析完成，提取了 ${res.parsed_count || 0} 个接口定义`);
             closeModal('specUploadModal');
@@ -444,6 +495,7 @@ const InterfaceSpec = {
             if (body) body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">报告生成失败: ${e.message}</div>`;
         }
     },
+
     _ensureReportModal() {
         if (document.getElementById('specReportModal')) return;
         const m = document.createElement('div');
@@ -502,8 +554,6 @@ const InterfaceSpec = {
             'extra_in_vendor': { label: 'ℹ️ 对方额外', color: '#6b7280', bg: '#f9fafb' },
             'pending': { label: '⏳ 待确认', color: '#6b7280', bg: '#f9fafb' }
         };
-
-        // 统计
         const stats = {};
         mappings.forEach(m => { const s = m.mapping_status || 'pending'; stats[s] = (stats[s] || 0) + 1; });
 
@@ -513,15 +563,9 @@ const InterfaceSpec = {
             html += `<span style="background:${info.bg};color:${info.color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;">${info.label} ${c}</span>`;
         });
         html += '</div>';
-
-        html += '<div class="table-container"><table class="table" style="font-size:12px;"><thead><tr>';
-        html += '<th>状态</th><th>我方字段</th><th>中文</th><th>→</th><th>对方字段</th><th>中文</th><th>类型</th><th>转换规则</th><th>操作</th>';
-        html += '</tr></thead><tbody>';
-
+        html += '<div class="table-container"><table class="table" style="font-size:12px;"><thead><tr><th>状态</th><th>我方字段</th><th>中文</th><th>→</th><th>对方字段</th><th>中文</th><th>类型</th><th>转换规则</th><th>操作</th></tr></thead><tbody>';
         mappings.forEach(m => {
             const info = statusMap[m.mapping_status] || statusMap['pending'];
-            const ourType = m.our_field_type || m.our_type || '';
-            const vType = m.vendor_field_type || m.vendor_type || '';
             html += `<tr style="background:${info.bg}20;">
                 <td><span style="color:${info.color};font-size:11px;font-weight:600;white-space:nowrap;">${info.label}</span></td>
                 <td style="font-family:monospace;font-weight:600;">${m.our_field_name || '-'}</td>
@@ -529,15 +573,11 @@ const InterfaceSpec = {
                 <td style="color:var(--gray-300);font-size:16px;">→</td>
                 <td style="font-family:monospace;font-weight:600;">${m.vendor_field_name || '-'}</td>
                 <td style="color:var(--gray-500);">${m.vendor_field_cn || m.vendor_field_name_cn || '-'}</td>
-                <td style="font-size:11px;">${ourType}${vType ? ' → ' + vType : ''}</td>
+                <td style="font-size:11px;">${m.our_field_type || m.our_type || ''}${(m.vendor_field_type || m.vendor_type) ? ' → ' + (m.vendor_field_type || m.vendor_type) : ''}</td>
                 <td style="font-size:11px;color:var(--gray-500);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${m.transform_rule || ''}">${m.transform_rule || '-'}</td>
-                <td>${m.is_confirmed
-                    ? '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>'
-                    : (m.id ? '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.confirmMapping(' + m.id + ')">确认</button>' : '')
-                }</td>
+                <td>${m.is_confirmed ? '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>' : (m.id ? '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.confirmMapping(' + m.id + ')">确认</button>' : '')}</td>
             </tr>`;
         });
-
         html += '</tbody></table></div>';
         body.innerHTML = html;
     },
@@ -546,7 +586,6 @@ const InterfaceSpec = {
         try {
             await api.put(`/field-mappings/${mappingId}/confirm`, { mapping_status: 'matched' });
             showToast('已确认');
-            // 简单更新 DOM
             if (event && event.target) event.target.outerHTML = '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>';
         } catch (e) { showToast(`确认失败: ${e.message}`); }
     },
@@ -554,9 +593,6 @@ const InterfaceSpec = {
     // ==================== AI 对话 ====================
     openChatModal() {
         this._ensureChatModal();
-        const modal = document.getElementById('interfaceChatModal');
-        if (modal && modal.parentElement !== document.body) document.body.appendChild(modal);
-        if (modal) modal.style.zIndex = '9999';
         openModal('interfaceChatModal');
         this._renderChatHistory();
         setTimeout(() => document.getElementById('modalChatInput')?.focus(), 300);
@@ -584,8 +620,8 @@ const InterfaceSpec = {
                     </div>
                 </div>
                 <div style="padding:12px 16px;border-top:1px solid var(--gray-100);display:flex;gap:8px;flex-shrink:0;">
-                    <input id="modalChatInput" type="text" class="form-control" placeholder="输入问题..." style="flex:1;border-radius:20px;padding:10px 16px;" onkeydown="if(event.key==='Enter')InterfaceSpec.sendChatMessage(true)">
-                    <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage(true)" style="border-radius:20px;padding:10px 20px;">发送</button>
+                    <input id="modalChatInput" type="text" class="form-control" placeholder="输入问题..." style="flex:1;border-radius:20px;padding:10px 16px;" onkeydown="if(event.key==='Enter')InterfaceSpec.sendChatMessage()">
+                    <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage()" style="border-radius:20px;padding:10px 20px;">发送</button>
                 </div>
             </div>`;
         document.body.appendChild(m);
@@ -594,12 +630,12 @@ const InterfaceSpec = {
     quickChat(text) {
         const input = document.getElementById('modalChatInput');
         if (input) input.value = text;
-        this.sendChatMessage(true);
+        this.sendChatMessage();
     },
 
-    async sendChatMessage(isModal) {
-        const input = document.getElementById(isModal ? 'modalChatInput' : 'specChatInput');
-        const mc = document.getElementById(isModal ? 'modalChatMessages' : 'specChatMessages');
+    async sendChatMessage() {
+        const input = document.getElementById('modalChatInput');
+        const mc = document.getElementById('modalChatMessages');
         if (!input || !input.value.trim() || !mc) return;
         const text = input.value.trim();
         input.value = '';
@@ -615,7 +651,10 @@ const InterfaceSpec = {
         mc.scrollTop = mc.scrollHeight;
 
         try {
-            const res = await api.post(`/projects/${this._currentProjectId}/interface-specs/chat`, { message: text, category: document.getElementById('compareCategory')?.value || this._currentCategory });
+            const res = await api.post(`/projects/${this._currentProjectId}/interface-specs/chat`, {
+                message: text,
+                category: document.getElementById('compareCategory')?.value || this._currentCategory
+            });
             const answer = res.answer || (typeof res === 'string' ? res : JSON.stringify(res));
             const codeBlocks = res.code_blocks || [];
             const el = document.getElementById(lid);
@@ -625,7 +664,7 @@ const InterfaceSpec = {
                     h += '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
                     codeBlocks.forEach((b, i) => {
                         const bid = `cb-${Date.now()}-${i}`;
-                        h += `<div><div style="display:flex;justify-content:space-between;align-items:center;background:var(--gray-700);color:white;padding:6px 12px;border-radius:8px 8px 0 0;font-size:11px;"><span>${b.language.toUpperCase()}</span><button onclick="InterfaceSpec.copyCodeBlock('${bid}')" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">📋 复制</button></div><pre id="${bid}" style="background:var(--gray-800);color:#e2e8f0;padding:12px;border-radius:0 0 8px 8px;overflow-x:auto;font-size:12px;margin:0;white-space:pre-wrap;word-break:break-all;">${this._escapeHtml(b.code)}</pre></div>`;
+                        h += `<div><div style="display:flex;justify-content:space-between;align-items:center;background:var(--gray-700);color:white;padding:6px 12px;border-radius:8px 8px 0 0;font-size:11px;"><span>${(b.language || 'code').toUpperCase()}</span><button onclick="InterfaceSpec.copyCodeBlock('${bid}')" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">📋 复制</button></div><pre id="${bid}" style="background:var(--gray-800);color:#e2e8f0;padding:12px;border-radius:0 0 8px 8px;overflow-x:auto;font-size:12px;margin:0;white-space:pre-wrap;word-break:break-all;">${this._escapeHtml(b.code)}</pre></div>`;
                     });
                     h += '</div>';
                 }
@@ -637,186 +676,154 @@ const InterfaceSpec = {
             this._saveChatHistory();
         } catch (e) {
             const el = document.getElementById(lid);
-            if (el) el.outerHTML = `<div style="display:flex;justify-content:flex-start;"><div style="background:#fef2f2;border:1px solid #fecaca;padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:13px;color:var(--danger);">助手响应失败: ${e.message || '网络错误'}</div></div>`;
+            if (el) el.outerHTML = `<div style="display:flex;justify-content:flex-start;"><div style="background:#fef2f2;border:1px solid #fecaca;padding:10px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:13px;color:var(--danger);">请求失败: ${e.message || '请稍后重试'}</div></div>`;
         }
         mc.scrollTop = mc.scrollHeight;
     },
 
-    // ==================== 生成请求 ====================
-    async generateRequestForComparison(compId) {
-        this._ensureChatModal();
-        openModal('interfaceChatModal');
+    // ==================== 聊天工具方法 ====================
+    _renderChatHistory() {
         const mc = document.getElementById('modalChatMessages');
-        if (!mc) return;
+        if (!mc || this._chatHistory.length === 0) return;
         const welcome = mc.querySelector('.spec-chat-welcome');
         if (welcome) welcome.remove();
-
-        const lid = 'gen-' + Date.now();
-        mc.innerHTML += `<div style="display:flex;justify-content:flex-start;" id="${lid}"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px;max-width:85%;font-size:14px;"><div style="display:flex;gap:4px;align-items:center;"><span class="spinner" style="width:16px;height:16px;border-width:2px;margin:0;"></span><span style="color:var(--gray-400);font-size:12px;">正在生成请求内容...</span></div></div></div>`;
-        mc.scrollTop = mc.scrollHeight;
-
-        try {
-            const res = await api.post(`/projects/${this._currentProjectId}/interface-specs/generate-request`, { comparison_id: compId, format: 'auto' });
-            const answer = res.answer || '生成失败';
-            const cbs = res.code_blocks || [];
-            const el = document.getElementById(lid);
-            if (el) {
-                let h = `<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px;max-width:85%;font-size:14px;line-height:1.7;"><div style="font-weight:600;color:var(--primary);margin-bottom:8px;">📝 ${res.interface_name || ''} → ${res.vendor_name || ''}</div><div class="report-content">${marked.parse(answer)}</div>`;
-                if (cbs.length > 0) {
-                    h += '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
-                    cbs.forEach((b, i) => {
-                        const bid = `gc-${Date.now()}-${i}`;
-                        h += `<div><div style="display:flex;justify-content:space-between;align-items:center;background:var(--gray-700);color:white;padding:6px 12px;border-radius:8px 8px 0 0;font-size:11px;"><span>${b.language.toUpperCase()} - 可直接复制</span><button onclick="InterfaceSpec.copyCodeBlock('${bid}')" style="background:rgba(255,255,255,0.2);border:none;color:white;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">📋 复制</button></div><pre id="${bid}" style="background:var(--gray-800);color:#e2e8f0;padding:12px;border-radius:0 0 8px 8px;overflow-x:auto;font-size:12px;margin:0;white-space:pre-wrap;word-break:break-all;">${this._escapeHtml(b.code)}</pre></div>`;
-                    });
-                    h += '</div>';
-                }
-                h += '</div></div>';
-                el.outerHTML = h;
-            }
-        } catch (e) {
-            const el = document.getElementById(lid);
-            if (el) el.outerHTML = `<div style="display:flex;justify-content:flex-start;"><div style="background:#fef2f2;border:1px solid #fecaca;padding:12px 16px;border-radius:16px;color:var(--danger);font-size:13px;">请求生成失败: ${e.message}</div></div>`;
-        }
-        mc.scrollTop = mc.scrollHeight;
-    },
-
-    // ==================== 接口列表 ====================
-    renderSpecList(specs, containerId, source) {
-        const el = document.getElementById(containerId);
-        if (!el) return;
-        if (specs.length === 0) {
-            const label = source === 'our_standard' ? '我方标准' : '对方';
-            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${source === 'our_standard' ? '📋' : '🏥'}</div><div class="empty-state-text">暂未上传${label}接口文档</div><div class="empty-state-hint">请点击上方按钮上传文档</div></div>`;
-            return;
-        }
-        const groups = {};
-        specs.forEach(s => { const k = s.system_type || '其他'; if (!groups[k]) groups[k] = []; groups[k].push(s); });
-
         let html = '';
-        Object.entries(groups).forEach(([sysType, items]) => {
-            html += `<div style="margin-bottom:16px;"><div style="font-weight:600;font-size:14px;color:var(--gray-700);margin-bottom:8px;display:flex;align-items:center;gap:8px;"><span class="badge badge-info">${sysType}</span><span style="font-size:12px;color:var(--gray-400);">${items.length} 个接口</span></div>`;
-            items.forEach(spec => {
-                html += `<div class="stage-item" style="margin-bottom:8px;">
-                    <div class="stage-header" onclick="InterfaceSpec.toggleSpecFields(this)" style="padding:10px 14px;">
-                        <div class="stage-info">
-                            <span class="stage-arrow">▶</span>
-                            <span style="font-weight:600;font-size:13px;">${spec.interface_name}</span>
-                            <span style="font-size:11px;color:var(--gray-400);">${spec.transcode || ''}</span>
-                            <span class="badge badge-gray" style="font-size:10px;">${spec.protocol || ''}</span>
-                            <span style="font-size:11px;color:var(--gray-500);">${spec.field_count || 0} 字段</span>
-                        </div>
-                        <button class="btn btn-danger btn-xs" onclick="event.stopPropagation();InterfaceSpec.deleteSpec(${spec.id})">删除</button>
-                    </div>
-                    <div class="stage-body" style="padding:0;max-height:0;overflow:hidden;">
-                        ${spec.description ? '<div style="font-size:12px;color:var(--gray-500);margin-bottom:10px;padding:8px 14px 0;">' + spec.description + '</div>' : ''}
-                        ${spec.fields && spec.fields.length > 0 ? this._renderFieldsTable(spec.fields) : '<div style="padding:14px;color:var(--gray-400);font-size:12px;">无字段定义</div>'}
-                    </div>
-                </div>`;
-            });
-            html += '</div>';
+        this._chatHistory.forEach(m => {
+            if (m.role === 'user') {
+                html += `<div style="display:flex;justify-content:flex-end;"><div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;line-height:1.6;">${this._escapeHtml(m.content)}</div></div>`;
+            } else {
+                html += `<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;"><div class="report-content">${marked.parse(m.content)}</div></div></div>`;
+            }
         });
-        el.innerHTML = html;
+        mc.innerHTML = html;
+        mc.scrollTop = mc.scrollHeight;
     },
 
-    _renderFieldsTable(fields) {
-        let h = '<div class="table-container" style="padding:0 14px 14px;"><table class="table" style="font-size:12px;min-width:500px;"><thead><tr><th>#</th><th>字段名</th><th>中文名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead><tbody>';
-        fields.forEach(f => {
-            h += `<tr>
-                <td style="color:var(--gray-400);">${(f.field_order || 0) + 1}</td>
-                <td style="font-weight:600;font-family:monospace;">${f.field_name}</td>
-                <td>${f.field_name_cn || '-'}</td>
-                <td><span class="badge badge-gray">${f.field_type || '-'}</span></td>
-                <td>${f.is_required ? '<span style="color:var(--danger);font-weight:700;">✱ 必填</span>' : f.is_primary_key ? '<span style="color:var(--primary);font-weight:700;">🔑 主键</span>' : '-'}</td>
-                <td style="color:var(--gray-500);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(f.description || '') + ' ' + (f.remark || '')}">${f.description || f.remark || '-'}</td>
-            </tr>`;
-        });
-        h += '</tbody></table></div>';
-        return h;
+    _saveChatHistory() {
+        try {
+            const key = `interface_chat_${this._currentProjectId}`;
+            const recent = this._chatHistory.slice(-20);
+            localStorage.setItem(key, JSON.stringify(recent));
+        } catch (e) { /* quota exceeded */ }
     },
 
-    toggleSpecFields(headerEl) {
-        const item = headerEl.parentElement;
-        item.classList.toggle('expanded');
-        const body = item.querySelector('.stage-body');
-        body.style.maxHeight = item.classList.contains('expanded') ? body.scrollHeight + 'px' : '0';
+    _loadChatHistory() {
+        try {
+            const key = `interface_chat_${this._currentProjectId}`;
+            const data = localStorage.getItem(key);
+            this._chatHistory = data ? JSON.parse(data) : [];
+        } catch (e) { this._chatHistory = []; }
     },
 
-    // ==================== 统计 ====================
+    clearChatHistory() {
+        if (!confirm('确认清空对话记录？')) return;
+        this._chatHistory = [];
+        try { localStorage.removeItem(`interface_chat_${this._currentProjectId}`); } catch (e) { }
+        const mc = document.getElementById('modalChatMessages');
+        if (mc) mc.innerHTML = `<div class="spec-chat-welcome" style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;font-weight:500;">接口 AI 助手</div><div style="font-size:12px;margin-top:6px;">我可以帮您生成请求报文、查询字段映射、排查对接问题</div></div>`;
+    },
+
+    copyCodeBlock(blockId) {
+        const el = document.getElementById(blockId);
+        if (!el) return;
+        const text = el.textContent || el.innerText;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(() => showToast('已复制到剪贴板'));
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            showToast('已复制到剪贴板');
+        }
+    },
+
+    _escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    },
+
+    // ==================== 概览 ====================
     renderOverview() {
         const el = document.getElementById('specOverview');
         if (!el) return;
-        const o = this._ourSpecs.length, v = this._vendorSpecs.length, c = this._comparisons.length;
-        const g = this._comparisons.reduce((s, x) => s + (x.gap_count || 0), 0);
-        const t = this._comparisons.reduce((s, x) => s + (x.transform_count || 0), 0);
-        const m = this._comparisons.filter(x => !x.vendor_spec_id).length;
-        el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;">
-            ${this._sc(o, '我方标准接口', 'var(--primary)', false)}${this._sc(v, '对方接口', 'var(--info)', false)}
-            ${this._sc(c, '已对照', 'var(--success)', c > 0)}${this._sc(g, '字段差异', g > 0 ? 'var(--danger)' : 'var(--success)', g > 0)}
-            ${this._sc(t, '需转换', t > 0 ? 'var(--warning)' : 'var(--success)', t > 0)}${this._sc(m, '对方缺失', m > 0 ? 'var(--danger)' : 'var(--success)', m > 0)}
-        </div>`;
-    },
-    _sc(val, label, color, hl) {
-        const bg = hl ? (color.includes('danger') ? '#fef2f2' : color.includes('warning') ? '#fffbeb' : '#f0fdf4') : 'var(--gray-50)';
-        return `<div style="background:${bg};border-radius:10px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:700;color:${color};">${val}</div><div style="font-size:11px;color:var(--gray-500);margin-top:4px;">${label}</div></div>`;
+        const total = this._comparisons.length;
+        const matched = this._comparisons.filter(c => (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0).length;
+        const gaps = this._comparisons.reduce((s, c) => s + (c.gap_count || 0), 0);
+        const transforms = this._comparisons.reduce((s, c) => s + (c.transform_count || 0), 0);
+
+        el.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;">
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--primary);">${this._ourSpecs.length}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">我方标准</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--info);">${this._vendorSpecs.length}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">对方接口</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--success);">${matched}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">完全匹配</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--warning);">${gaps}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">字段差异</div>
+                </div>
+                <div style="background:white;border-radius:10px;padding:16px;border:1px solid var(--gray-200);text-align:center;">
+                    <div style="font-size:24px;font-weight:700;color:var(--secondary);">${transforms}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">需转换</div>
+                </div>
+            </div>`;
     },
 
-    // ==================== 对照结果表 ====================
+    // ==================== 对照结果视图 ====================
     renderComparisonView() {
         const el = document.getElementById('specComparisonView');
         if (!el) return;
         if (this._comparisons.length === 0) {
-            el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-text">暂无对照结果</div><div class="empty-state-hint">请先上传文档并点击"一键智能对照"</div></div>';
+            el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-text">暂无对照数据</div><div class="empty-state-hint">请先上传文档并执行智能对照</div></div>';
             return;
         }
-        let h = '<div class="table-container"><table class="table"><thead><tr><th>系统</th><th>我方接口</th><th>对方接口</th><th>匹配度</th><th>差异</th><th>需转换</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        let html = '<div class="table-container"><table class="table"><thead><tr><th>我方接口</th><th>对方接口</th><th>匹配方式</th><th>差异</th><th>转换</th><th>状态</th><th>操作</th></tr></thead><tbody>';
         this._comparisons.forEach(c => {
-            const isGood = !(c.gap_count || 0) && !(c.transform_count || 0);
-            const isMiss = !c.vendor_spec_id;
-            const badge = isMiss ? '<span class="badge badge-danger">对方缺失</span>' : isGood ? '<span class="badge badge-success">完全匹配</span>' : (c.gap_count || 0) > 0 ? '<span class="badge badge-danger">有差异</span>' : '<span class="badge badge-warning">需转换</span>';
-            const conf = c.match_confidence != null ? `<div style="display:flex;align-items:center;gap:6px;"><div style="width:60px;height:6px;background:var(--gray-200);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${c.match_confidence * 100}%;background:${c.match_confidence >= 0.8 ? 'var(--success)' : c.match_confidence >= 0.5 ? 'var(--warning)' : 'var(--danger)'};border-radius:3px;"></div></div><span style="font-size:11px;color:var(--gray-500);">${Math.round(c.match_confidence * 100)}%</span></div>` : '-';
-            h += `<tr>
-                <td><span class="badge badge-info">${c.system_type || '-'}</span></td>
-                <td><div style="font-weight:600;font-size:13px;">${c.our_name || '-'}</div><div style="font-size:11px;color:var(--gray-400);">${c.our_transcode || ''}</div></td>
-                <td>${isMiss ? '<span style="color:var(--danger);font-size:13px;">❌ 未找到</span>' : `<div style="font-weight:500;font-size:13px;">${c.vendor_name || '-'}</div><div style="font-size:11px;color:var(--gray-400);">${c.vendor_transcode || ''}</div>`}</td>
-                <td>${conf}</td>
-                <td style="font-weight:600;color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--success)'};">${c.gap_count || 0}</td>
-                <td style="font-weight:600;color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--success)'};">${c.transform_count || 0}</td>
-                <td>${badge}</td>
-                <td style="white-space:nowrap;">
-                    ${!isMiss ? `<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">字段</button>` : ''}
-                    ${!isMiss ? `<button class="btn btn-ai btn-xs" onclick="InterfaceSpec.generateRequestForComparison(${c.id})" style="margin-left:4px;">生成请求</button>` : ''}
-                </td>
+            const statusColor = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? 'var(--success)' : (c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--warning)';
+            const statusText = (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0 ? '✅ 匹配' : (c.gap_count || 0) > 0 ? '⚠️ 有差异' : '🔧 需转换';
+            html += `<tr>
+                <td style="font-weight:600;">${c.our_interface_name || c.our_spec_name || '-'}</td>
+                <td>${c.vendor_interface_name || c.vendor_spec_name || '-'}</td>
+                <td><span class="badge badge-info">${c.match_type || 'auto'}</span></td>
+                <td style="color:${(c.gap_count || 0) > 0 ? 'var(--danger)' : 'var(--gray-400)'};">${c.gap_count || 0}</td>
+                <td style="color:${(c.transform_count || 0) > 0 ? 'var(--warning)' : 'var(--gray-400)'};">${c.transform_count || 0}</td>
+                <td style="color:${statusColor};font-weight:500;font-size:12px;">${statusText}</td>
+                <td><button class="btn btn-outline btn-xs" onclick="InterfaceSpec.showFieldDetail(${c.id})">查看详情</button></td>
             </tr>`;
         });
-        h += '</tbody></table></div>';
-        el.innerHTML = h;
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
     },
 
-    // ==================== 工具方法 ====================
-    copyCodeBlock(id) {
-        const el = document.getElementById(id);
+    // ==================== 规范列表 ====================
+    renderSpecList(specs, containerId, source) {
+        const el = document.getElementById(containerId);
         if (!el) return;
-        navigator.clipboard.writeText(el.textContent).then(() => showToast('已复制到剪贴板')).catch(() => {
-            const ta = document.createElement('textarea'); ta.value = el.textContent; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showToast('已复制到剪贴板');
+        if (specs.length === 0) {
+            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">${source === 'our_standard' ? '📋' : '🏥'}</div><div class="empty-state-text">暂无${source === 'our_standard' ? '标准' : '对方'}接口</div></div>`;
+            return;
+        }
+        let html = '<div class="table-container"><table class="table"><thead><tr><th>系统类型</th><th>接口名称</th><th>协议</th><th>方向</th><th>操作</th></tr></thead><tbody>';
+        specs.forEach(s => {
+            html += `<tr>
+                <td><span class="badge badge-info">${s.system_type || '-'}</span></td>
+                <td style="font-weight:600;">${s.interface_name || '-'}</td>
+                <td>${s.protocol || '-'}</td>
+                <td>${s.data_direction || '-'}</td>
+                <td><button class="btn btn-danger btn-xs" onclick="InterfaceSpec.deleteSpec(${s.id})">删除</button></td>
+            </tr>`;
         });
-    },
-    _escapeHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; },
-    _saveChatHistory() { try { localStorage.setItem(`spec_chat_${this._currentProjectId}`, JSON.stringify(this._chatHistory.slice(-40))); } catch (e) { } },
-    _loadChatHistory() { try { const s = localStorage.getItem(`spec_chat_${this._currentProjectId}`); this._chatHistory = s ? JSON.parse(s) : []; } catch (e) { this._chatHistory = []; } },
-    clearChatHistory() {
-        this._chatHistory = []; this._saveChatHistory();
-        const mc = document.getElementById('modalChatMessages');
-        if (mc) mc.innerHTML = '<div class="spec-chat-welcome" style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;font-weight:500;">接口 AI 助手</div><div style="font-size:12px;margin-top:6px;">我可以帮您生成请求报文、查询字段映射、排查对接问题</div></div>';
-        showToast('聊天记录已清空');
-    },
-    _renderChatHistory() {
-        const mc = document.getElementById('modalChatMessages');
-        if (!mc || !this._chatHistory.length) return;
-        mc.innerHTML = '';
-        this._chatHistory.forEach(msg => {
-            if (msg.role === 'user') mc.innerHTML += `<div style="display:flex;justify-content:flex-end;"><div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;line-height:1.6;">${this._escapeHtml(msg.content)}</div></div>`;
-            else mc.innerHTML += `<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;"><div class="report-content">${marked.parse(msg.content)}</div></div></div>`;
-        });
-        mc.scrollTop = mc.scrollHeight;
+        html += '</tbody></table></div>';
+        el.innerHTML = html;
     }
 };
