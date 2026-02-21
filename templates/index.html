@@ -2540,9 +2540,114 @@
         }
     </style>
 </head>
+<!-- 接口文档上传解析弹窗 -->
+<div id="specUploadModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="specUploadTitle">上传接口文档</h3>
+            <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>选择文件（PDF / Word / TXT / XML / JSON）</label>
+                <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl"
+                    onchange="InterfaceSpec.handleFileSelect()" style="width:100%;">
+            </div>
+            <div class="form-group" id="specCategoryGroup">
+                <label>分类</label>
+                <select id="specCategory" class="form-control">
+                    <option value="手麻标准">手麻标准</option>
+                    <option value="重症标准">重症标准</option>
+                    <option value="接口文档">接口文档</option>
+                </select>
+            </div>
+            <div class="form-group" id="specVendorNameGroup" style="display:none;">
+                <label>厂家/系统名称</label>
+                <input type="text" id="specVendorName" class="form-control" placeholder="如：东华HIS、卫宁LIS...">
+            </div>
+            <div class="form-group">
+                <label>文档内容（粘贴或由上方文件自动提取）</label>
+                <textarea id="specDocText" class="form-control" rows="12" placeholder="将接口文档内容粘贴到此处..."></textarea>
+            </div>
+            <div id="specParseResult" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
+            <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
+        </div>
+    </div>
+</div>
+
+<!-- 字段对照详情弹窗 -->
+<div id="fieldDetailModal" class="modal">
+    <div class="modal-content modal-xl">
+        <div class="modal-header">
+            <h3>字段级对照详情</h3>
+            <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
+        </div>
+        <div class="modal-body" id="fieldDetailBody">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
+        </div>
+    </div>
+</div>
+<!-- 接口文档上传解析弹窗 -->
+<div id="specUploadModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="specUploadTitle">上传接口文档</h3>
+            <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>选择文件（PDF / Word / TXT / XML / JSON）</label>
+                <input type="file" id="specFileInput" accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl"
+                    onchange="InterfaceSpec.handleFileSelect()" style="width:100%;">
+            </div>
+            <div class="form-group" id="specCategoryGroup">
+                <label>分类</label>
+                <select id="specCategory" class="form-control">
+                    <option value="手麻标准">手麻标准</option>
+                    <option value="重症标准">重症标准</option>
+                    <option value="接口文档">接口文档</option>
+                </select>
+            </div>
+            <div class="form-group" id="specVendorNameGroup" style="display:none;">
+                <label>厂家/系统名称</label>
+                <input type="text" id="specVendorName" class="form-control" placeholder="如：东华HIS、卫宁LIS...">
+            </div>
+            <div class="form-group">
+                <label>文档内容（粘贴或由上方文件自动提取）</label>
+                <textarea id="specDocText" class="form-control" rows="12" placeholder="将接口文档内容粘贴到此处..."></textarea>
+            </div>
+            <div id="specParseResult" style="display:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
+            <button class="btn btn-ai" id="btnSpecParse" onclick="InterfaceSpec.submitParse()">🤖 开始 AI 解析</button>
+        </div>
+    </div>
+</div>
+
+<!-- 字段对照详情弹窗 -->
+<div id="fieldDetailModal" class="modal">
+    <div class="modal-content modal-xl">
+        <div class="modal-header">
+            <h3>字段级对照详情</h3>
+            <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
+        </div>
+        <div class="modal-body" id="fieldDetailBody">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
+        </div>
+    </div>
+</div>
 
 <body>
     <!-- Header -->
+
     <div class="header">
         <div class="header-left">
             <button class="menu-toggle" onclick="toggleSidebar()">☰</button>

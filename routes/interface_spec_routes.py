@@ -2,13 +2,125 @@
 接口文档智能对照 - 路由层
 所有 API 挂载在 /api 前缀下
 """
-from flask import Blueprint, request
+import os
+import logging
+from flask import Blueprint, request, current_app
+from werkzeug.utils import secure_filename
 from services.interface_parser_service import interface_parser
 from services.interface_comparison_service import comparison_service
+from services.interface_chat_service import interface_chat_service
 from database import DatabasePool
 from api_utils import api_response
 
+logger = logging.getLogger(__name__)
+
 spec_bp = Blueprint('interface_spec', __name__, url_prefix='/api')
+
+
+# ========== 0. 文件文本提取（修复前端 404）==========
+
+@spec_bp.route('/extract-text', methods=['POST'])
+def extract_text_from_file():
+    """
+    从上传的 PDF/Word/TXT 文件中提取纯文本。
+    前端 handleFileSelect() 调用此接口。
+    """
+    if 'file' not in request.files:
+        return api_response(False, message='未找到上传文件')
+
+    file = request.files['file']
+    if not file or not file.filename:
+        return api_response(False, message='文件为空')
+
+    filename = secure_filename(file.filename)
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+
+    # 保存临时文件
+    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    os.makedirs(upload_folder, exist_ok=True)
+    tmp_path = os.path.join(upload_folder, f'_extract_tmp_{filename}')
+
+    try:
+        file.save(tmp_path)
+
+        text = ''
+        if ext == 'txt':
+            # 尝试多种编码
+            for encoding in ['utf-8', 'gbk', 'gb2312', 'latin-1']:
+                try:
+                    with open(tmp_path, 'r', encoding=encoding) as f:
+                        text = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+        elif ext == 'pdf':
+            try:
+                import pdfplumber
+                with pdfplumber.open(tmp_path) as pdf:
+                    pages = []
+                    for page in pdf.pages:
+                        page_text = page.extract_text() or ''
+                        # 也提取表格
+                        tables = page.extract_tables()
+                        for table in tables:
+                            for row in table:
+                                if row:
+                                    page_text += '\n' + '\t'.join([str(cell or '') for cell in row])
+                        pages.append(page_text)
+                    text = '\n\n'.join(pages)
+            except ImportError:
+                return api_response(False, message='服务器未安装 pdfplumber，请执行 pip install pdfplumber')
+            except Exception as e:
+                return api_response(False, message=f'PDF 解析失败: {str(e)}')
+
+        elif ext in ('doc', 'docx'):
+            try:
+                from docx import Document
+                doc = Document(tmp_path)
+                paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+                # 也提取表格
+                for table in doc.tables:
+                    for row in table.rows:
+                        row_text = '\t'.join([cell.text.strip() for cell in row.cells])
+                        if row_text.strip():
+                            paragraphs.append(row_text)
+                text = '\n'.join(paragraphs)
+            except ImportError:
+                return api_response(False, message='服务器未安装 python-docx，请执行 pip install python-docx')
+            except Exception as e:
+                return api_response(False, message=f'Word 文档解析失败: {str(e)}')
+
+        elif ext in ('xml', 'wsdl'):
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+
+        elif ext == 'json':
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+
+        else:
+            return api_response(False, message=f'不支持的文件格式: {ext}，支持 PDF/Word/TXT/XML/JSON')
+
+        if not text.strip():
+            return api_response(False, message='文件中未提取到文本内容，请检查文件是否为空或扫描件')
+
+        return api_response(True, {
+            'text': text,
+            'length': len(text),
+            'filename': filename
+        })
+
+    except Exception as e:
+        logger.error(f"文件文本提取异常: {e}", exc_info=True)
+        return api_response(False, message=f'文件处理失败: {str(e)}')
+    finally:
+        # 清理临时文件
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except:
+            pass
 
 
 # ========== 1. 文档解析 ==========
@@ -34,16 +146,15 @@ def parse_interface_doc(project_id):
     vendor_name = data.get('vendor_name', '')
     doc_id = data.get('doc_id')
 
-    # 我方标准可以不绑定项目 (project_id 传 None 存为全局)
     save_project_id = None if spec_source == 'our_standard' and data.get('as_global') else project_id
 
-    # AI 解析
     parsed = interface_parser.parse_document_with_ai(doc_text, spec_source, vendor_name)
     if not parsed:
         return api_response(False, message='AI 解析未能提取到接口定义，请检查文档内容或格式')
 
-    # 持久化
-    created_ids = interface_parser.save_parsed_specs(save_project_id, doc_id, parsed, spec_source, vendor_name, category, raw_text=doc_text)
+    created_ids = interface_parser.save_parsed_specs(
+        save_project_id, doc_id, parsed, spec_source, vendor_name, category, raw_text=doc_text
+    )
 
     return api_response(True, {
         'parsed_count': len(parsed),
@@ -59,9 +170,7 @@ def parse_interface_doc(project_id):
 
 @spec_bp.route('/interface-specs/parse-standard', methods=['POST'])
 def parse_our_standard():
-    """
-    上传并解析我方标准接口文档（全局标准，不绑定项目）。
-    """
+    """上传并解析我方标准接口文档（全局标准，不绑定项目）"""
     data = request.json or {}
     doc_text = data.get('doc_text', '').strip()
     if not doc_text:
@@ -71,7 +180,10 @@ def parse_our_standard():
     if not parsed:
         return api_response(False, message='解析失败')
 
-    created_ids = interface_parser.save_parsed_specs(None, data.get('doc_id'), parsed, 'our_standard', category=data.get('category'), raw_text=doc_text)
+    created_ids = interface_parser.save_parsed_specs(
+        None, data.get('doc_id'), parsed, 'our_standard',
+        category=data.get('category'), raw_text=doc_text
+    )
     return api_response(True, {
         'parsed_count': len(parsed),
         'spec_ids': created_ids,
@@ -88,7 +200,7 @@ def parse_our_standard():
 @spec_bp.route('/projects/<int:project_id>/interface-specs', methods=['GET'])
 def get_interface_specs(project_id):
     """获取项目的所有已解析接口规范(含字段)"""
-    source = request.args.get('source')  # our_standard / vendor
+    source = request.args.get('source')
     category = request.args.get('category')
     specs = interface_parser.get_specs_by_project(project_id, source, category)
     return api_response(True, specs)
@@ -97,7 +209,8 @@ def get_interface_specs(project_id):
 @spec_bp.route('/interface-specs/standard', methods=['GET'])
 def get_standard_specs():
     """获取全局标准接口规范"""
-    specs = interface_parser.get_specs_by_project(None, 'our_standard')
+    category = request.args.get('category')
+    specs = interface_parser.get_specs_by_project(None, 'our_standard', category)
     return api_response(True, specs)
 
 
@@ -129,7 +242,8 @@ def get_comparisons(project_id):
                    ic.match_confidence, ic.gap_count, ic.transform_count,
                    ic.status, ic.summary, ic.created_at, ic.category,
                    os.interface_name as our_name, os.transcode as our_transcode, os.system_type,
-                   vs.interface_name as vendor_name, vs.transcode as vendor_transcode, vs.vendor_name as vendor_company
+                   vs.interface_name as vendor_name, vs.transcode as vendor_transcode,
+                   vs.vendor_name as vendor_company
             FROM interface_comparisons ic
             LEFT JOIN interface_specs os ON ic.our_spec_id = os.id
             LEFT JOIN interface_specs vs ON ic.vendor_spec_id = vs.id
@@ -139,7 +253,7 @@ def get_comparisons(project_id):
         if category:
             query += ' AND ic.category = ?'
             params.append(category)
-        
+
         query += ' ORDER BY ic.gap_count DESC, os.system_type'
         rows = conn.execute(query, params).fetchall()
     return api_response(True, [dict(r) for r in rows])
@@ -202,8 +316,67 @@ def update_comparison_status(comp_id):
     data = request.json or {}
     with DatabasePool.get_connection() as conn:
         conn.execute('''
-            UPDATE interface_comparisons SET status = ?, reviewed_by = ?, 
+            UPDATE interface_comparisons SET status = ?, reviewed_by = ?,
             reviewed_at = CURRENT_TIMESTAMP WHERE id = ?
         ''', (data.get('status', 'reviewed'), data.get('reviewed_by', ''), comp_id))
         conn.commit()
     return api_response(True)
+
+
+# ========== 6. AI 对话 + 请求生成（全新）==========
+
+@spec_bp.route('/projects/<int:project_id>/interface-specs/chat', methods=['POST'])
+def interface_chat(project_id):
+    """
+    接口 AI 助手对话。
+    Body JSON: {
+        "message": "用户提问",
+        "category": "手麻标准" | "重症标准"
+    }
+    支持的意图：
+    - 生成请求（XML/JSON/SQL）
+    - 查询字段映射
+    - 对接指导
+    - 自由问答
+    """
+    data = request.json or {}
+    message = data.get('message', '').strip()
+    if not message:
+        return api_response(False, message='消息不能为空')
+
+    category = data.get('category', '手麻标准')
+
+    try:
+        result = interface_chat_service.chat(project_id, message, category)
+        return api_response(True, result)
+    except Exception as e:
+        logger.error(f"接口 AI 对话异常: {e}", exc_info=True)
+        return api_response(False, message=f'AI 助手响应失败: {str(e)}')
+
+
+@spec_bp.route('/projects/<int:project_id>/interface-specs/generate-request', methods=['POST'])
+def generate_request(project_id):
+    """
+    根据对照结果，为指定接口生成可复制的请求内容。
+    Body JSON: {
+        "comparison_id": 对照记录 ID,
+        "format": "xml" | "json" | "sql" | "auto",
+        "params": { 可选的请求参数 }
+    }
+    """
+    data = request.json or {}
+    comparison_id = data.get('comparison_id')
+    if not comparison_id:
+        return api_response(False, message='请指定对照记录 ID')
+
+    req_format = data.get('format', 'auto')
+    params = data.get('params', {})
+
+    try:
+        result = interface_chat_service.generate_request(
+            project_id, comparison_id, req_format, params
+        )
+        return api_response(True, result)
+    except Exception as e:
+        logger.error(f"请求生成异常: {e}", exc_info=True)
+        return api_response(False, message=f'请求生成失败: {str(e)}')
