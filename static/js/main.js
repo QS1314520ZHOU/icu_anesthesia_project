@@ -721,12 +721,42 @@ async function toggleShare(projectId, enabled) {
 
 function copyShareLink(token) {
     const url = `${window.location.origin}/share/${token}`;
-    navigator.clipboard.writeText(url).then(() => {
-        alert('链接已复制到剪贴板！\n' + url);
-    }).catch(err => {
-        alert('复制失败，请手动复制: ' + url);
-    });
+
+    // 优先使用 navigator.clipboard
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(() => {
+            alert('链接已复制到剪贴板！\n' + url);
+        }).catch(err => {
+            console.error('Clipboard copy failed:', err);
+            _fallbackCopyText(url);
+        });
+    } else {
+        _fallbackCopyText(url);
+    }
 }
+
+function _fallbackCopyText(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-9999px";
+    textArea.style.top = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            alert('链接已复制到剪贴板！(兼容模式)\n' + text);
+        } else {
+            alert('复制失败，请手动复制: ' + text);
+        }
+    } catch (err) {
+        alert('无法复制，请手动选择复制: ' + text);
+    }
+    document.body.removeChild(textArea);
+}
+
 
 // ========== 项目模板功能 ==========
 async function saveAsTemplate(projectId) {
