@@ -746,5 +746,123 @@ const InterfaceSpec = {
         } catch (e) {
             showToast('报告生成失败: ' + e.message, 'error');
         }
+    },
+
+    _escapeHtml: function (str) {
+        var div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    },
+
+    _loadChatHistory: function () {
+        try {
+            var key = 'spec_chat_' + this._currentProjectId;
+            var saved = localStorage.getItem(key);
+            this._chatHistory = saved ? JSON.parse(saved) : [];
+        } catch (e) { this._chatHistory = []; }
+    },
+
+    _saveChatHistory: function () {
+        try {
+            var key = 'spec_chat_' + this._currentProjectId;
+            localStorage.setItem(key, JSON.stringify(this._chatHistory.slice(-40)));
+        } catch (e) { }
+    },
+
+    _renderChatHistory: function () {
+        var mc = document.getElementById('modalChatMessages');
+        if (!mc || this._chatHistory.length === 0) return;
+        mc.innerHTML = '';
+        for (var i = 0; i < this._chatHistory.length; i++) {
+            var msg = this._chatHistory[i];
+            if (msg.role === 'user') {
+                mc.innerHTML += '<div style="display:flex;justify-content:flex-end;"><div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;">' + this._escapeHtml(msg.content) + '</div></div>';
+            } else {
+                mc.innerHTML += '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;"><div class="report-content">' + marked.parse(msg.content) + '</div></div></div>';
+            }
+        }
+        mc.scrollTop = mc.scrollHeight;
+    },
+
+    clearChatHistory: function () {
+        this._chatHistory = [];
+        this._saveChatHistory();
+        var mc = document.getElementById('modalChatMessages');
+        if (mc) mc.innerHTML = '<div style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;">接口 AI 助手</div></div>';
+        showToast('已清空');
+    },
+
+    copyCodeBlock: function (blockId) {
+        var el = document.getElementById(blockId);
+        if (!el) return;
+        var text = el.textContent;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(function () { showToast('已复制'); });
+        } else {
+            var ta = document.createElement('textarea'); ta.value = text;
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta); showToast('已复制');
+        }
+    },
+
+    _ensureChatModal: function () {
+        if (document.getElementById('interfaceChatModal')) return;
+        var m = document.createElement('div');
+        m.id = 'interfaceChatModal'; m.className = 'modal';
+        m.innerHTML = '<div class="modal-content modal-large" style="height:80vh;display:flex;flex-direction:column;">' +
+            '<div class="modal-header" style="flex-shrink:0;"><h3>🤖 接口 AI 助手</h3><button class="modal-close" onclick="closeModal(\'interfaceChatModal\')">×</button></div>' +
+            '<div style="padding:8px 16px;border-bottom:1px solid var(--gray-100);display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;">' +
+            '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.quickChat(\'帮我生成请求住院病人信息接口的XML报文\')">📝 生成请求</button>' +
+            '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.quickChat(\'列出所有接口的字段映射关系表\')">📋 字段映射</button>' +
+            '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.quickChat(\'给出接口对接方案和建议步骤\')">📊 对接方案</button>' +
+            '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.clearChatHistory()" style="margin-left:auto;color:var(--gray-400);">🗑️ 清空</button></div>' +
+            '<div id="modalChatMessages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;"><div style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;">接口 AI 助手</div><div style="font-size:12px;margin-top:6px;">可帮您生成报文、查询映射、排查问题</div></div></div>' +
+            '<div style="padding:12px 16px;border-top:1px solid var(--gray-100);display:flex;gap:8px;flex-shrink:0;">' +
+            '<input id="modalChatInput" type="text" class="form-control" placeholder="输入问题..." style="flex:1;border-radius:20px;padding:10px 16px;" onkeydown="if(event.key===\'Enter\')InterfaceSpec.sendChatMessage()">' +
+            '<button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage()" style="border-radius:20px;padding:10px 20px;">发送</button></div></div>';
+        document.body.appendChild(m);
+    },
+
+    openChatModal: function () {
+        this._ensureChatModal();
+        var modal = document.getElementById('interfaceChatModal');
+        if (modal) modal.style.zIndex = '9999';
+        openModal('interfaceChatModal');
+        this._renderChatHistory();
+        setTimeout(function () { var el = document.getElementById('modalChatInput'); if (el) el.focus(); }, 300);
+    },
+
+    quickChat: function (text) {
+        var input = document.getElementById('modalChatInput');
+        if (input) input.value = text;
+        this.sendChatMessage();
+    },
+
+    sendChatMessage: async function () {
+        var input = document.getElementById('modalChatInput');
+        var mc = document.getElementById('modalChatMessages');
+        if (!input || !input.value.trim() || !mc) return;
+        var text = input.value.trim(); input.value = '';
+        var welcome = mc.querySelector('[style*="text-align:center"]');
+        if (welcome && mc.children.length === 1) mc.innerHTML = '';
+        mc.innerHTML += '<div style="display:flex;justify-content:flex-end;"><div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;">' + this._escapeHtml(text) + '</div></div>';
+        var lid = 'ai-' + Date.now();
+        mc.innerHTML += '<div id="' + lid + '" style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px;font-size:14px;"><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span>思考中...</div></div>';
+        mc.scrollTop = mc.scrollHeight;
+        try {
+            var cat = (document.getElementById('compareCategory') || {}).value || this._currentCategory;
+            var res = await api.post('/projects/' + this._currentProjectId + '/interface-specs/chat', { message: text, category: cat });
+            var answer = res.answer || JSON.stringify(res);
+            var el = document.getElementById(lid);
+            if (el) el.outerHTML = '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;"><div class="report-content">' + marked.parse(answer) + '</div></div></div>';
+            this._chatHistory.push({ role: 'user', content: text });
+            this._chatHistory.push({ role: 'assistant', content: answer });
+            this._saveChatHistory();
+        } catch (e) {
+            var el2 = document.getElementById(lid);
+            if (el2) el2.outerHTML = '<div style="display:flex;justify-content:flex-start;"><div style="background:#fef2f2;border:1px solid #fecaca;padding:10px 16px;border-radius:16px;color:var(--danger);font-size:13px;">请求失败: ' + (e.message || '') + '</div></div>';
+        }
+        mc.scrollTop = mc.scrollHeight;
     }
+
 };
