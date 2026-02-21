@@ -1,6 +1,6 @@
 /**
  * 接口文档智能对照 - 前端模块 V2.2 (完整修复版)
- * 修复: Modal null 报错、方法缺失、文件截断
+ * 修复: 移除冗余的旧版方法定义，解决 Modal DOM 元素 ID 冲突导致的报错
  */
 const InterfaceSpec = {
     _ourSpecs: [],
@@ -579,174 +579,15 @@ const InterfaceSpec = {
         body.innerHTML = html;
     },
 
-    confirmMapping: async function (mappingId) {
+    async confirmMapping(mappingId) {
         try {
-            await api.put('/field-mappings/' + mappingId + '/confirm', {});
+            await api.put(`/field-mappings/${mappingId}/confirm`, {});
             showToast('已确认');
         } catch (e) {
-            showToast('确认失败: ' + e.message, 'error');
+            showToast(`确认失败: ${e.message}`, 'error');
         }
     },
 
-    deleteSpec: async function (specId) {
-        if (!confirm('确认删除此接口记录？')) return;
-        try {
-            await api.delete('/interface-specs/' + specId);
-            showToast('已删除');
-            await this.loadAll(true);
-        } catch (e) {
-            showToast('删除失败: ' + e.message, 'error');
-        }
-    },
-
-    _ensureUploadModal: function () {
-        if (document.getElementById('specUploadModal')) return;
-        var modal = document.createElement('div');
-        modal.id = 'specUploadModal';
-        modal.className = 'modal';
-        modal.innerHTML = '<div class="modal-content" style="max-width:600px;">' +
-            '<div class="modal-header"><h3 id="specUploadTitle">上传接口文档</h3><button class="modal-close" onclick="closeModal(\'specUploadModal\')">×</button></div>' +
-            '<div class="modal-body">' +
-            '<div class="form-group"><label>文档来源</label><select id="specUploadSource" class="form-control" onchange="InterfaceSpec.onSourceChange()"><option value="our_standard">我方标准</option><option value="vendor">对方接口</option></select></div>' +
-            '<div class="form-group"><label>分类</label><select id="specUploadCategory" class="form-control"><option value="手麻标准">手麻标准</option><option value="重症标准">重症标准</option><option value="接口文档">接口文档</option></select></div>' +
-            '<div class="form-group" id="specVendorNameGroup" style="display:none;"><label>厂家/系统名称</label><input type="text" id="specUploadVendorName" class="form-control" placeholder="如：东华HIS、卫宁LIS"></div>' +
-            '<div class="form-group"><label>上传文件 (PDF/Word/TXT/XML/JSON)</label><input type="file" id="specFileInput" class="form-control" accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl" onchange="InterfaceSpec.handleFileSelect()"><div id="specFileStatus" style="margin-top:6px;font-size:12px;"></div></div>' +
-            '<div class="form-group"><label>或直接粘贴文档内容</label><textarea id="specDocText" class="form-control" rows="10" placeholder="粘贴接口文档内容…上传文件后会自动填入此处。"></textarea></div>' +
-            '</div>' +
-            '<div class="modal-footer"><button class="btn btn-outline" onclick="closeModal(\'specUploadModal\')">取消</button><button class="btn btn-ai" onclick="InterfaceSpec.submitParse()" id="btnSubmitParse">🤖 AI 智能解析</button></div></div>';
-        document.body.appendChild(modal);
-    },
-
-    showUploadModal: function (source) {
-        this._ensureUploadModal();
-        requestAnimationFrame(function () {
-            var srcEl = document.getElementById('specUploadSource');
-            var catEl = document.getElementById('specUploadCategory');
-            var vendorGroup = document.getElementById('specVendorNameGroup');
-            var titleEl = document.getElementById('specUploadTitle');
-            var textEl = document.getElementById('specDocText');
-            var fileInput = document.getElementById('specFileInput');
-            var statusEl = document.getElementById('specFileStatus');
-            if (srcEl) srcEl.value = source || 'our_standard';
-            if (catEl) catEl.value = InterfaceSpec._currentCategory || '手麻标准';
-            if (vendorGroup) vendorGroup.style.display = (source === 'vendor') ? 'block' : 'none';
-            if (titleEl) titleEl.textContent = source === 'vendor' ? '上传对方接口文档' : '上传我方标准文档';
-            if (textEl) textEl.value = '';
-            if (fileInput) fileInput.value = '';
-            if (statusEl) statusEl.innerHTML = '';
-            openModal('specUploadModal');
-        });
-    },
-
-    openQuickUpload: function (source) {
-        this._uploadSource = source;
-        var cat = (document.getElementById('dashOurCategory') || {}).value || this._currentCategory;
-        var vendorName = (document.getElementById('dashVendorName') || {}).value || '';
-        this.showUploadModal(source);
-        requestAnimationFrame(function () {
-            var catEl = document.getElementById('specUploadCategory');
-            var vnEl = document.getElementById('specUploadVendorName');
-            if (catEl) catEl.value = cat;
-            if (vnEl && vendorName) vnEl.value = vendorName;
-        });
-    },
-
-    onSourceChange: function () {
-        var source = (document.getElementById('specUploadSource') || {}).value;
-        var vendorGroup = document.getElementById('specVendorNameGroup');
-        if (vendorGroup) vendorGroup.style.display = (source === 'vendor') ? 'block' : 'none';
-    },
-
-    handleFileSelect: function () {
-        var fileInput = document.getElementById('specFileInput');
-        var statusEl = document.getElementById('specFileStatus');
-        var textEl = document.getElementById('specDocText');
-        if (!fileInput || !fileInput.files || fileInput.files.length === 0) return;
-        var file = fileInput.files[0];
-        var ext = file.name.split('.').pop().toLowerCase();
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--info);">📁 ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB) 读取中...</span>';
-        if (['txt', 'xml', 'json', 'wsdl'].indexOf(ext) >= 0) {
-            var reader = new FileReader();
-            reader.onload = function (e) {
-                if (textEl) textEl.value = e.target.result;
-                if (statusEl) statusEl.innerHTML = '<span style="color:var(--success);">✅ ' + file.name + ' 已读取</span>';
-            };
-            reader.readAsText(file);
-        } else if (['pdf', 'doc', 'docx'].indexOf(ext) >= 0) {
-            if (statusEl) statusEl.innerHTML = '<span style="color:var(--warning);">⏳ 正在上传并提取文本...</span>';
-            var formData = new FormData();
-            formData.append('file', file);
-            fetch('/api/extract-text', { method: 'POST', body: formData })
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (data.success && data.data && data.data.text) {
-                        if (textEl) textEl.value = data.data.text;
-                        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success);">✅ 文本已提取 (' + (data.data.length || 0) + ' 字符)</span>';
-                    } else {
-                        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">❌ 提取失败: ' + (data.message || '未知错误') + '</span>';
-                    }
-                })
-                .catch(function (err) {
-                    if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">❌ 上传失败: ' + err.message + '</span>';
-                });
-        } else {
-            if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger);">不支持的格式: .' + ext + '</span>';
-        }
-    },
-
-    submitParse: async function () {
-        var textEl = document.getElementById('specDocText');
-        var sourceEl = document.getElementById('specUploadSource');
-        var catEl = document.getElementById('specUploadCategory');
-        var vendorNameEl = document.getElementById('specUploadVendorName');
-        var btn = document.getElementById('btnSubmitParse');
-        var docText = textEl ? textEl.value.trim() : '';
-        if (!docText) { showToast('请先粘贴文档内容或上传文件', 'warning'); return; }
-        if (btn) { btn.disabled = true; btn.textContent = '🤖 AI 解析中...'; }
-        try {
-            var url = InterfaceSpec._currentProjectId ? '/projects/' + InterfaceSpec._currentProjectId + '/interface-specs/parse' : '/interface-specs/parse-standard';
-            var res = await api.post(url, { doc_text: docText, spec_source: sourceEl ? sourceEl.value : 'our_standard', category: catEl ? catEl.value : '手麻标准', vendor_name: vendorNameEl ? vendorNameEl.value.trim() : '' });
-            showToast('AI 解析完成！识别到 ' + (res.parsed_count || 0) + ' 个接口', 'success');
-            closeModal('specUploadModal');
-            await InterfaceSpec.loadAll(true);
-        } catch (e) {
-            showToast('解析失败: ' + (e.message || '请稍后重试'), 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 智能解析'; }
-        }
-    },
-
-    runComparisonFromDash: async function () { await this.runComparison(); },
-
-    runComparison: async function () {
-        var btn = document.getElementById('btnRunComparison');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ AI 对照中...'; }
-        try {
-            var cat = (document.getElementById('compareCategory') || document.getElementById('dashOurCategory') || {}).value || this._currentCategory;
-            var res = await api.post('/projects/' + this._currentProjectId + '/interface-comparison/run', { category: cat });
-            showToast('对照完成！' + (res.comparison_count || 0) + ' 组，' + (res.total_gaps || 0) + ' 差异，' + (res.total_transforms || 0) + ' 需转换', 'success');
-            await this.loadAll(true);
-        } catch (e) {
-            showToast('对照失败: ' + (e.message || '请确保已上传双方文档'), 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '🔍 一键智能对照'; }
-        }
-    },
-
-    generateReport: async function () {
-        showToast('正在生成报告...');
-        try {
-            var cat = (document.getElementById('compareCategory') || {}).value || this._currentCategory;
-            var res = await api.get('/projects/' + this._currentProjectId + '/interface-comparison/report?category=' + encodeURIComponent(cat));
-            var report = res.report || res;
-            var m = document.createElement('div');
-            m.id = 'specReportModal'; m.className = 'modal active';
-            m.innerHTML = '<div class="modal-content modal-large" style="height:85vh;display:flex;flex-direction:column;"><div class="modal-header" style="flex-shrink:0;"><h3>📊 接口对照报告</h3><button class="modal-close" onclick="document.getElementById(\'specReportModal\').remove()">×</button></div><div style="flex:1;overflow-y:auto;padding:20px;"><div class="report-content">' + marked.parse(typeof report === 'string' ? report : JSON.stringify(report, null, 2)) + '</div></div></div>';
-            document.body.appendChild(m);
-        } catch (e) {
-            showToast('报告生成失败: ' + e.message, 'error');
-        }
-    },
 
     _escapeHtml: function (str) {
         var div = document.createElement('div');
