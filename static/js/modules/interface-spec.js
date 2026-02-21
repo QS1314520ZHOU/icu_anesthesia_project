@@ -1,5 +1,8 @@
 /**
- * 接口文档智能对照 - 前端模块 V2
+ * 接口文档智能对照 - 前端模块 V2.1 (P0 修复版)
+ * 修复：补全 showUploadModal / openQuickUpload / deleteSpec / generateReport /
+ *       runComparison / runComparisonFromDash / _renderFieldDetail / confirmMapping
+ *       动态创建 specUploadModal + fieldDetailModal（不再依赖 index.html 中的静态 DOM）
  * 依赖：全局 api (ApiClient), openModal, closeModal, showToast, marked
  */
 
@@ -21,7 +24,6 @@ const InterfaceSpec = {
         this._currentProjectId = projectId;
         const container = document.getElementById('tabInterfaceSpec');
         if (!container) return;
-        // 恢复聊天历史
         this._loadChatHistory();
         await this.loadAll();
     },
@@ -62,7 +64,6 @@ const InterfaceSpec = {
                         通过 AI 智能解析，自动识别标准与私有接口差异，为您节省 90% 的文档整理时间。
                     </p>
                 </div>
-
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap:24px; margin-bottom:40px;">
                     <div style="background:white; border-radius:16px; border:1px solid var(--gray-200); padding:24px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.05); position:relative; overflow:hidden;">
                         <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--primary);"></div>
@@ -88,7 +89,6 @@ const InterfaceSpec = {
                             <span style="color:var(--success); font-weight:600;">✓ 标准文档已就绪 (${this._ourSpecs.length} 个接口)</span>
                         </div>
                     </div>
-
                     <div style="background:white; border-radius:16px; border:1px solid var(--gray-200); padding:24px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.05); position:relative; overflow:hidden;">
                         <div style="position:absolute; top:0; left:0; right:0; height:4px; background:var(--info);"></div>
                         <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
@@ -99,7 +99,7 @@ const InterfaceSpec = {
                             <span style="font-size:24px;">🏥</span>
                         </div>
                         <div style="margin-bottom:20px;">
-                            <input type="text" id="dashVendorName" class="form-control" placeholder="输入厂家/系统名称 (可选)" 
+                            <input type="text" id="dashVendorName" class="form-control" placeholder="输入厂家/系统名称 (可选)"
                                    style="width:100%; border-radius:8px; padding:8px 12px; border:1px solid var(--gray-200);">
                         </div>
                         <div style="border:2px dashed var(--gray-200); border-radius:12px; padding:30px; text-align:center; cursor:pointer;" onclick="InterfaceSpec.openQuickUpload('vendor')">
@@ -112,16 +112,14 @@ const InterfaceSpec = {
                         </div>
                     </div>
                 </div>
-
                 <div style="text-align:center;">
-                    <button class="btn btn-ai" onclick="InterfaceSpec.runComparisonFromDash()" 
+                    <button class="btn btn-ai" onclick="InterfaceSpec.runComparisonFromDash()"
                             style="padding:16px 48px; border-radius:30px; font-size:18px; font-weight:700; box-shadow:0 10px 25px -5px rgba(99,102,241,0.4);">
                         🔍 一键智能比对 (AI Sync)
                     </button>
                     <div style="margin-top:16px; font-size:13px; color:var(--gray-400);">AI 将自动分析两份文档，提取字段对应关系并标注差异点</div>
                 </div>
-            </div>
-        `;
+            </div>`;
     },
 
     // ========== 主应用模式 ==========
@@ -158,8 +156,7 @@ const InterfaceSpec = {
                     <div id="specOurView" style="display:none;"></div>
                     <div id="specVendorView" style="display:none;"></div>
                 </div>
-            </div>
-        `;
+            </div>`;
         this.renderOverview();
         this.renderComparisonView();
     },
@@ -222,6 +219,454 @@ const InterfaceSpec = {
         } catch { this._comparisons = []; }
     },
 
+    // ================================================================
+    //  P0 修复：showUploadModal / openQuickUpload（动态创建上传弹窗）
+    // ================================================================
+
+    /** 确保上传弹窗 DOM 存在（动态创建，和 Chat Modal 同理）*/
+    _ensureUploadModal() {
+        if (document.getElementById('specUploadModal')) return;
+        const modal = document.createElement('div');
+        modal.id = 'specUploadModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content modal-large" style="max-width:680px;">
+                <div class="modal-header">
+                    <h3 id="specUploadTitle">📤 上传接口文档</h3>
+                    <button class="modal-close" onclick="closeModal('specUploadModal')">×</button>
+                </div>
+                <div class="modal-body" style="padding:20px;">
+                    <div class="form-group">
+                        <label>文档来源</label>
+                        <select id="uploadSpecSource" class="form-control" onchange="InterfaceSpec._onSourceChange()">
+                            <option value="our_standard">我方标准</option>
+                            <option value="vendor">对方/厂商接口</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="uploadVendorNameGroup" style="display:none;">
+                        <label>厂商/系统名称</label>
+                        <input type="text" id="uploadVendorName" class="form-control" placeholder="如：东华HIS、金仕达LIS">
+                    </div>
+                    <div class="form-group">
+                        <label>分类</label>
+                        <select id="uploadCategory" class="form-control">
+                            <option value="手麻标准">手麻标准</option>
+                            <option value="重症标准">重症标准</option>
+                            <option value="接口文档">接口文档</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>方式一：上传文件</label>
+                        <input type="file" id="specFileInput" class="form-control"
+                               accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl"
+                               onchange="InterfaceSpec._handleFileSelect()">
+                        <div style="font-size:11px;color:var(--gray-400);margin-top:4px;">支持 PDF / Word(.docx) / TXT / XML / JSON，最大 50MB</div>
+                    </div>
+                    <div class="form-group">
+                        <label>方式二：粘贴文档内容</label>
+                        <textarea id="specDocText" class="form-control" rows="10"
+                                  placeholder="将接口文档内容粘贴到此处...&#10;&#10;支持直接粘贴 Word/PDF 中复制的表格内容，AI 会自动识别接口结构。"
+                                  style="font-size:13px;line-height:1.6;font-family:monospace;"></textarea>
+                    </div>
+                    <div id="uploadFileStatus" style="display:none;padding:10px;border-radius:8px;background:var(--gray-50);font-size:13px;margin-bottom:12px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeModal('specUploadModal')">取消</button>
+                    <button class="btn btn-ai" id="btnSubmitParse" onclick="InterfaceSpec._submitParse()">
+                        🤖 AI 解析
+                    </button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    },
+
+    /** 打开上传弹窗（主 UI 模式的按钮调用） */
+    showUploadModal(source) {
+        this._ensureUploadModal();
+        this._uploadSource = source;
+
+        const titleEl = document.getElementById('specUploadTitle');
+        const sourceSelect = document.getElementById('uploadSpecSource');
+        const categorySelect = document.getElementById('uploadCategory');
+
+        if (source === 'our_standard') {
+            titleEl.textContent = '📤 上传我方标准文档';
+            sourceSelect.value = 'our_standard';
+        } else {
+            titleEl.textContent = '📥 上传对方接口文档';
+            sourceSelect.value = 'vendor';
+        }
+        this._onSourceChange();
+
+        // 同步分类
+        if (categorySelect) {
+            categorySelect.value = this._currentCategory || '手麻标准';
+        }
+
+        // 清空旧内容
+        const fileInput = document.getElementById('specFileInput');
+        const textArea = document.getElementById('specDocText');
+        const statusDiv = document.getElementById('uploadFileStatus');
+        if (fileInput) fileInput.value = '';
+        if (textArea) textArea.value = '';
+        if (statusDiv) statusDiv.style.display = 'none';
+
+        openModal('specUploadModal');
+    },
+
+    /** Dashboard 模式下的快捷上传（直接打开上传弹窗） */
+    openQuickUpload(source) {
+        this.showUploadModal(source);
+        // 如果在 Dashboard 页面填了厂商名，带过去
+        if (source === 'vendor') {
+            const dashVendorName = document.getElementById('dashVendorName')?.value;
+            if (dashVendorName) {
+                setTimeout(() => {
+                    const input = document.getElementById('uploadVendorName');
+                    if (input) input.value = dashVendorName;
+                }, 100);
+            }
+        }
+        // 同步 Dashboard 的分类选择
+        const dashCat = document.getElementById('dashOurCategory')?.value;
+        if (dashCat) {
+            setTimeout(() => {
+                const catSelect = document.getElementById('uploadCategory');
+                if (catSelect) catSelect.value = dashCat;
+            }, 100);
+        }
+    },
+
+    /** 来源切换时显示/隐藏厂商名输入框 */
+    _onSourceChange() {
+        const source = document.getElementById('uploadSpecSource')?.value;
+        const vendorGroup = document.getElementById('uploadVendorNameGroup');
+        if (vendorGroup) {
+            vendorGroup.style.display = (source === 'vendor') ? 'block' : 'none';
+        }
+    },
+
+    /** 文件选择后自动提取文本 */
+    async _handleFileSelect() {
+        const fileInput = document.getElementById('specFileInput');
+        const statusDiv = document.getElementById('uploadFileStatus');
+        const textArea = document.getElementById('specDocText');
+        if (!fileInput || !fileInput.files.length) return;
+
+        const file = fileInput.files[0];
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        // TXT / XML / JSON 可直接前端读取
+        if (['txt', 'xml', 'json', 'wsdl'].includes(ext)) {
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '⏳ 正在读取文件...';
+            try {
+                const text = await file.text();
+                textArea.value = text;
+                statusDiv.innerHTML = `✅ 已读取 <b>${file.name}</b>（${(text.length / 1024).toFixed(1)} KB 文本）`;
+                statusDiv.style.background = '#f0fdf4';
+            } catch (e) {
+                statusDiv.innerHTML = `❌ 读取失败: ${e.message}`;
+                statusDiv.style.background = '#fef2f2';
+            }
+            return;
+        }
+
+        // PDF / Word 需要后端提取
+        if (['pdf', 'doc', 'docx'].includes(ext)) {
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '⏳ 正在上传并提取文本，请稍候...';
+            statusDiv.style.background = '#eff6ff';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch('/api/extract-text', { method: 'POST', body: formData });
+                const json = await res.json();
+                if (json.success && json.data && json.data.text) {
+                    textArea.value = json.data.text;
+                    statusDiv.innerHTML = `✅ 已提取 <b>${json.data.filename}</b>（${(json.data.length / 1024).toFixed(1)} KB 文本）`;
+                    statusDiv.style.background = '#f0fdf4';
+                } else {
+                    statusDiv.innerHTML = `❌ 提取失败: ${json.message || '未知错误'}`;
+                    statusDiv.style.background = '#fef2f2';
+                }
+            } catch (e) {
+                statusDiv.innerHTML = `❌ 上传失败: ${e.message}`;
+                statusDiv.style.background = '#fef2f2';
+            }
+            return;
+        }
+
+        statusDiv.style.display = 'block';
+        statusDiv.innerHTML = `⚠️ 不支持的文件格式: .${ext}`;
+        statusDiv.style.background = '#fffbeb';
+    },
+
+    /** 提交 AI 解析 */
+    async _submitParse() {
+        const source = document.getElementById('uploadSpecSource')?.value || this._uploadSource || 'vendor';
+        const vendorName = document.getElementById('uploadVendorName')?.value || '';
+        const category = document.getElementById('uploadCategory')?.value || this._currentCategory;
+        const docText = document.getElementById('specDocText')?.value?.trim();
+        const btn = document.getElementById('btnSubmitParse');
+
+        if (!docText) {
+            showToast('请先粘贴文档内容或上传文件');
+            return;
+        }
+
+        if (docText.length < 50) {
+            showToast('文档内容过短，请粘贴完整的接口文档');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0 6px 0 0;display:inline-block;vertical-align:middle;"></span> AI 解析中...';
+
+        try {
+            const url = source === 'our_standard' && !this._currentProjectId
+                ? '/interface-specs/parse-standard'
+                : `/projects/${this._currentProjectId}/interface-specs/parse`;
+
+            const res = await api.post(url, {
+                doc_text: docText,
+                spec_source: source,
+                vendor_name: vendorName,
+                category: category
+            });
+
+            const count = res.parsed_count || 0;
+            showToast(`✅ AI 解析完成，提取了 ${count} 个接口定义`);
+            closeModal('specUploadModal');
+            await this.loadAll(true);
+        } catch (e) {
+            showToast(`❌ 解析失败: ${e.message || '请检查文档内容'}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🤖 AI 解析';
+        }
+    },
+
+    // ================================================================
+    //  P0 修复：runComparison / runComparisonFromDash
+    // ================================================================
+
+    /** 从 Dashboard 页面触发对照 */
+    async runComparisonFromDash() {
+        if (this._ourSpecs.length === 0 && this._vendorSpecs.length === 0) {
+            showToast('请先上传我方标准和对方接口文档');
+            return;
+        }
+        if (this._ourSpecs.length === 0) {
+            showToast('请先上传我方标准文档');
+            return;
+        }
+        if (this._vendorSpecs.length === 0) {
+            showToast('请先上传对方接口文档');
+            return;
+        }
+        await this.runComparison();
+    },
+
+    /** 执行一键智能对照 */
+    async runComparison() {
+        const btn = document.getElementById('btnRunComparison');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0 4px 0 0;display:inline-block;vertical-align:middle;"></span> 对照中...';
+        }
+
+        try {
+            const cat = document.getElementById('compareCategory')?.value || this._currentCategory;
+            const res = await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, {
+                category: cat
+            });
+
+            const count = res.comparison_count || 0;
+            const summary = res.summary || {};
+            showToast(`✅ 对照完成：${count} 对接口，差异 ${summary.gap || 0}，需转换 ${summary.transform || 0}`);
+            await this.loadAll(true);
+        } catch (e) {
+            showToast(`❌ 对照失败: ${e.message || '请稍后重试'}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '🔍 一键智能对照';
+            }
+        }
+    },
+
+    // ================================================================
+    //  P0 修复：generateReport
+    // ================================================================
+
+    async generateReport() {
+        if (this._comparisons.length === 0) {
+            showToast('暂无对照数据，请先执行对照');
+            return;
+        }
+
+        // 创建报告弹窗
+        this._ensureReportModal();
+        openModal('specReportModal');
+        const body = document.getElementById('specReportBody');
+        body.innerHTML = '<div style="text-align:center;padding:60px;"><div class="spinner" style="margin:0 auto 16px;"></div><div style="color:var(--gray-500);font-size:14px;">AI 正在生成对照分析报告，请稍候...</div></div>';
+
+        try {
+            const res = await api.get(`/projects/${this._currentProjectId}/interface-comparison/report`);
+            const report = res.report || '报告生成失败';
+            body.innerHTML = `<div class="report-content" style="padding:10px;">${marked.parse(report)}</div>`;
+        } catch (e) {
+            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">报告生成失败: ${e.message}</div>`;
+        }
+    },
+
+    _ensureReportModal() {
+        if (document.getElementById('specReportModal')) return;
+        const modal = document.createElement('div');
+        modal.id = 'specReportModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content modal-xl" style="height:85vh;display:flex;flex-direction:column;">
+                <div class="modal-header">
+                    <h3>📊 接口对照分析报告</h3>
+                    <button class="modal-close" onclick="closeModal('specReportModal')">×</button>
+                </div>
+                <div id="specReportBody" class="modal-body" style="flex:1;overflow-y:auto;"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeModal('specReportModal')">关闭</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    },
+
+    // ================================================================
+    //  P0 修复：deleteSpec
+    // ================================================================
+
+    async deleteSpec(specId) {
+        if (!confirm('确认删除此接口规范？此操作不可恢复。')) return;
+        try {
+            await api.delete(`/interface-specs/${specId}`);
+            showToast('已删除');
+            await this.loadAll(true);
+        } catch (e) {
+            showToast(`删除失败: ${e.message}`);
+        }
+    },
+
+    // ================================================================
+    //  P0 修复：fieldDetailModal（动态创建字段映射详情弹窗）
+    // ================================================================
+
+    _ensureFieldDetailModal() {
+        if (document.getElementById('fieldDetailModal')) return;
+        const modal = document.createElement('div');
+        modal.id = 'fieldDetailModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content modal-xl" style="height:85vh;display:flex;flex-direction:column;">
+                <div class="modal-header">
+                    <h3>🔍 字段映射详情</h3>
+                    <button class="modal-close" onclick="closeModal('fieldDetailModal')">×</button>
+                </div>
+                <div id="fieldDetailBody" class="modal-body" style="flex:1;overflow-y:auto;padding:16px;"></div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline" onclick="closeModal('fieldDetailModal')">关闭</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    },
+
+    async showFieldDetail(comparisonId) {
+        this._ensureFieldDetailModal();
+        openModal('fieldDetailModal');
+        const body = document.getElementById('fieldDetailBody');
+        body.innerHTML = '<div style="text-align:center;padding:40px;"><div class="spinner" style="margin:0 auto 12px;"></div>加载字段对照...</div>';
+        try {
+            const data = await api.get(`/interface-comparisons/${comparisonId}/detail`);
+            this._renderFieldDetail(data);
+        } catch (e) {
+            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">加载失败: ${e.message}</div>`;
+        }
+    },
+
+    _renderFieldDetail(data) {
+        const body = document.getElementById('fieldDetailBody');
+        const mappings = data.mappings || [];
+        const statusMap = {
+            'matched': { label: '✅ 完全匹配', color: '#10b981', bg: '#f0fdf4' },
+            'name_different': { label: '🔄 名称不同', color: '#f59e0b', bg: '#fffbeb' },
+            'type_mismatch': { label: '⚠️ 类型不匹配', color: '#ef4444', bg: '#fef2f2' },
+            'needs_transform': { label: '🔧 需转换', color: '#8b5cf6', bg: '#f5f3ff' },
+            'missing_in_vendor': { label: '❌ 对方缺失', color: '#ef4444', bg: '#fef2f2' },
+            'extra_in_vendor': { label: 'ℹ️ 对方额外', color: '#6b7280', bg: '#f9fafb' },
+            'pending': { label: '⏳ 待确认', color: '#6b7280', bg: '#f9fafb' }
+        };
+
+        // 统计摘要
+        const stats = {};
+        for (const m of mappings) {
+            const s = m.mapping_status || 'pending';
+            stats[s] = (stats[s] || 0) + 1;
+        }
+
+        let html = '<div style="margin-bottom:16px;display:flex;gap:8px;flex-wrap:wrap;">';
+        for (const [key, count] of Object.entries(stats)) {
+            const info = statusMap[key] || { label: key, color: '#6b7280', bg: '#f9fafb' };
+            html += `<span style="background:${info.bg};color:${info.color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;">${info.label} ${count}</span>`;
+        }
+        html += '</div>';
+
+        // 字段映射表
+        html += '<div class="table-container"><table class="table" style="font-size:12px;"><thead><tr>';
+        html += '<th>状态</th><th>我方字段</th><th>我方中文</th><th>→</th><th>对方字段</th><th>对方中文</th><th>类型</th><th>转换规则</th><th>操作</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const m of mappings) {
+            const info = statusMap[m.mapping_status] || statusMap['pending'];
+            html += `<tr style="background:${info.bg}20;">
+                <td><span style="color:${info.color};font-size:11px;font-weight:600;white-space:nowrap;">${info.label}</span></td>
+                <td style="font-family:monospace;font-weight:600;">${m.our_field_name || '-'}</td>
+                <td style="color:var(--gray-500);">${m.our_field_cn || m.our_field_name_cn || '-'}</td>
+                <td style="color:var(--gray-300);font-size:16px;">→</td>
+                <td style="font-family:monospace;font-weight:600;">${m.vendor_field_name || '-'}</td>
+                <td style="color:var(--gray-500);">${m.vendor_field_cn || m.vendor_field_name_cn || '-'}</td>
+                <td style="font-size:11px;">
+                    ${m.our_field_type || m.our_type || ''} ${(m.vendor_field_type || m.vendor_type) ? '→ ' + (m.vendor_field_type || m.vendor_type) : ''}
+                </td>
+                <td style="font-size:11px;color:var(--gray-500);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                    title="${m.transform_rule || ''}">${m.transform_rule || '-'}</td>
+                <td>
+                    ${m.is_confirmed ? '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>'
+                    : m.id ? `<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.confirmMapping(${m.id})">确认</button>` : ''}
+                </td>
+            </tr>`;
+        }
+
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    },
+
+    /** 确认字段映射 */
+    async confirmMapping(mappingId) {
+        try {
+            await api.put(`/field-mappings/${mappingId}/confirm`, {
+                mapping_status: 'matched'
+            });
+            showToast('已确认');
+            // 刷新当前详情（重新打开不太方便，直接改 DOM）
+            const btn = event?.target;
+            if (btn) {
+                btn.outerHTML = '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>';
+            }
+        } catch (e) {
+            showToast(`确认失败: ${e.message}`);
+        }
+    },
+
     // ========== AI 对话 ==========
     openChatModal() {
         this._ensureChatModal();
@@ -267,8 +712,7 @@ const InterfaceSpec = {
                            onkeydown="if(event.key==='Enter')InterfaceSpec.sendChatMessage(true)">
                     <button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage(true)" style="border-radius:20px;padding:10px 20px;">发送</button>
                 </div>
-            </div>
-        `;
+            </div>`;
         document.body.appendChild(modal);
     },
 
@@ -289,18 +733,15 @@ const InterfaceSpec = {
         const text = input.value.trim();
         input.value = '';
 
-        // 清除欢迎信息
         const welcome = msgContainer.querySelector('.spec-chat-welcome');
         if (welcome) welcome.remove();
 
-        // 用户消息
         msgContainer.innerHTML += `
             <div style="display:flex;justify-content:flex-end;">
                 <div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;line-height:1.6;">${this._escapeHtml(text)}</div>
             </div>`;
         msgContainer.scrollTop = msgContainer.scrollHeight;
 
-        // AI loading
         const loadingId = 'ai-loading-' + Date.now();
         msgContainer.innerHTML += `
             <div style="display:flex;justify-content:flex-start;" id="${loadingId}">
@@ -325,7 +766,6 @@ const InterfaceSpec = {
                     <div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;">
                         <div class="report-content">${marked.parse(answer)}</div>`;
 
-                // 添加代码块复制按钮
                 if (codeBlocks.length > 0) {
                     html += '<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
                     for (let i = 0; i < codeBlocks.length; i++) {
@@ -347,7 +787,6 @@ const InterfaceSpec = {
                 loadingEl.outerHTML = html;
             }
 
-            // 保存聊天历史
             this._chatHistory.push({ role: 'user', content: text });
             this._chatHistory.push({ role: 'assistant', content: answer });
             this._saveChatHistory();
@@ -373,7 +812,6 @@ const InterfaceSpec = {
         navigator.clipboard.writeText(text).then(() => {
             showToast('已复制到剪贴板');
         }).catch(() => {
-            // fallback
             const ta = document.createElement('textarea');
             ta.value = text;
             document.body.appendChild(ta);
@@ -393,7 +831,7 @@ const InterfaceSpec = {
     _saveChatHistory() {
         try {
             const key = `spec_chat_${this._currentProjectId}`;
-            const toSave = this._chatHistory.slice(-40); // 保留最近 20 轮
+            const toSave = this._chatHistory.slice(-40);
             localStorage.setItem(key, JSON.stringify(toSave));
         } catch { }
     },
@@ -522,7 +960,6 @@ const InterfaceSpec = {
         const welcome = mc?.querySelector('.spec-chat-welcome');
         if (welcome) welcome.remove();
 
-        // 显示 loading
         const loadingId = 'gen-req-' + Date.now();
         if (mc) {
             mc.innerHTML += `
@@ -640,242 +1077,5 @@ const InterfaceSpec = {
         } else {
             body.style.maxHeight = '0';
         }
-    },
-
-    // ========== 字段详情弹窗 ==========
-    async showFieldDetail(comparisonId) {
-        openModal('fieldDetailModal');
-        const body = document.getElementById('fieldDetailBody');
-        body.innerHTML = '<div style="text-align:center;padding:40px;"><div class="spinner" style="margin:0 auto 12px;"></div>加载字段对照...</div>';
-        try {
-            const data = await api.get(`/interface-comparisons/${comparisonId}/detail`);
-            this._renderFieldDetail(data);
-        } catch (e) {
-            body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">加载失败: ${e.message}</div>`;
-        }
-    },
-
-    _renderFieldDetail(data) {
-        const body = document.getElementById('fieldDetailBody');
-        const mappings = data.mappings || [];
-        const statusMap = {
-            'matched': { label: '✅ 完全匹配', color: '#10b981', bg: '#f0fdf4' },
-            'name_different': { label: '🔄 名称不同', color: '#f59e0b', bg: '#fffbeb' },
-            'type_mismatch': { label: '⚠️ 类型不匹配', color: '#ef4444', bg: '#fef2f2' },
-            'needs_transform': { label: '🔧 需转换', color: '#f59e0b', bg: '#fffbeb' },
-            'missing_in_vendor': { label: '❌ 对方缺失', color: '#ef4444', bg: '#fef2f2' },
-            'extra_in_vendor': { label: 'ℹ️ 对方额外', color: '#6b7280', bg: '#f9fafb' },
-        };
-        const stats = {};
-        for (const m of mappings) { stats[m.mapping_status] = (stats[m.mapping_status] || 0) + 1; }
-
-        let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-            ${Object.entries(stats).map(([k, v]) => {
-            const s = statusMap[k] || { label: k, color: '#6b7280', bg: '#f9fafb' };
-            return `<span style="background:${s.bg};color:${s.color};padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;">${s.label}: ${v}</span>`;
-        }).join('')}
-        </div>
-        <div class="table-container"><table class="table" style="font-size:12px;">
-            <thead><tr><th>状态</th><th>我方字段</th><th>→</th><th>对方字段</th><th>我方类型</th><th>对方类型</th><th>转换规则</th><th>确认</th></tr></thead><tbody>`;
-
-        for (const m of mappings) {
-            const s = statusMap[m.mapping_status] || { label: m.mapping_status, color: '#6b7280', bg: '#f9fafb' };
-            html += `<tr style="background:${m.is_confirmed ? '#f0fdf4' : s.bg};">
-                <td><span style="color:${s.color};font-size:11px;font-weight:600;">${s.label}</span></td>
-                <td><div style="font-family:monospace;font-weight:600;">${m.our_field_name || '-'}</div></td>
-                <td style="color:var(--gray-300);">→</td>
-                <td><div style="font-family:monospace;font-weight:500;">${m.vendor_field_name || '-'}</div></td>
-                <td><span class="badge badge-gray">${m.our_type || '-'}</span></td>
-                <td><span class="badge badge-gray">${m.vendor_type || '-'}</span></td>
-                <td style="font-size:11px;color:var(--gray-600);max-width:180px;overflow:hidden;text-overflow:ellipsis;" title="${m.transform_rule || ''}">${m.transform_rule || '-'}</td>
-                <td>${m.is_confirmed ? '<span style="color:var(--success);font-weight:600;">✓</span>' : `<button class="btn btn-success btn-xs" onclick="InterfaceSpec.confirmMapping(${m.id})">确认</button>`}</td>
-            </tr>`;
-        }
-        html += '</tbody></table></div>';
-        body.innerHTML = html;
-    },
-
-    async confirmMapping(mappingId) {
-        try {
-            await api.put(`/field-mappings/${mappingId}/confirm`, {});
-            showToast('已确认');
-            event.target.outerHTML = '<span style="color:var(--success);font-weight:600;">✓</span>';
-        } catch (e) { showToast('确认失败: ' + e.message, 'error'); }
-    },
-
-    // ========== 上传 ==========
-    openQuickUpload(source) {
-        this.showUploadModal(source);
-    },
-
-    showUploadModal(source) {
-        this._uploadSource = source;
-        const title = source === 'our_standard' ? '上传我方标准接口文档' : '上传对方接口文档';
-        document.getElementById('specUploadTitle').textContent = title;
-        document.getElementById('specVendorNameGroup').style.display = source === 'vendor' ? 'block' : 'none';
-        document.getElementById('specCategoryGroup').style.display = 'block';
-        document.getElementById('specDocText').value = '';
-        document.getElementById('specDocText').placeholder = '将接口文档内容粘贴到此处，或通过上方文件选择器上传...\n\n支持格式：PDF、Word、TXT、XML、JSON、HL7\nAI 将自动识别并提取所有接口定义、字段、类型等。';
-        document.getElementById('specVendorName').value = '';
-        document.getElementById('specFileInput').value = '';
-        document.getElementById('specParseResult').innerHTML = '';
-        document.getElementById('specParseResult').style.display = 'none';
-
-        const categorySelect = document.getElementById('specCategory');
-        if (categorySelect) {
-            categorySelect.value = (source === 'our_standard') ? this._currentCategory : (this._lastCategories[source] || '接口文档');
-        }
-        openModal('specUploadModal');
-    },
-
-    async handleFileSelect() {
-        const input = document.getElementById('specFileInput');
-        const textarea = document.getElementById('specDocText');
-        if (!input.files || !input.files[0]) return;
-
-        const file = input.files[0];
-        const ext = file.name.split('.').pop().toLowerCase();
-
-        if (['txt', 'xml', 'json', 'wsdl'].includes(ext)) {
-            const reader = new FileReader();
-            reader.onload = (e) => { textarea.value = e.target.result; };
-            reader.readAsText(file);
-            return;
-        }
-
-        textarea.value = '';
-        textarea.placeholder = `已选择文件: ${file.name}\n正在通过后端提取文本，请稍候...`;
-
-        const parseBtn = document.getElementById('btnSpecParse');
-        if (parseBtn) { parseBtn.disabled = true; parseBtn.dataset.originalText = parseBtn.textContent; parseBtn.textContent = '⏳ 正在提取文件文本...'; }
-
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            const res = await fetch(`/api/extract-text`, { method: 'POST', body: formData });
-
-            if (res.status === 404) {
-                showToast('后端文本提取接口未找到', 'error');
-                textarea.placeholder = '文本提取失败，请手动粘贴文档内容';
-                return;
-            }
-
-            const data = await res.json();
-            if (data.success && data.data && data.data.text) {
-                textarea.value = data.data.text;
-                showToast(`文本提取成功，${data.data.text.length} 字符`);
-            } else {
-                showToast(data.message || '文本提取失败', 'error');
-                textarea.placeholder = data.message || '请手动粘贴文档内容';
-            }
-        } catch (e) {
-            showToast('文件解析失败', 'error');
-            textarea.placeholder = '文件解析失败，请手动粘贴文档内容';
-        } finally {
-            if (parseBtn) { parseBtn.disabled = false; parseBtn.textContent = parseBtn.dataset.originalText || '🤖 开始 AI 解析'; }
-        }
-    },
-
-    async submitParse() {
-        const textarea = document.getElementById('specDocText');
-        const docText = textarea.value.trim();
-        if (!docText) {
-            showToast('请粘贴或上传文档内容', 'error');
-            return;
-        }
-
-        const source = this._uploadSource;
-        const vendorName = document.getElementById('specVendorName').value.trim();
-        const category = document.getElementById('specCategory').value;
-        const resultEl = document.getElementById('specParseResult');
-        const btn = document.getElementById('btnSpecParse');
-
-        btn.disabled = true;
-        btn.textContent = '⏳ AI 正在解析...';
-        resultEl.style.display = 'block';
-        resultEl.innerHTML = '<div style="text-align:center;padding:20px;"><div class="spinner" style="margin:0 auto 10px;"></div><div style="color:var(--gray-500);font-size:13px;">AI 正在解析接口文档，请稍候（可能需要 30-60 秒）...</div></div>';
-
-        try {
-            const endpoint = source === 'our_standard'
-                ? '/interface-specs/parse-standard'
-                : `/projects/${this._currentProjectId}/interface-specs/parse`;
-
-            const body = { doc_text: docText, spec_source: source, category, vendor_name: vendorName, as_global: source === 'our_standard' };
-            const data = await api.post(endpoint, body);
-
-            resultEl.innerHTML = `
-                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;">
-                    <div style="font-weight:700;color:#047857;margin-bottom:10px;">✅ 解析成功！共识别 ${data.parsed_count} 个接口</div>
-                    ${(data.interfaces || []).map(i => `
-                        <div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #dcfce7;">
-                            <span class="badge badge-info">${i.system_type || ''}</span>
-                            <span style="font-weight:600;font-size:13px;">${i.name}</span>
-                            <span style="font-size:11px;color:var(--gray-400);">${i.transcode || ''}</span>
-                            <span style="font-size:11px;color:var(--gray-500);">${i.fields_count} 字段</span>
-                        </div>
-                    `).join('')}
-                    <div style="margin-top:12px;text-align:center;">
-                        <button class="btn btn-primary btn-sm" onclick="closeModal('specUploadModal');InterfaceSpec.loadAll(true);">关闭并刷新</button>
-                    </div>
-                </div>`;
-        } catch (e) {
-            resultEl.innerHTML = `<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;color:var(--danger);">❌ 解析失败: ${e.message}</div>`;
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '🤖 开始 AI 解析';
-        }
-    },
-
-    // ========== 对照 / 报告 / 删除 ==========
-    async runComparisonFromDash() {
-        await this.loadAll(true);
-        await this.runComparison();
-    },
-
-    async runComparison() {
-        const btn = document.getElementById('btnRunComparison');
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ 对照中...'; }
-        try {
-            const category = document.getElementById('compareCategory')?.value || this._currentCategory;
-            const result = await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, { category });
-            showToast(`对照完成！共 ${result.comparison_count} 对接口`);
-            await this.loadAll(true);
-        } catch (e) {
-            showToast('对照失败: ' + e.message, 'error');
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '🔍 一键智能对照'; }
-        }
-    },
-
-    async generateReport() {
-        showToast('正在生成对照报告...');
-        try {
-            const res = await api.get(`/projects/${this._currentProjectId}/interface-comparison/report`);
-            const report = res.report || '报告生成失败';
-            // 用 Chat Modal 展示报告
-            this._ensureChatModal();
-            openModal('interfaceChatModal');
-            const mc = document.getElementById('modalChatMessages');
-            if (mc) {
-                const welcome = mc.querySelector('.spec-chat-welcome');
-                if (welcome) welcome.remove();
-                mc.innerHTML += `<div style="display:flex;justify-content:flex-start;">
-                    <div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:16px;border-radius:16px;max-width:90%;font-size:14px;line-height:1.7;">
-                        <div style="font-weight:700;color:var(--primary);margin-bottom:8px;">📊 接口对照分析报告</div>
-                        <div class="report-content">${marked.parse(report)}</div>
-                    </div>
-                </div>`;
-                mc.scrollTop = mc.scrollHeight;
-            }
-        } catch (e) { showToast('报告生成失败: ' + e.message, 'error'); }
-    },
-
-    async deleteSpec(specId) {
-        if (!confirm('确认删除此接口规范？')) return;
-        try {
-            await api.delete(`/interface-specs/${specId}`);
-            showToast('已删除');
-            await this.loadAll(true);
-        } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
     }
 };
