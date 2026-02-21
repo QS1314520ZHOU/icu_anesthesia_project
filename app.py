@@ -53,7 +53,7 @@ def debug_static_info():
 @app.route('/api/force_static/<path:filename>')
 def force_static(filename):
     return send_from_directory(os.path.join(app.root_path, 'static'), filename)
-
+from routes.alignment_routes import alignment_bp
 from routes.project_routes import project_bp
 from routes.member_routes import member_bp
 from routes.log_routes import log_bp
@@ -78,6 +78,7 @@ from routes.interface_spec_routes import spec_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
+app.register_blueprint(alignment_bp)
 app.register_blueprint(project_bp)
 app.register_blueprint(member_bp)
 app.register_blueprint(log_bp)
@@ -863,6 +864,109 @@ def init_db():
             FOREIGN KEY (vendor_field_id) REFERENCES interface_spec_fields(id)
         )
     ''')
+        # ========== 接口对齐模块表 ==========
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interface_specs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spec_version TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'common',
+            system_name TEXT NOT NULL,
+            interface_name TEXT NOT NULL,
+            interface_code TEXT,
+            description TEXT,
+            protocol TEXT,
+            view_name TEXT,
+            is_required BOOLEAN DEFAULT 0,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS interface_spec_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spec_interface_id INTEGER NOT NULL,
+            field_name TEXT NOT NULL,
+            field_label TEXT,
+            field_type TEXT DEFAULT 'VARCHAR',
+            is_required BOOLEAN DEFAULT 0,
+            max_length INTEGER,
+            sample_value TEXT,
+            remark TEXT,
+            sort_order INTEGER DEFAULT 0,
+            FOREIGN KEY (spec_interface_id) REFERENCES interface_specs(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alignment_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            spec_version TEXT NOT NULL,
+            vendor_name TEXT,
+            vendor_doc_path TEXT,
+            vendor_doc_text TEXT,
+            total_spec_interfaces INTEGER DEFAULT 0,
+            matched_count INTEGER DEFAULT 0,
+            partial_count INTEGER DEFAULT 0,
+            missing_count INTEGER DEFAULT 0,
+            extra_count INTEGER DEFAULT 0,
+            match_score REAL DEFAULT 0,
+            ai_summary TEXT,
+            status TEXT DEFAULT 'pending',
+            created_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alignment_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            spec_interface_id INTEGER NOT NULL,
+            match_status TEXT NOT NULL,
+            confidence REAL DEFAULT 0,
+            vendor_interface_name TEXT,
+            vendor_view_name TEXT,
+            vendor_protocol TEXT,
+            vendor_description TEXT,
+            diff_summary TEXT,
+            risk_note TEXT,
+            is_confirmed BOOLEAN DEFAULT 0,
+            confirmed_by TEXT,
+            confirmed_at TIMESTAMP,
+            manual_note TEXT,
+            FOREIGN KEY (session_id) REFERENCES alignment_sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (spec_interface_id) REFERENCES interface_specs(id)
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alignment_field_maps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alignment_result_id INTEGER NOT NULL,
+            spec_field_id INTEGER NOT NULL,
+            vendor_field_name TEXT,
+            vendor_field_type TEXT,
+            map_status TEXT DEFAULT 'auto',
+            transform_rule TEXT,
+            confidence REAL DEFAULT 0,
+            FOREIGN KEY (alignment_result_id) REFERENCES alignment_results(id) ON DELETE CASCADE,
+            FOREIGN KEY (spec_field_id) REFERENCES interface_spec_fields(id)
+        )
+    ''')
+
+    # 索引
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_align_session_project ON alignment_sessions(project_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_align_result_session ON alignment_results(session_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_align_field_result ON alignment_field_maps(alignment_result_id)')
+    except:
+        pass
+
 
     # ========== 数据库升级：添加缺失的列 ==========
     columns_to_add = [
@@ -1043,6 +1147,9 @@ def log_operation(operator, op_type, entity_type, entity_id, entity_name, old_va
 @app.route('/')
 def index():
     return render_template('index.html')
+@app.route('/alignment')
+def alignment_page():
+    return render_template('alignment.html')
 
 # ========== 项目健康度仪表盘 API ==========
 @app.route('/api/dashboard/health', methods=['GET'])
