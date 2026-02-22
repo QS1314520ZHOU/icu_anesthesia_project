@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify, send_file, make_resp
 import logging
 import re
 # Force reload
-# te3
+# reload_trigger_1
 import sqlite3
 import requests
 import json
@@ -35,6 +35,15 @@ def list_routes():
         line = urllib.parse.unquote("{:50s} {:20s} {}".format(rule.endpoint, methods, rule))
         output.append(line)
     return "<pre>" + "\n".join(output) + "</pre>"
+
+@app.route('/debug/wecom-logs')
+def debug_wecom_logs():
+    try:
+        with DatabasePool.get_connection() as conn:
+            logs = conn.execute('SELECT * FROM wecom_debug_logs ORDER BY id DESC LIMIT 20').fetchall()
+            return jsonify([dict(l) for l in logs])
+    except Exception as e:
+        return str(e), 500
 
 @app.route('/debug/static-info')
 def debug_static_info():
@@ -459,7 +468,16 @@ def init_db():
         )
     ''')
 
-    # 14. 离场记录表
+    # 20. 企业微信调试日志表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS wecom_debug_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            msg_type TEXT,
+            raw_xml TEXT,
+            parsed_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS project_departures (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

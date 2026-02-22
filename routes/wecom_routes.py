@@ -53,12 +53,23 @@ def receive_callback():
     
     if not wecom_service.crypto:
         return "callback not configured", 403
-    
+    # 获取加密参数
     msg_signature = request.args.get('msg_signature', '')
     timestamp = request.args.get('timestamp', '')
     nonce = request.args.get('nonce', '')
     post_data = request.data.decode('utf-8')
     
+    # 甚至在解密前就开始记录（紧急调试）
+    try:
+        from database import DatabasePool
+        import json
+        with DatabasePool.get_connection() as conn:
+            conn.execute('INSERT INTO wecom_debug_logs (msg_type, raw_xml) VALUES (?, ?)', 
+                         ('RAW_POST', f"Signature: {msg_signature}, Data: {post_data[:200]}..."))
+            conn.commit()
+    except Exception as e:
+        logger.error("Failed to save raw wecom debug log: %s", e)
+
     try:
         # 解密
         plain_xml = wecom_service.crypto.decrypt_callback(
@@ -69,8 +80,18 @@ def receive_callback():
         
         msg = wecom_service.crypto.parse_msg_xml(plain_xml)
         
-        # 加这一行，打印完整消息内容
-        logger.info("收到完整消息内容: %s", msg)
+        # 将原始消息记录到数据库供调试
+        try:
+            from database import DatabasePool
+            import json
+            with DatabasePool.get_connection() as conn:
+                conn.execute('''
+                    INSERT INTO wecom_debug_logs (msg_type, raw_xml, parsed_json)
+                    VALUES (?, ?, ?)
+                ''', (msg.get('MsgType'), plain_xml, json.dumps(msg, ensure_ascii=False)))
+                conn.commit()
+        except Exception as db_err:
+            logger.error("Failed to save wecom debug log: %s", db_err)
         
         logger.info("收到企业微信回调: MsgType=%s, From=%s", 
                     msg.get('MsgType'), msg.get('FromUserName'))
