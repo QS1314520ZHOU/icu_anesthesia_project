@@ -7690,21 +7690,38 @@ document.addEventListener('click', function (e) {
     }
 });
 
-function showWecomLogin() {
-    // 方案一：直接跳转（最简单，推荐先用这个）
-    const corpId = 'ww6b317cedddce30f2';
-    const agentId = '1000003';
-    const redirectUri = encodeURIComponent('https://dxm.jylb.fun/api/wecom/sso/callback');
-    const state = 'wecom_login_' + Date.now();
+async function showWecomLogin() {
+    const container = document.getElementById('wecom_login_container');
+    const loginForm = document.getElementById('loginForm');
 
-    const loginUrl = `https://login.work.weixin.qq.com/wwlogin/sso/login`
-        + `?login_type=CorpApp`
-        + `&appid=${corpId}`
-        + `&agentid=${agentId}`
-        + `&redirect_uri=${redirectUri}`
-        + `&state=${state}`;
+    if (container.style.display === 'block') {
+        container.style.display = 'none';
+        loginForm.style.display = 'block';
+        return;
+    }
 
-    window.location.href = loginUrl;
+    try {
+        // 获取配置
+        const config = await api.get('/wecom/config');
+
+        container.style.display = 'block';
+        loginForm.style.display = 'none';
+        container.innerHTML = ''; // 清空
+
+        // 初始化扫码
+        window.wwLogin = new WwLogin({
+            "id": "wecom_login_container",
+            "appid": config.corp_id,
+            "agentid": config.agent_id,
+            "redirect_uri": encodeURIComponent(config.redirect_uri),
+            "state": "wecom_login_" + Date.now(),
+            "href": "", // 可以自定义样式
+            "lang": "zh",
+        });
+    } catch (e) {
+        console.error('获取企业微信配置失败', e);
+        alert('无法启动企业微信登录，请联系管理员');
+    }
 }
 
 // 页面加载时检查 URL 中是否有 token（扫码登录回调回来）

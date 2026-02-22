@@ -159,8 +159,16 @@ def _handle_menu_click(userid: str, event_key: str) -> str:
     handler = handlers.get(event_key)
     return handler() if handler else f"未知的菜单操作: {event_key}"
 
-
 # ===== OAuth2 登录 =====
+
+@wecom_bp.route('/config', methods=['GET'])
+def get_wecom_config():
+    """获取企业微信配置（用于前端 JS SDK）"""
+    return api_response(True, data={
+        "corp_id": WECOM_CONFIG.get('CORP_ID'),
+        "agent_id": WECOM_CONFIG.get('AGENT_ID'),
+        "redirect_uri": f"{WECOM_CONFIG['APP_HOME_URL']}/api/wecom/sso/callback"
+    })
 
 @wecom_bp.route('/oauth/login', methods=['GET'])
 def oauth_login():
@@ -269,6 +277,9 @@ def sso_callback():
     
     if result.get('success'):
         token = result['token']
-        return redirect(f'/?token={token}')
+        from flask import make_response
+        response = make_response(redirect(f'/?token={token}'))
+        response.set_cookie('auth_token', token, httponly=True, max_age=86400)
+        return response
     else:
         return redirect('/?login_error=bindFailed')
