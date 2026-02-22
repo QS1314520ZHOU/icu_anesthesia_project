@@ -81,6 +81,15 @@ def receive_callback():
             media_id = msg.get('MediaId', '')
             reply_content = wecom_msg_handler.handle_image_message(from_user, media_id)
             
+        elif msg_type == 'voice':
+            # 企业微信自动语音转文字，结果在 Recognition 字段
+            recognition = msg.get('Recognition', '')
+            if recognition:
+                # 把识别出的文字当作普通文本消息处理
+                reply_content = wecom_msg_handler.handle_text_message(from_user, recognition)
+            else:
+                reply_content = "抱歉，没有识别出语音内容，请重新发送或使用文字。"
+            
         elif msg_type == 'event':
             event_type = msg.get('Event', '')
             if event_type == 'click':
