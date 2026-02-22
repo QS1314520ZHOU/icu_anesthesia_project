@@ -33,7 +33,7 @@ class ApiClient {
                 if (data.success) {
                     return data.data !== undefined ? data.data : data;
                 } else {
-                    const errorMsg = data.message || 'Unknown API Error';
+                    const errorMsg = data.message || data.error || 'Unknown API Error';
                     if (!options.silent) alert(errorMsg);
                     throw new Error(errorMsg);
                 }
@@ -41,7 +41,7 @@ class ApiClient {
 
             // Handle legacy/direct response
             if (!response.ok) {
-                throw new Error(data.message || `HTTP Error ${response.status}`);
+                throw new Error(data.message || data.error || `HTTP Error ${response.status}`);
             }
 
             return data;

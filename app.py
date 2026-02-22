@@ -3727,7 +3727,7 @@ def get_wecom_config():
         if result.get('callback_aes_key'):
             result['callback_aes_key'] = '******'
             
-        return jsonify({'success': True, 'data': result})
+        return jsonify({'success': True, 'message': 'Success', 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
     finally:
@@ -3753,12 +3753,19 @@ def save_wecom_config():
             
             # 如果是脱敏过的且没改，则保留原值
             final_val = val
-            if key == 'secret' and val.startswith('****') and val.endswith('****'):
-                final_val = existing.get('secret')
+            is_masked = False
+            
+            if key == 'secret':
+                # 检查是否包含星号，且长度与脱敏后的特征匹配
+                if val and '****' in val:
+                    is_masked = True
             elif key == 'callback_aes_key' and val == '******':
-                final_val = existing.get('callback_aes_key')
+                is_masked = True
                 
-            updates.append((db_key, str(final_val)))
+            if is_masked:
+                final_val = existing.get(key)
+                
+            updates.append((db_key, str(final_val) if final_val is not None else ""))
             
         for k, v in updates:
             cursor.execute('''

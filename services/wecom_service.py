@@ -49,7 +49,7 @@ class WeComService:
                     val = row['value']
                     
                     if key == 'WECOM_ENABLED':
-                        WECOM_CONFIG['ENABLED'] = val.lower() == 'true'
+                        WECOM_CONFIG['ENABLED'] = val.lower() == 'true' or val == '1'
                     elif key == 'WECOM_CORP_ID':
                         WECOM_CONFIG['CORP_ID'] = val
                     elif key == 'WECOM_AGENT_ID':

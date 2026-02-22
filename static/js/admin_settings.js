@@ -596,8 +596,9 @@ var adminSettings = {
     loadWecomConfig: async function () {
         try {
             const res = await api.get('/admin/wecom-config');
-            if (res && res.success && res.data) {
-                const d = res.data;
+            // api.get already returns data.data if success=true
+            if (res) {
+                const d = res; // res is the config object
                 document.getElementById('wecomEnabled').checked = d.enabled === 'true';
                 document.getElementById('wecomCorpId').value = d.corp_id || '';
                 document.getElementById('wecomAgentId').value = d.agent_id || '';
