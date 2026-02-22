@@ -2950,7 +2950,7 @@ async function updateOverallProgress() {
 
 // ========== 视图切换工具 ==========
 function hideAllViews() {
-    const views = ['dashboardView', 'projectDetailView', 'mapView', 'analyticsView', 'approvalView', 'kbView', 'assetView', 'emptyState'];
+    const views = ['dashboardView', 'projectDetailView', 'mapView', 'analyticsView', 'approvalView', 'kbView', 'assetView', 'formGeneratorView', 'emptyState'];
     views.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
@@ -4570,7 +4570,7 @@ async function handleApproval(type, id, status) {
 
 
 function hideAllViews() {
-    const views = ['dashboardView', 'projectDetailView', 'approvalView', 'emptyState', 'mapView', 'analyticsView'];
+    const views = ['dashboardView', 'projectDetailView', 'mapView', 'analyticsView', 'approvalView', 'kbView', 'assetView', 'formGeneratorView', 'emptyState'];
     views.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
@@ -4715,6 +4715,24 @@ function showKBView() {
         const script = document.createElement('script');
         script.src = '/static/js/kb_management.js';
         script.onload = () => initKB();
+        document.body.appendChild(script);
+    }
+}
+
+function showFormGeneratorView() {
+    currentProjectId = null;
+    hideAllViews();
+    document.getElementById('formGeneratorView').style.display = 'block';
+    if (typeof FormGenerator !== 'undefined') {
+        FormGenerator.init();
+    } else {
+        const script = document.createElement('script');
+        script.src = '/api/force_static/js/form_generator.js';
+        script.onload = () => {
+            if (typeof FormGenerator !== 'undefined') {
+                FormGenerator.init();
+            }
+        };
         document.body.appendChild(script);
     }
 }

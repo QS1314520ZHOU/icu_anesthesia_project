@@ -2632,6 +2632,9 @@
                     <button class="btn btn-purple btn-full" onclick="showPerformanceAnalytics()">🏅 绩效分析</button>
                     <button class="btn btn-outline btn-full" onclick="showApprovalCenter()">📋 审批中心</button>
                     <button class="btn btn-ai btn-full" onclick="showProjectComparison()">📊 项目对比</button>
+                    <button class="btn btn-primary btn-full" onclick="showFormGeneratorView()"
+                        style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; border: none;">📝
+                        Form Generator</button>
                     <button class="btn btn-outline btn-full" onclick="showWecomConfigPanel()"
                         style="background:linear-gradient(135deg,#25d366,#128c7e);color:white;border:none;">📤
                         企微推送配置</button>
@@ -2733,6 +2736,99 @@
                 </div>
             </div>
 
+            <div id="formGeneratorView" style="display:none; padding: 20px;">
+                <div class="detail-header" style="margin-bottom: 20px;">
+                    <div>
+                        <h2 class="detail-title">📝 Form Generator</h2>
+                        <p class="detail-meta">批量生成表单控件 JSON 数组</p>
+                    </div>
+                </div>
+                <!-- Premium Form Generator UI -->
+                <div class="panel" style="max-width: 1200px; margin: 0 auto;">
+                    <div class="panel-body" style="padding: 30px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                            <!-- Left: Config -->
+                            <div>
+                                <h3 style="margin-bottom: 20px; font-size: 16px; color: var(--gray-800);">配置参数</h3>
+                                <div class="form-group">
+                                    <label>模板 JSON (单个元素)</label>
+                                    <textarea id="fgTemplate" rows="8" class="form-control"
+                                        placeholder='{ "id": "field_1", "type": "text", "label": "Label", "x": 100, "y": 100, "value": "a1" }'
+                                        style="font-family: monospace; font-size: 12px;"></textarea>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>生成模式</label>
+                                        <select id="fgMode" class="form-control"
+                                            onchange="FormGenerator.onModeChange()">
+                                            <option value="y">垂直 (Y轴)</option>
+                                            <option value="x">水平 (X轴)</option>
+                                            <option value="xy">网格 (XY轴)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>起始前缀 (如 'a')</label>
+                                        <input type="text" id="fgPrefix" class="form-control" value="a">
+                                    </div>
+                                </div>
+                                <div id="fgSingleAxisParams">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>生成数量</label>
+                                            <input type="number" id="fgCount" class="form-control" value="10">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>间距 (Spacing)</label>
+                                            <input type="number" id="fgSpacing" class="form-control" value="40">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="fgGridParams" style="display: none;">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>行数 (Rows)</label>
+                                            <input type="number" id="fgRows" class="form-control" value="5">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>列数 (Cols)</label>
+                                            <input type="number" id="fgCols" class="form-control" value="5">
+                                        </div>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Y轴间距</label>
+                                            <input type="number" id="fgYSpacing" class="form-control" value="40">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>X轴间距</label>
+                                            <input type="number" id="fgXSpacing" class="form-control" value="100">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="margin-top: 20px; display: flex; gap: 12px;">
+                                    <button class="btn btn-primary" onclick="FormGenerator.generate()"
+                                        style="flex: 1;">🚀 立即生成</button>
+                                    <button class="btn btn-outline" onclick="FormGenerator.clear()"
+                                        style="width: 80px;">清空</button>
+                                </div>
+                            </div>
+                            <!-- Right: Result -->
+                            <div style="display: flex; flex-direction: column;">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                    <h3 style="font-size: 16px; color: var(--gray-800); margin: 0;">生成结果</h3>
+                                    <button class="btn btn-outline btn-xs" onclick="FormGenerator.copy()">📋
+                                        复制结果</button>
+                                </div>
+                                <textarea id="fgResult" rows="20" class="form-control" readonly
+                                    style="flex: 1; font-family: monospace; font-size: 11px; background: var(--gray-50);"></textarea>
+                                <div id="fgStatus" style="margin-top: 8px; font-size: 12px; color: var(--gray-500);">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div id="assetView" style="display:none; padding: 20px;">
                 <div class="detail-header" style="margin-bottom: 20px;">
                     <div>
@@ -4999,6 +5095,7 @@
     <script src='/api/force_static/js/daily_report.js?v=2'></script>
     <script src='/api/force_static/js/standup.js?v=2'></script>
     <script src='/api/force_static/js/admin_settings.js?v=5'></script>
+    <script src='/api/force_static/js/form_generator.js?v=1'></script>
 
     <!-- Service Worker Registration -->
     <script>
