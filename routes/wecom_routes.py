@@ -64,6 +64,9 @@ def receive_callback():
         plain_xml = wecom_service.crypto.decrypt_callback(
             msg_signature, timestamp, nonce, post_data
         )
+        # 加这一行，打印原始解密后的 XML 供调试
+        logger.debug("WeCom Decrypted XML: %s", plain_xml)
+        
         msg = wecom_service.crypto.parse_msg_xml(plain_xml)
         
         # 加这一行，打印完整消息内容
@@ -85,12 +88,14 @@ def receive_callback():
             reply_content = wecom_msg_handler.handle_image_message(from_user, media_id)
             
         elif msg_type == 'voice':
-            # 企业微信自动语音转文字，结果在 Recognition 字段
-            recognition = msg.get('Recognition', '')
+            # 兼容不同大小写（虽然官方是 Recognition）
+            recognition = msg.get('Recognition') or msg.get('recognition') or ''
             if recognition:
+                logger.info("识别到语音内容: %s", recognition)
                 # 把识别出的文字当作普通文本消息处理
                 reply_content = wecom_msg_handler.handle_text_message(from_user, recognition)
             else:
+                logger.warning("语音消息未包含有效 Recognition 字段")
                 reply_content = "抱歉，没有识别出语音内容，请重新发送或使用文字。"
             
         elif msg_type == 'event':

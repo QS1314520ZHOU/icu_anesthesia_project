@@ -617,7 +617,9 @@ class AIInsightService:
         try:
             with DatabasePool.get_connection() as conn:
                 project = conn.execute('SELECT id, project_name, progress, plan_end_date, plan_start_date FROM projects WHERE id = ?', (project_id,)).fetchone()
-                if not project: return None
+                if not project: 
+                    logger.warning(f"Project {project_id} not found for prediction")
+                    return None
                 
                 # 1. 计算交付速度 (Velocity)
                 # 获取过去 14 天的进度变化
@@ -630,11 +632,14 @@ class AIInsightService:
                 
                 velocity = 0 # 每天平均增长百分比
                 if len(history) >= 2:
-                    start_p = history[0]['progress']
-                    end_p = history[-1]['progress']
-                    days = (datetime.strptime(history[-1]['record_date'], '%Y-%m-%d') - datetime.strptime(history[0]['record_date'], '%Y-%m-%d')).days
-                    if days > 0:
-                        velocity = (end_p - start_p) / float(days)
+                    start_p = history[0]['progress'] or 0
+                    end_p = history[-1]['progress'] or 0
+                    try:
+                        days = (datetime.strptime(history[-1]['record_date'], '%Y-%m-%d') - datetime.strptime(history[0]['record_date'], '%Y-%m-%d')).days
+                        if days > 0:
+                            velocity = (end_p - start_p) / float(days)
+                    except Exception as ex:
+                        logger.error(f"Error calculating velocity days: {ex}")
                 
                 # 2. 获取情绪评分趋势 (Sentiment Trend)
                 risk_history = conn.execute('''
@@ -643,15 +648,23 @@ class AIInsightService:
                     ORDER BY record_date DESC LIMIT 5
                 ''', (project_id,)).fetchall()
                 
-                sentiment_avg = sum([r['sentiment_score'] for r in risk_history]) / len(risk_history) if risk_history else 50
+                # 过滤 None 值
+                sentiment_scores = [r['sentiment_score'] for r in risk_history if r['sentiment_score'] is not None]
+                sentiment_avg = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 50
+                
                 is_sentiment_dropping = False
                 if len(risk_history) >= 2:
-                    is_sentiment_dropping = risk_history[0]['sentiment_score'] < risk_history[-1]['sentiment_score'] # 因为第0个是最近的
+                    current_s = risk_history[0]['sentiment_score'] or 0
+                    prev_s = risk_history[-1]['sentiment_score'] or 0
+                    is_sentiment_dropping = current_s < prev_s # 因为第0个是最近的
 
                 # 3. 计算预测日期
-                remaining_p = 100 - project['progress']
+                current_progress = project['progress'] or 0
+                remaining_p = 100 - current_progress
                 if velocity > 0:
                     days_needed = remaining_p / velocity
+                    # 限制天数，防止溢出
+                    days_needed = min(days_needed, 3650) # 最多预测10年
                     predicted_end = (datetime.now() + timedelta(days=int(days_needed))).strftime('%Y-%m-%d')
                 else:
                     predicted_end = "无法计算 (进度停滞)"
@@ -661,15 +674,18 @@ class AIInsightService:
                 is_delay_predicted = False
                 delay_days = 0
                 if project['plan_end_date'] and velocity > 0:
-                    plan_end = datetime.strptime(project['plan_end_date'], '%Y-%m-%d')
-                    actual_pred = datetime.now() + timedelta(days=int(days_needed))
-                    if actual_pred > plan_end:
-                        is_delay_predicted = True
-                        delay_days = (actual_pred - plan_end).days
+                    try:
+                        plan_end = datetime.strptime(project['plan_end_date'], '%Y-%m-%d')
+                        actual_pred = datetime.now() + timedelta(days=int(days_needed))
+                        if actual_pred > plan_end:
+                            is_delay_predicted = True
+                            delay_days = (actual_pred - plan_end).days
+                    except Exception as pe:
+                        logger.error(f"Error parsing plan_end_date for project {project_id}: {pe}")
 
                 return {
                     "project_id": project_id,
-                    "current_progress": project['progress'],
+                    "current_progress": current_progress,
                     "avg_velocity": round(velocity, 2),
                     "predicted_end_date": predicted_end,
                     "plan_end_date": project['plan_end_date'],
@@ -681,7 +697,7 @@ class AIInsightService:
                 }
 
         except Exception as e:
-            print(f"Predict Future Risks Error: {e}")
+            logger.error(f"Predict Future Risks Error for project {project_id}: {e}", exc_info=True)
             return None
 
     @staticmethod
