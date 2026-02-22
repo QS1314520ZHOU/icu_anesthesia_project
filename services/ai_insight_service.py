@@ -426,12 +426,12 @@ class AIInsightService:
                 
                 # 4. 存入 Knowledge Base
                 # 检查是否已存在类似标题 (简单去重)
-                existing = conn.execute('SELECT id FROM kb_items WHERE title = ?', (kb_data['title'],)).fetchone()
+                existing = conn.execute('SELECT id FROM knowledge_base WHERE title = ?', (kb_data['title'],)).fetchone()
                 if existing:
                     return {"success": True, "message": "Knowledge item already exists", "id": existing['id']}
                 
                 cursor = conn.execute('''
-                    INSERT INTO kb_items (title, content, category, tags, created_at)
+                    INSERT INTO knowledge_base (title, content, category, tags, created_at)
                     VALUES (?, ?, ?, ?, ?)
                 ''', (
                     kb_data['title'], 

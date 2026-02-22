@@ -711,10 +711,16 @@ def init_db():
             assoc_stage TEXT,
             project_id INTEGER,
             author TEXT,
+            embedding BLOB,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # 升级 knowledge_base 增加 embedding
+    try:
+        cursor.execute("ALTER TABLE knowledge_base ADD COLUMN embedding BLOB")
+    except: pass
 
     # 24. 硬件资产报表
     cursor.execute('''
@@ -3156,7 +3162,7 @@ def ai_ask_kb():
         cursor = conn.cursor()
         
         try:
-            cursor.execute("SELECT id, title, content, category, tags FROM knowledge_base")
+            cursor.execute("SELECT id, title, content, category, tags, embedding FROM knowledge_base")
             columns = [column[0] for column in cursor.description]
             kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
         except sqlite3.OperationalError:

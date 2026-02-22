@@ -153,8 +153,8 @@ class AIService:
                     
                     if log_text:
                         # 获取全库知识项用于 RAG
-                        kb_items = conn.execute('SELECT title, content, category, tags, embedding FROM kb_items').fetchall()
-                        kb_items = [dict(item) for item in kb_items]
+                        rows = conn.execute('SELECT title, content, category, tags, embedding FROM knowledge_base').fetchall()
+                        kb_items = [dict(row) for row in rows]
                         
                         # 获取日志的向量表示
                         log_vector = AIService.get_embeddings(log_text[:2000]) # 限制长度

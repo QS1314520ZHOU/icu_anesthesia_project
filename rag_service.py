@@ -14,16 +14,34 @@ class RAGService:
     
     @staticmethod
     def calculate_keyword_score(query: str, text: str) -> float:
-        """关键词匹配评分 (原有逻辑)"""
+        """关键词匹配评分 (原有逻辑 - 增强版)"""
         query = query.lower()
         text = text.lower()
+        
+        # 基础分：整体包含直接给高分
+        if query in text:
+            return len(query) * 5.0
+            
+        # 提取关键词：中文环境下如果没有空格，尝试按常见关键词切分或简单按长度切分
         keywords = [k for k in re.split(r'[ ,.，。！？!?;；\n]', query) if len(k) > 1]
+        
+        # 增强：如果切分后只有一个词（说明没有空格），尝试一些常见的中文字符/词组匹配
+        if len(keywords) <= 1:
+            # 简单策略：提取 2-4 个字的片段
+            for i in range(len(query) - 1):
+                chunk = query[i:i+2]
+                if len(chunk) >= 2 and chunk in text:
+                    keywords.append(chunk)
+        
         if not keywords: return 0.0
+        
         score = 0.0
-        for kw in keywords:
+        unique_keywords = set(keywords)
+        for kw in unique_keywords:
             if kw in text:
-                score += (len(kw) * 1.5)
-                score += text.count(kw) * 0.2
+                # 权重：长词权重更高
+                score += (len(kw) * 2.0)
+                score += text.count(kw) * 0.5
         return score
 
     def retrieve_context(self, query: str, kb_items: List[Dict], top_k: int = 3, query_vector: List[float] = None) -> str:
@@ -69,7 +87,7 @@ class RAGService:
     def sync_embeddings(self, ai_service):
         """同步缺失的向量嵌入"""
         with DatabasePool.get_connection() as conn:
-            rows = conn.execute('SELECT id, title, content, category, tags FROM kb_items WHERE embedding IS NULL').fetchall()
+            rows = conn.execute('SELECT id, title, content, category, tags FROM knowledge_base WHERE embedding IS NULL').fetchall()
             if not rows: return 0
             
             count = 0
@@ -79,7 +97,7 @@ class RAGService:
                 vector = ai_service.get_embeddings(text)
                 if vector:
                     blob = vector_utils.encode_vector(vector)
-                    conn.execute('UPDATE kb_items SET embedding = ? WHERE id = ?', (blob, item['id']))
+                    conn.execute('UPDATE knowledge_base SET embedding = ? WHERE id = ?', (blob, item['id']))
                     count += 1
             conn.commit()
             return count

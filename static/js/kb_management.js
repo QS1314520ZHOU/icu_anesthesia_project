@@ -42,14 +42,28 @@ function renderKBList(items) {
 
     container.innerHTML = items.map(item => {
         const tags = item.tags ? item.tags.split(',').map(tag => `<span class="tag-pill">${tag.trim()}</span>`).join('') : '';
+
+        // 处理预览内容：如果是 Markdown，尝试渲染或去掉标记，并截断
+        let previewContent = item.content;
+        if (typeof marked !== 'undefined') {
+            // 简单处理：去掉表格和复杂标记，只保留文字
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = marked.parse(item.content);
+            previewContent = tempDiv.innerText || tempDiv.textContent || item.content;
+        }
+
+        const truncatedContent = previewContent.length > 150
+            ? previewContent.substring(0, 150) + '...'
+            : previewContent;
+
         return `
             <div class="kb-card" onclick="viewKBItem(${item.id})">
                 <div class="kb-card-tag">${item.category}</div>
                 <h3 class="kb-card-title">${item.title}</h3>
-                <div class="kb-card-content">${item.content}</div>
+                <div class="kb-card-content" style="white-space: pre-wrap; word-break: break-all;">${truncatedContent}</div>
                 <div class="kb-card-footer">
                     <div class="kb-tags">${tags}</div>
-                    <span>👤 ${item.author || '匿名'} | 📅 ${item.created_at.split(' ')[0]}</span>
+                    <span>👤 ${item.author || '匿名'} | 📅 ${(item.created_at || '').split(' ')[0]}</span>
                 </div>
                  <div class="kb-card-actions" style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 8px; display: flex; justify-content: flex-end; gap: 8px;">
                     <button class="btn btn-primary btn-xs" onclick="event.stopPropagation(); editKBItem(${item.id})">编辑</button>

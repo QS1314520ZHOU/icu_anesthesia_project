@@ -7,47 +7,90 @@ from services.ai_service import ai_service
 class ProjectService:
     @staticmethod
     def _update_project_auto_status(project_id, cursor):
-        """根据阶段进度自动计算项目状态"""
-        # 获取所有阶段及其进度
-        stages = cursor.execute('SELECT stage_name, status FROM project_stages WHERE project_id = ? ORDER BY stage_order', (project_id,)).fetchall()
+        """根据阶段进度自动计算项目状态和总体进度"""
+        # 1. 获取所有阶段
+        stages = cursor.execute('SELECT id, stage_name, status, actual_start_date FROM project_stages WHERE project_id = ? ORDER BY stage_order', (project_id,)).fetchall()
         if not stages:
             return
 
-        # 计算各阶段进度
-        stage_progress = {}
+        today = datetime.now().strftime('%Y-%m-%d')
+        total_tasks_all = 0
+        completed_tasks_all = 0
+        stage_progress_map = {}
+
+        # 2. 依次更新每个阶段的进度
         for stage in stages:
-            s_name = stage['stage_name']
-            total = cursor.execute('SELECT COUNT(*) as c FROM tasks t JOIN project_stages ps ON t.stage_id = ps.id WHERE ps.project_id = ? AND ps.stage_name = ?', (project_id, s_name)).fetchone()['c']
-            done = cursor.execute('SELECT COUNT(*) as c FROM tasks t JOIN project_stages ps ON t.stage_id = ps.id WHERE ps.project_id = ? AND ps.stage_name = ? AND t.is_completed = 1', (project_id, s_name)).fetchone()['c']
-            progress = (done / total * 100) if total > 0 else 0
-            stage_progress[s_name] = progress
+            sid = stage['id']
+            sname = stage['stage_name']
+            
+            # 获取该阶段的任务统计
+            counts = cursor.execute('''
+                SELECT COUNT(*) as total, 
+                       SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as done 
+                FROM tasks WHERE stage_id = ?
+            ''', (sid,)).fetchone()
+            
+            total = counts['total'] or 0
+            done = counts['done'] or 0
+            progress = round(done / total * 100) if total > 0 else 0
+            
+            stage_progress_map[sname] = progress
+            total_tasks_all += total
+            completed_tasks_all += done
 
-        # 逻辑判断
-        new_status = '待启动'
-        has_any_progress = any(p > 0 for p in stage_progress.values())
+            # 更新阶段表中的进度和自动日期
+            actual_start = stage['actual_start_date']
+            if done > 0 and not actual_start:
+                actual_start = today
+            
+            actual_end = today if (total > 0 and done == total) else None
+            
+            cursor.execute('''
+                UPDATE project_stages 
+                SET progress = ?, actual_start_date = ?, actual_end_date = ? 
+                WHERE id = ?
+            ''', (progress, actual_start, actual_end, sid))
+
+        # 3. 计算项目总体进度
+        overall_progress = round(completed_tasks_all / total_tasks_all * 100) if total_tasks_all > 0 else 0
         
-        if has_any_progress:
+        # 4. 逻辑判断项目状态
+        new_status = '待启动'
+        if completed_tasks_all > 0:
             new_status = '进行中'
-            # 记录实际开始日期
-            cursor.execute('UPDATE projects SET actual_start_date = ? WHERE id = ? AND actual_start_date IS NULL', 
-                         (datetime.now().strftime('%Y-%m-%d'), project_id))
+            # 记录项目实际开始日期
+            cursor.execute('UPDATE projects SET actual_start_date = ? WHERE id = ? AND actual_start_date IS NULL', (today, project_id))
 
-        # 优先级判断：特定的关键阶段进度
-        if stage_progress.get('验收上线', 0) == 100:
+        # 特殊阶段状态推断 (按优先级降序)
+        if overall_progress == 100:
+            new_status = '已完成'
+            cursor.execute('UPDATE projects SET actual_end_date = ? WHERE id = ? AND actual_end_date IS NULL', (today, project_id))
+        elif stage_progress_map.get('验收上线', 0) == 100:
             new_status = '已验收'
-            cursor.execute('UPDATE projects SET actual_end_date = ? WHERE id = ? AND actual_end_date IS NULL', 
-                         (datetime.now().strftime('%Y-%m-%d'), project_id))
-        elif 0 < stage_progress.get('验收上线', 0) < 100:
+            cursor.execute('UPDATE projects SET actual_end_date = ? WHERE id = ? AND actual_end_date IS NULL', (today, project_id))
+        elif 0 < stage_progress_map.get('验收上线', 0) < 100:
             new_status = '验收中'
-        elif 0 < stage_progress.get('试运行', 0) < 100:
+        elif 0 < stage_progress_map.get('试运行', 0) < 100:
             new_status = '试运行'
 
-        # 获取当前数据库中的状态，避免无谓的更新
-        current_status = cursor.execute('SELECT status FROM projects WHERE id = ?', (project_id,)).fetchone()
-        if current_status and current_status['status'] != new_status:
-            print(f"[DEBUG] Project {project_id} status changing: {current_status['status']} -> {new_status}")
-            cursor.execute('UPDATE projects SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', 
-                         (new_status, project_id))
+        # 5. 更新项目表
+        current = cursor.execute('SELECT status, progress FROM projects WHERE id = ?', (project_id,)).fetchone()
+        if current:
+            # 只有当状态或进度发生变化时才更新，避免触发多余的 updated_at 变更
+            if current['status'] != new_status or current['progress'] != overall_progress:
+                cursor.execute('''
+                    UPDATE projects 
+                    SET status = ?, progress = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                ''', (new_status, overall_progress, project_id))
+                print(f"[DEBUG] Project {project_id} auto-sync: status({current['status']}->{new_status}), progress({current['progress']}->{overall_progress})")
+
+        # 6. 记录历史趋势 (用于燃尽图)
+        cursor.execute('DELETE FROM progress_history WHERE project_id = ? AND record_date = ?', (project_id, today))
+        cursor.execute('''
+            INSERT INTO progress_history (project_id, record_date, progress, tasks_total, tasks_completed) 
+            VALUES (?, ?, ?, ?, ?)
+        ''', (project_id, today, overall_progress, total_tasks_all, completed_tasks_all))
 
     @staticmethod
     def sync_project_milestones(project_id, cursor):
@@ -361,41 +404,12 @@ class ProjectService:
             cursor.execute('UPDATE project_stages SET progress = ?, actual_end_date = ? WHERE id = ?', 
                          (progress, actual_end, stage_id))
             
-            # 自动同步里程碑和项目状态
-            ProjectService.sync_project_milestones(project_id, cursor)
-            ProjectService._update_project_auto_status(project_id, cursor)
-            
-            # 记录进度历史（用于燃尽图实际进度线）
-            try:
-                all_tasks = cursor.execute('''
-                    SELECT COUNT(*) as total, 
-                           SUM(CASE WHEN t.is_completed = 1 THEN 1 ELSE 0 END) as completed
-                    FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
-                    WHERE s.project_id = ?
-                ''', (project_id,)).fetchone()
-                
-                tasks_total = all_tasks['total'] or 0
-                tasks_completed = all_tasks['completed'] or 0
-                overall_progress = round(tasks_completed / tasks_total * 100) if tasks_total > 0 else 0
-                
-                # 一并更新项目主表的总体进度缓存
-                cursor.execute('UPDATE projects SET progress = ? WHERE id = ?', (overall_progress, project_id))
-                
-                # 用 REPLACE 确保每天每项目只有一条记录（取最新状态）
-                cursor.execute('''
-                    DELETE FROM progress_history 
-                    WHERE project_id = ? AND record_date = ?
-                ''', (project_id, today))
-                cursor.execute('''
-                    INSERT INTO progress_history (project_id, record_date, progress, tasks_total, tasks_completed) 
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (project_id, today, overall_progress, tasks_total, tasks_completed))
-
-            except Exception as e:
-                print(f"Warning: Failed to record progress history: {e}")
-            
-            conn.commit()
-            return True
+        # 自动同步里程碑和项目状态
+        ProjectService.sync_project_milestones(project_id, cursor)
+        ProjectService._update_project_auto_status(project_id, cursor)
+        
+        conn.commit()
+        return True
 
     @staticmethod
     def update_stage_scale(stage_id, quantity):
@@ -446,15 +460,34 @@ class ProjectService:
     @staticmethod
     def add_task(stage_id, data):
         with DatabasePool.get_connection() as conn:
-            conn.execute('INSERT INTO tasks (stage_id, task_name, remark) VALUES (?, ?, ?)',
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO tasks (stage_id, task_name, remark) VALUES (?, ?, ?)',
                          (stage_id, data['task_name'], data.get('remark', '')))
+            
+            # 联动更新状态
+            stage = cursor.execute('SELECT project_id FROM project_stages WHERE id = ?', (stage_id,)).fetchone()
+            if stage:
+                ProjectService._update_project_auto_status(stage['project_id'], cursor)
+            
             conn.commit()
             return True
 
     @staticmethod
     def delete_task(task_id):
         with DatabasePool.get_connection() as conn:
-            conn.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            cursor = conn.cursor()
+            task = cursor.execute('SELECT stage_id FROM tasks WHERE id = ?', (task_id,)).fetchone()
+            if not task: return False
+            
+            stage_id = task['stage_id']
+            cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            
+            # 联动更新状态
+            stage = cursor.execute('SELECT project_id FROM project_stages WHERE id = ?', (stage_id,)).fetchone()
+            if stage:
+                ProjectService._update_project_auto_status(stage['project_id'], cursor)
+                ProjectService.sync_project_milestones(stage['project_id'], cursor)
+
             conn.commit()
             return True
 
