@@ -7689,3 +7689,44 @@ document.addEventListener('click', function (e) {
         openWrappers.forEach(w => w.classList.remove('open'));
     }
 });
+
+function showWecomLogin() {
+    // 方案一：直接跳转（最简单，推荐先用这个）
+    const corpId = 'ww6b317cedddce30f2';
+    const agentId = '1000003';
+    const redirectUri = encodeURIComponent('https://dxm.jylb.fun/api/wecom/sso/callback');
+    const state = 'wecom_login_' + Date.now();
+
+    const loginUrl = `https://login.work.weixin.qq.com/wwlogin/sso/login`
+        + `?login_type=CorpApp`
+        + `&appid=${corpId}`
+        + `&agentid=${agentId}`
+        + `&redirect_uri=${redirectUri}`
+        + `&state=${state}`;
+
+    window.location.href = loginUrl;
+}
+
+// 页面加载时检查 URL 中是否有 token（扫码登录回调回来）
+(function checkWecomLoginCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+        // 保存 token，和你现有的登录成功逻辑一致
+        localStorage.setItem('token', token);
+        // 清除 URL 参数
+        window.history.replaceState({}, document.title, '/');
+        // 触发已登录状态
+        if (typeof onLoginSuccess === 'function') {
+            onLoginSuccess(token);
+        } else {
+            location.reload();
+        }
+    }
+
+    const loginError = urlParams.get('login_error');
+    if (loginError) {
+        alert('企业微信登录失败: ' + loginError);
+        window.history.replaceState({}, document.title, '/');
+    }
+})();

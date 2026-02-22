@@ -4728,6 +4728,19 @@
                         没有账户？<a href="#" onclick="showRegisterForm()" style="color: #4f46e5;">立即注册</a>
                     </div>
                 </div>
+
+                <!-- 企业微信扫码登录 -->
+                <div style="margin-top: 20px; text-align: center;">
+                    <div style="color: var(--gray-400); font-size: 13px; margin-bottom: 12px;">
+                        ── 或使用企业微信登录 ──
+                    </div>
+                    <button type="button" onclick="showWecomLogin()" style="width:100%; padding:10px; background:#07C160; color:white; 
+                        border:none; border-radius:8px; cursor:pointer; font-size:14px;">
+                        📱 企业微信扫码登录
+                    </button>
+                    <div id="wecom_login_container" style="display:none; margin-top:15px;"></div>
+                </div>
+
                 <div id="registerForm" style="display: none;">
                     <div class="form-group">
                         <label>用户名</label>

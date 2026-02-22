@@ -237,3 +237,26 @@ def submit_expense(expense_id):
     result = wecom_approval_service.submit_expense_approval(expense_id, userid)
     return api_response(result.get('success', False), data=result,
                        message=result.get('message', ''))
+@wecom_bp.route('/sso/callback', methods=['GET'])
+def sso_callback():
+    """企业微信扫码登录回调"""
+    from services.wecom_service import wecom_service
+    from services.auth_service import auth_service
+    
+    code = request.args.get('code', '')
+    if not code:
+        return redirect('/?login_error=no_code')
+    
+    # 用 code 换取用户身份
+    wecom_user = wecom_service.get_user_by_code(code)
+    if not wecom_user:
+        return redirect('/?login_error=auth_failed')
+    
+    # 登录或自动注册
+    result = auth_service.login_via_wecom(wecom_user)
+    
+    if result.get('success'):
+        token = result['token']
+        return redirect(f'/?token={token}')
+    else:
+        return redirect('/?login_error=bindFailed')

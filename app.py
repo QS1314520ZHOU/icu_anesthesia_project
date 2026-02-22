@@ -54,6 +54,10 @@ def debug_static_info():
 def force_static(filename):
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
     return send_from_directory(static_dir, filename)
+@app.route('/WW_verify_qbEX7XXnUe5licTo.txt')
+def wecom_verify_file():
+    return send_from_directory('.', 'WW_verify_qbEX7XXnUe5licTo.txt')
+
 from routes.alignment_routes import alignment_bp
 from routes.project_routes import project_bp
 from routes.member_routes import member_bp
