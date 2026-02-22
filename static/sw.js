@@ -93,8 +93,8 @@ self.addEventListener('push', event => {
     const title = data.title || 'ICU 项目管理';
     const options = {
         body: data.body || '您有新的通知',
-        icon: '/static/icons/icon-192.png',
-        badge: '/static/icons/badge-72.png',
+        icon: '/api/force_static/icons/icon-192.png',
+        badge: '/api/force_static/icons/badge-72.png',
         tag: data.tag || 'default',
         data: data.data || {}
     };

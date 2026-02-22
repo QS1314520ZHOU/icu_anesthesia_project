@@ -83,6 +83,13 @@ class ProjectService:
                     # 如果里程碑未完成，则更新为完成并记录完成时间
                     cursor.execute('UPDATE milestones SET is_completed = 1, completed_date = ? WHERE id = ?', 
                                  (current_date, milestone['id']))
+                    
+                    # 触发企业微信庆祝通报
+                    try:
+                        from services.wecom_push_service import wecom_push_service
+                        wecom_push_service.push_milestone_celebration(project_id, milestone_name)
+                    except Exception as e:
+                        print(f"Milestone celebration push failed: {e}")
             else:
                 if milestone and milestone['is_completed']:
                     # 如果阶段未完成但里程碑已完成（撤销任务时），则更新为未完成

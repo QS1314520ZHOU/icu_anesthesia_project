@@ -118,6 +118,7 @@ class ReportScheduler:
         try:
             logger.info("⏰ 开始自动生成日报...")
             self._generate_daily_reports()
+            self._check_idle_projects()
         except Exception as e:
             logger.error("自动日报生成异常: %s", e, exc_info=True)
         finally:
@@ -158,6 +159,21 @@ class ReportScheduler:
                 logger.warning("晨会简报推送结果: %s", result.get('message', '未知'))
         except Exception as e:
             logger.error("晨会简报推送失败: %s", e)
+
+    def _check_idle_projects(self):
+        """检查闲置项目并催办"""
+        try:
+            from services.reminder_service import reminder_service
+            from services.wecom_push_service import wecom_push_service
+            
+            idle_projects = reminder_service.check_idle_projects()
+            for p in idle_projects:
+                wecom_push_service.push_idle_escalation(
+                    p['id'], p['project_name'], 
+                    p.get('manager', ''), p['days_idle']
+                )
+        except Exception as e:
+            logger.error("闲置催办检查失败: %s", e)
 
     # ------------------------------------------------------------------
     # Report generation core
@@ -206,7 +222,15 @@ class ReportScheduler:
                     continue
 
                 content = self._build_daily_report(pid, project, today)
+                 # 企业微信卡片推送
                 self._save_archive(pid, 'daily', today, content, 'auto')
+                try:
+                    from services.wecom_push_service import wecom_push_service
+                    wecom_push_service.push_daily_report_card(pid, content, today)
+                except Exception as e:
+                    logger.warning("日报卡片推送失败: %s", e)
+
+
                 success_count += 1
                 logger.info("  ✅ 项目 %s 日报已归档", project['project_name'])
             except Exception as e:
@@ -389,6 +413,21 @@ class ReportScheduler:
 
                 content = self._build_weekly_report(pid, project, today)
                 self._save_archive(pid, 'weekly', today, content, 'auto')
+
+                # 企业微信周报卡片推送
+                try:
+                    from services.wecom_push_service import wecom_push_service
+                    wecom_push_service.push_weekly_report_card(pid, content, today)
+                except Exception as e:
+                    logger.warning("周报卡片推送失败: %s", e)
+
+                # 周报推送给甲方联系人
+                try:
+                    from services.wecom_push_service import wecom_push_service
+                    wecom_push_service.push_weekly_to_customer(pid, content)
+                except Exception as e:
+                    logger.warning("甲方周报推送失败: %s", e)
+
                 success_count += 1
                 logger.info("  ✅ 项目 %s 周报已归档", project['project_name'])
             except Exception as e:

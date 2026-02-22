@@ -38,7 +38,76 @@ class AuthService:
     """用户认证服务"""
     
     TOKEN_EXPIRY_HOURS = 24
-    
+    # 在 auth_service.py 的 AuthService 类中新增以下方法
+
+    def login_via_wecom(self, wecom_user: dict) -> dict:
+        """通过企业微信 OAuth2 登录/自动注册"""
+        wecom_userid = wecom_user.get('userid')
+        if not wecom_userid:
+            return {"success": False, "message": "无效的企业微信用户"}
+        
+        conn = get_db()
+        
+        # 1. 查找已绑定的用户
+        existing = conn.execute(
+            'SELECT id, username, display_name, role, is_active FROM users WHERE wecom_userid = ?',
+            (wecom_userid,)
+        ).fetchone()
+        
+        if existing:
+            if not existing['is_active']:
+                return {"success": False, "message": "账号已被禁用"}
+            
+            # 生成 Token 并登录
+            token = secrets.token_urlsafe(32)
+            expires_at = (datetime.now() + timedelta(hours=self.TOKEN_EXPIRY_HOURS)).strftime('%Y-%m-%d %H:%M:%S')
+            conn.execute('INSERT INTO user_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+                        (existing['id'], token, expires_at))
+            conn.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (existing['id'],))
+            conn.commit()
+            
+            return {
+                "success": True,
+                "token": token,
+                "user": {
+                    "id": existing['id'],
+                    "username": existing['username'],
+                    "display_name": existing['display_name'],
+                    "role": existing['role'],
+                    "wecom_userid": wecom_userid
+                }
+            }
+        
+        # 2. 尝试按姓名匹配已有用户并绑定
+        display_name = wecom_user.get('name', wecom_userid)
+        name_match = conn.execute(
+            'SELECT id, username, display_name, role FROM users WHERE display_name = ? AND wecom_userid IS NULL',
+            (display_name,)
+        ).fetchone()
+        
+        if name_match:
+            conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (wecom_userid, name_match['id']))
+            conn.commit()
+            # 递归调用自己，走已绑定流程
+            return self.login_via_wecom(wecom_user)
+        
+        # 3. 自动注册新用户
+        username = f"wx_{wecom_userid}"
+        password_hash = self._hash_password(secrets.token_urlsafe(16))  # 随机密码
+        
+        try:
+            conn.execute('''
+                INSERT INTO users (username, password_hash, email, display_name, role, wecom_userid)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (username, password_hash, wecom_user.get('email', ''), 
+                  display_name, 'team_member', wecom_userid))
+            conn.commit()
+            
+            # 注册后登录
+            return self.login_via_wecom(wecom_user)
+        except Exception as e:
+            return {"success": False, "message": f"自动注册失败: {str(e)}"}
+
     def __init__(self):
         self._ensure_tables()
     
@@ -61,7 +130,10 @@ class AuthService:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
+        except:
+            pass
         # Token表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_tokens (

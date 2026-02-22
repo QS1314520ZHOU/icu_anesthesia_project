@@ -11,8 +11,24 @@ from app_config import NOTIFICATION_CONFIG
 class MonitorService:
     """监控与通知服务"""
 
+
     def send_wecom_message(self, title, content, msg_type='text'):
-        """发送企业微信通知"""
+        """发送企业微信通知（优先自建应用，降级到Webhook）"""
+        from services.wecom_service import wecom_service
+        
+        # 优先使用自建应用推送（支持定向、卡片等能力）
+        if wecom_service.is_enabled:
+            try:
+                full_content = f"**{title}**\n\n{content}" if msg_type == 'markdown' else f"【{title}】\n{content}"
+                result = wecom_service.send_markdown_to_all(full_content)
+                if result.get('errcode') == 0:
+                    return True, "通过自建应用推送成功"
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning("自建应用推送失败，降级到Webhook: %s", e)
+        
+        # 降级：Webhook（原有逻辑）
         if not NOTIFICATION_CONFIG.get('ENABLE_WECOM') or not NOTIFICATION_CONFIG.get('WECOM_WEBHOOK'):
             return False, "企业微信通知未启用或未配置"
         try:
@@ -22,10 +38,8 @@ class MonitorService:
             else:
                 payload = {"msgtype": "text", "text": {"content": f"【{title}】\n{content}"}}
             
-            # Retry logic: 3 attempts
             for attempt in range(3):
                 try:
-                    # Increased timeout to 30s
                     response = requests.post(webhook_url, json=payload, timeout=30)
                     result = response.json()
                     if result.get('errcode') == 0:
@@ -33,9 +47,9 @@ class MonitorService:
                     else:
                         return False, f"WeChat API Error: {result.get('errmsg')}"
                 except requests.exceptions.Timeout:
-                    if attempt == 2: # Last attempt
+                    if attempt == 2:
                         return False, "WeChat API Timeout (3 attempts)"
-                    continue # Retry on timeout
+                    continue
                 except Exception as e:
                     return False, str(e)
             

@@ -1,0 +1,239 @@
+# routes/wecom_routes.py
+"""
+企业微信路由
+- /api/wecom/callback   → 消息回调（GET验证 + POST接收）
+- /api/wecom/oauth      → OAuth2 登录
+- /api/wecom/approval/* → 审批接口
+"""
+
+import logging
+import xml.etree.ElementTree as ET
+from flask import Blueprint, request, jsonify, redirect
+from api_utils import api_response
+from app_config import WECOM_CONFIG
+
+logger = logging.getLogger(__name__)
+
+wecom_bp = Blueprint('wecom', __name__, url_prefix='/api/wecom')
+
+
+# ===== 消息回调 =====
+
+@wecom_bp.route('/callback', methods=['GET'])
+def verify_callback():
+    """企业微信回调URL验证（GET请求）"""
+    from services.wecom_service import wecom_service
+    
+    if not wecom_service.crypto:
+        return "callback not configured", 403
+    
+    msg_signature = request.args.get('msg_signature', '')
+    timestamp = request.args.get('timestamp', '')
+    nonce = request.args.get('nonce', '')
+    echostr = request.args.get('echostr', '')
+    
+    try:
+        if wecom_service.crypto.verify_signature(msg_signature, timestamp, nonce, echostr):
+            # 解密 echostr 返回明文
+            plain = wecom_service.crypto.decrypt(echostr)
+            return plain
+        else:
+            logger.warning("回调验证签名失败")
+            return "signature error", 403
+    except Exception as e:
+        logger.error("回调验证异常: %s", e)
+        return "error", 500
+
+
+@wecom_bp.route('/callback', methods=['POST'])
+def receive_callback():
+    """接收企业微信回调消息（POST请求）"""
+    from services.wecom_service import wecom_service
+    from services.wecom_msg_handler import wecom_msg_handler
+    
+    if not wecom_service.crypto:
+        return "callback not configured", 403
+    
+    msg_signature = request.args.get('msg_signature', '')
+    timestamp = request.args.get('timestamp', '')
+    nonce = request.args.get('nonce', '')
+    post_data = request.data.decode('utf-8')
+    
+    try:
+        # 解密
+        plain_xml = wecom_service.crypto.decrypt_callback(
+            msg_signature, timestamp, nonce, post_data
+        )
+        msg = wecom_service.crypto.parse_msg_xml(plain_xml)
+        
+        logger.info("收到企业微信回调: MsgType=%s, From=%s", 
+                    msg.get('MsgType'), msg.get('FromUserName'))
+        
+        msg_type = msg.get('MsgType', '')
+        from_user = msg.get('FromUserName', '')
+        reply_content = ""
+        
+        if msg_type == 'text':
+            content = msg.get('Content', '')
+            reply_content = wecom_msg_handler.handle_text_message(from_user, content)
+            
+        elif msg_type == 'image':
+            media_id = msg.get('MediaId', '')
+            reply_content = wecom_msg_handler.handle_image_message(from_user, media_id)
+            
+        elif msg_type == 'event':
+            event_type = msg.get('Event', '')
+            if event_type == 'click':
+                # 菜单点击事件
+                event_key = msg.get('EventKey', '')
+                reply_content = _handle_menu_click(from_user, event_key)
+            elif event_type == 'sys_approval_change':
+                # 审批状态变更事件
+                from services.wecom_approval_service import wecom_approval_service
+                approval_info = msg.get('ApprovalInfo', {})
+                wecom_approval_service.handle_approval_callback(approval_info)
+                return "success"
+            elif event_type == 'enter_agent':
+                # 用户进入应用
+                reply_content = "👋 欢迎使用 ICU-PM 项目管理助手！\n发送「帮助」查看可用命令。"
+        
+        # 被动回复消息（5秒内必须响应）
+        if reply_content:
+            # 由于被动回复有长度和格式限制，对于长内容改用主动推送
+            if len(reply_content) > 500:
+                # 先被动回复一个简短提示
+                short_reply = "正在处理，请稍候..."
+                # 异步主动推送完整内容
+                import threading
+                threading.Thread(
+                    target=wecom_service.send_markdown,
+                    args=(from_user, reply_content)
+                ).start()
+                reply_content = short_reply
+            
+            reply_xml = _build_text_reply(from_user, msg.get('ToUserName', ''), reply_content)
+            encrypted_reply = wecom_service.crypto.encrypt_reply(reply_xml, nonce, timestamp)
+            return encrypted_reply
+        
+        return "success"
+        
+    except Exception as e:
+        logger.error("处理回调消息异常: %s", e, exc_info=True)
+        return "success"  # 即使出错也返回 success，避免企业微信重试
+
+
+def _build_text_reply(to_user: str, from_user: str, content: str) -> str:
+    """构建被动回复的XML"""
+    import time
+    return (
+        f"<xml>"
+        f"<ToUserName><![CDATA[{to_user}]]></ToUserName>"
+        f"<FromUserName><![CDATA[{from_user}]]></FromUserName>"
+        f"<CreateTime>{int(time.time())}</CreateTime>"
+        f"<MsgType><![CDATA[text]]></MsgType>"
+        f"<Content><![CDATA[{content}]]></Content>"
+        f"</xml>"
+    )
+
+
+def _handle_menu_click(userid: str, event_key: str) -> str:
+    """处理自定义菜单点击"""
+    from services.wecom_msg_handler import wecom_msg_handler
+    
+    handlers = {
+        "menu_status": lambda: wecom_msg_handler._handle_status(userid),
+        "menu_help": lambda: wecom_msg_handler._get_help_text(),
+    }
+    handler = handlers.get(event_key)
+    return handler() if handler else f"未知的菜单操作: {event_key}"
+
+
+# ===== OAuth2 登录 =====
+
+@wecom_bp.route('/oauth/login', methods=['GET'])
+def oauth_login():
+    """发起 OAuth2 登录"""
+    from services.wecom_service import wecom_service
+    
+    redirect_uri = request.args.get('redirect_uri', WECOM_CONFIG.get('APP_HOME_URL', ''))
+    callback_url = f"{WECOM_CONFIG['APP_HOME_URL']}/api/wecom/oauth/callback"
+    oauth_url = wecom_service.get_oauth_url(callback_url)
+    return redirect(oauth_url)
+
+
+@wecom_bp.route('/oauth/callback', methods=['GET'])
+def oauth_callback():
+    """OAuth2 回调"""
+    from services.wecom_service import wecom_service
+    from services.auth_service import auth_service
+    
+    code = request.args.get('code', '')
+    if not code:
+        return api_response(False, message="缺少授权码", code=400)
+    
+    # 用 code 换取用户身份
+    wecom_user = wecom_service.get_user_by_code(code)
+    if not wecom_user:
+        return api_response(False, message="获取用户身份失败", code=401)
+    
+    # 查找或创建本地用户
+    result = auth_service.login_via_wecom(wecom_user)
+    
+    if result.get('success'):
+        # 重定向到前端，带上 token
+        token = result['token']
+        home_url = WECOM_CONFIG.get('APP_HOME_URL', '/')
+        return redirect(f"{home_url}?token={token}")
+    else:
+        return api_response(False, message=result.get('message', '登录失败'), code=401)
+
+
+# ===== 审批 API =====
+
+@wecom_bp.route('/approval/departure/<int:departure_id>', methods=['POST'])
+def submit_departure(departure_id):
+    """提交离场审批"""
+    from services.wecom_approval_service import wecom_approval_service
+    
+    data = request.json or {}
+    userid = data.get('wecom_userid', '')
+    
+    if not userid:
+        # 尝试从当前登录用户获取
+        user = getattr(request, 'current_user', None)
+        if user:
+            from database import DatabasePool
+            with DatabasePool.get_connection() as conn:
+                u = conn.execute('SELECT wecom_userid FROM users WHERE id = ?', (user['id'],)).fetchone()
+                userid = u['wecom_userid'] if u else ''
+    
+    if not userid:
+        return api_response(False, message="未提供企业微信用户ID", code=400)
+    
+    result = wecom_approval_service.submit_departure_approval(departure_id, userid)
+    return api_response(result.get('success', False), data=result, 
+                       message=result.get('message', ''))
+
+
+@wecom_bp.route('/approval/change/<int:change_id>', methods=['POST'])
+def submit_change(change_id):
+    """提交变更审批"""
+    from services.wecom_approval_service import wecom_approval_service
+    
+    data = request.json or {}
+    userid = data.get('wecom_userid', '')
+    result = wecom_approval_service.submit_change_approval(change_id, userid)
+    return api_response(result.get('success', False), data=result,
+                       message=result.get('message', ''))
+
+
+@wecom_bp.route('/approval/expense/<int:expense_id>', methods=['POST'])
+def submit_expense(expense_id):
+    """提交费用审批"""
+    from services.wecom_approval_service import wecom_approval_service
+    
+    data = request.json or {}
+    userid = data.get('wecom_userid', '')
+    result = wecom_approval_service.submit_expense_approval(expense_id, userid)
+    return api_response(result.get('success', False), data=result,
+                       message=result.get('message', ''))

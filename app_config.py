@@ -2,7 +2,27 @@
 
 import os
 
-# ========== 通知配置 ==========
+# ========== 企业微信自建应用配置 ==========
+WECOM_CONFIG = {
+    # 企业信息
+    "CORP_ID": os.environ.get("WECOM_CORP_ID", ""),
+    
+    # 自建应用信息（管理后台 → 应用管理 → 自建应用）
+    "AGENT_ID": int(os.environ.get("WECOM_AGENT_ID", 0)),
+    "SECRET": os.environ.get("WECOM_SECRET", ""),
+    
+    # 回调配置（管理后台 → 应用 → 接收消息 → 设置API接收）
+    "CALLBACK_TOKEN": os.environ.get("WECOM_CALLBACK_TOKEN", ""),
+    "CALLBACK_AES_KEY": os.environ.get("WECOM_CALLBACK_AES_KEY", ""),
+    
+    # 应用主页URL（用户点击应用时跳转的地址）
+    "APP_HOME_URL": os.environ.get("WECOM_APP_HOME_URL", "https://your-domain.com"),
+    
+    # 是否启用自建应用模式（False则仅用Webhook）
+    "ENABLED": os.environ.get("WECOM_ENABLED", "false").lower() == "true",
+}
+
+# ========== 通知配置（保留原有Webhook作为fallback） ==========
 NOTIFICATION_CONFIG = {
     "WECOM_WEBHOOK": os.environ.get("WECOM_WEBHOOK", ""),
     "SMTP_SERVER": os.environ.get("SMTP_SERVER", "smtp.qq.com"),
@@ -13,6 +33,7 @@ NOTIFICATION_CONFIG = {
     "ENABLE_WECOM": os.environ.get("ENABLE_WECOM", "False").lower() == "true",
     "ENABLE_EMAIL": os.environ.get("ENABLE_EMAIL", "False").lower() == "true"
 }
+
 
 # ========== 项目状态定义 ==========
 PROJECT_STATUS = {

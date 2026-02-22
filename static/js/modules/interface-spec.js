@@ -37,11 +37,8 @@ const InterfaceSpec = {
         const container = document.getElementById('tabInterfaceSpec');
         if (!container) return;
 
-        if (!forceMainUI && this._ourSpecs.length === 0 && this._vendorSpecs.length === 0) {
-            this.renderSetupDashboard(container);
-        } else {
-            this.renderMainUI(container);
-        }
+        // Always render Main UI to maintain consistency across projects
+        this.renderMainUI(container);
     },
 
     // ==================== Dashboard ====================

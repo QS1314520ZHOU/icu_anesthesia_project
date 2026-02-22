@@ -148,6 +148,7 @@ var adminSettings = {
                 <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0; background: #f9fafb;">
                     <div class="admin-tabs" style="padding: 0 24px; background: white; border-bottom: 1px solid var(--gray-200); display: flex; gap: 24px;">
                         <div class="admin-tab active" onclick="adminSettings.switchTab(event, 'tabAiConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">AI 模型配置</div>
+                        <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">企业微信配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabStorageConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">云存储配置</div>
                     </div>
                     
@@ -165,6 +166,66 @@ var adminSettings = {
                                 <div class="text-center" style="padding: 40px; color: var(--gray-500);">
                                     <div style="font-size: 24px; margin-bottom: 10px;">⏳</div>
                                     加载配置中...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- WeCom Config Tab -->
+                        <div id="tabWecomConfig" class="admin-tab-pane" style="display: none;">
+                            <div class="config-section">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                    <div>
+                                        <div style="font-size: 15px; font-weight: 600; color: var(--gray-800);">企业微信自建应用</div>
+                                        <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">配置消息推送、OAuth2 登录及消息回调参数</div>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <label class="switch-label" style="font-size: 13px; font-weight: 600; color: var(--gray-700);">启用状态</label>
+                                        <input type="checkbox" id="wecomEnabled" style="width: 18px; height: 18px;">
+                                    </div>
+                                </div>
+
+                                <div class="grid-form" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; background: white; padding: 24px; border-radius: 12px; border: 1px solid var(--gray-200);">
+                                    <div class="form-group">
+                                        <label>企业 ID (CorpID)</label>
+                                        <input type="text" id="wecomCorpId" class="form-control" placeholder="ww..." style="font-family: monospace;">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>应用 ID (AgentID)</label>
+                                        <input type="number" id="wecomAgentId" class="form-control" placeholder="1000002">
+                                    </div>
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label>应用 Secret</label>
+                                        <input type="password" id="wecomSecret" class="form-control" placeholder="填写应用密钥">
+                                    </div>
+                                    
+                                    <div style="grid-column: span 2; margin: 10px 0; padding-top: 10px; border-top: 1px dashed var(--gray-200);">
+                                        <h5 style="font-weight: 700; margin-bottom: 12px; font-size: 14px;">回调/验证参数 (用于消息接收)</h5>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>Token</label>
+                                        <input type="text" id="wecomCallbackToken" class="form-control" placeholder="自定义 Token">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>EncodingAESKey</label>
+                                        <input type="password" id="wecomCallbackAesKey" class="form-control" placeholder="43位字符">
+                                    </div>
+                                    
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label>应用首页 URL</label>
+                                        <input type="text" id="wecomAppHomeUrl" class="form-control" placeholder="https://your-domain.com">
+                                        <div style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">用于 OAuth2 登录回调后的重定向起点</div>
+                                    </div>
+
+                                    <div class="form-group" style="grid-column: span 2;">
+                                        <label>Wecom Webhook (兜底)</label>
+                                        <input type="text" id="wecomWebhook" class="form-control" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...">
+                                        <div style="font-size: 12px; color: var(--gray-400); margin-top: 4px;">选填。当自建应用推送失败或未启用时，将尝试通过此 Webhook 推送文本消息。</div>
+                                    </div>
+                                    
+                                    <div style="grid-column: span 2; margin-top: 10px;">
+                                        <button class="btn btn-primary" style="width: 100%; height: 45px;" onclick="adminSettings.saveWecomConfig()">保存并应用配置</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -319,6 +380,7 @@ var adminSettings = {
         el.classList.add('show');
         el.style.display = 'flex';
         this.loadAiConfigs();
+        this.loadWecomConfig();
         this.loadStorageConfig();
     },
 
@@ -526,6 +588,56 @@ var adminSettings = {
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
+        }
+    },
+
+    // ========== WeCom Configuration Logic ==========
+
+    loadWecomConfig: async function () {
+        try {
+            const res = await api.get('/admin/wecom-config');
+            if (res && res.success && res.data) {
+                const d = res.data;
+                document.getElementById('wecomEnabled').checked = d.enabled === 'true';
+                document.getElementById('wecomCorpId').value = d.corp_id || '';
+                document.getElementById('wecomAgentId').value = d.agent_id || '';
+                document.getElementById('wecomSecret').value = d.secret || '';
+                document.getElementById('wecomCallbackToken').value = d.callback_token || '';
+                document.getElementById('wecomCallbackAesKey').value = d.callback_aes_key || '';
+                document.getElementById('wecomAppHomeUrl').value = d.app_home_url || '';
+                document.getElementById('wecomWebhook').value = d.webhook || '';
+            }
+        } catch (e) {
+            console.error('Failed to load WeCom config:', e);
+        }
+    },
+
+    saveWecomConfig: async function () {
+        const data = {
+            enabled: document.getElementById('wecomEnabled').checked ? 'true' : 'false',
+            corp_id: document.getElementById('wecomCorpId').value.trim(),
+            agent_id: document.getElementById('wecomAgentId').value.trim(),
+            secret: document.getElementById('wecomSecret').value.trim(),
+            callback_token: document.getElementById('wecomCallbackToken').value.trim(),
+            callback_aes_key: document.getElementById('wecomCallbackAesKey').value.trim(),
+            app_home_url: document.getElementById('wecomAppHomeUrl').value.trim(),
+            webhook: document.getElementById('wecomWebhook').value.trim()
+        };
+
+        if (data.enabled === 'true' && (!data.corp_id || !data.secret || !data.agent_id)) {
+            alert('启用企业微信时，企业ID、应用ID和Secret为必填项');
+            return;
+        }
+
+        try {
+            const res = await api.post('/admin/wecom-config', data);
+            if (res.success) {
+                alert('✅ 企业微信配置已保存并生效');
+            } else {
+                alert('❌ 保存失败: ' + res.message);
+            }
+        } catch (e) {
+            alert('❌ 请求失败: ' + e.message);
         }
     },
 

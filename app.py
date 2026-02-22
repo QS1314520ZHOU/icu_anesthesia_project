@@ -52,7 +52,8 @@ def debug_static_info():
 
 @app.route('/api/force_static/<path:filename>')
 def force_static(filename):
-    return send_from_directory(os.path.join(app.root_path, 'static'), filename)
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    return send_from_directory(static_dir, filename)
 from routes.alignment_routes import alignment_bp
 from routes.project_routes import project_bp
 from routes.member_routes import member_bp
@@ -75,6 +76,7 @@ from routes.risk_simulation_routes import risk_bp
 from routes.collaboration_routes import collab_bp
 from routes.operational_routes import operational_bp
 from routes.interface_spec_routes import spec_bp
+from routes.wecom_routes import wecom_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
@@ -98,6 +100,7 @@ app.register_blueprint(risk_bp)
 app.register_blueprint(collab_bp)
 app.register_blueprint(operational_bp)
 app.register_blueprint(spec_bp)
+app.register_blueprint(wecom_bp)
 
 # thread executor for async tasks
 executor = ThreadPoolExecutor(max_workers=4)
@@ -160,6 +163,12 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # 升级脚本：增加 WeCom 关联
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
+    except:
+        pass
     
     # 1. 项目主表
     cursor.execute('''
@@ -3696,6 +3705,77 @@ def generate_report_archive(project_id):
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ========== 管理员：企业微信配置 API ==========
+from services.wecom_service import wecom_service
+
+@app.route('/api/admin/wecom-config', methods=['GET'])
+@require_auth('admin')
+def get_wecom_config():
+    """获取企业微信配置"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
+        configs = cursor.fetchall()
+        result = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs}
+        
+        # 脱敏
+        if result.get('secret'):
+            result['secret'] = result['secret'][:4] + '****' + result['secret'][-4:] if len(result['secret']) > 8 else '****'
+        if result.get('callback_aes_key'):
+            result['callback_aes_key'] = '******'
+            
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
+
+@app.route('/api/admin/wecom-config', methods=['POST'])
+@require_auth('admin')
+def save_wecom_config():
+    """保存企业微信配置"""
+    data = request.json or {}
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        # 预加载现有配置以处理脱敏数据字段
+        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
+        configs_raw = cursor.fetchall()
+        existing = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs_raw}
+        
+        updates = []
+        for key, val in data.items():
+            db_key = f"wecom_{key}"
+            
+            # 如果是脱敏过的且没改，则保留原值
+            final_val = val
+            if key == 'secret' and val.startswith('****') and val.endswith('****'):
+                final_val = existing.get('secret')
+            elif key == 'callback_aes_key' and val == '******':
+                final_val = existing.get('callback_aes_key')
+                
+            updates.append((db_key, str(final_val)))
+            
+        for k, v in updates:
+            cursor.execute('''
+                INSERT INTO system_config (config_key, value) VALUES (?, ?)
+                ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+            ''', (k, v))
+            
+        conn.commit()
+        
+        # 立即重载服务配置
+        wecom_service.reload_config()
+        
+        return jsonify({'success': True, 'message': '企业微信配置已保存'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
 
 
 
