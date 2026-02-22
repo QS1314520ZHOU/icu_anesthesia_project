@@ -66,6 +66,9 @@ def receive_callback():
         )
         msg = wecom_service.crypto.parse_msg_xml(plain_xml)
         
+        # 加这一行，打印完整消息内容
+        logger.info("收到完整消息内容: %s", msg)
+        
         logger.info("收到企业微信回调: MsgType=%s, From=%s", 
                     msg.get('MsgType'), msg.get('FromUserName'))
         
