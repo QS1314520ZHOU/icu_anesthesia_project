@@ -4970,16 +4970,31 @@ function showFullPageLogin() {
                     <h2 style="font-size: 24px; color: var(--gray-800); margin-bottom: 8px;">重症手麻项目管理系统</h2>
                     <p style="color: var(--gray-500); font-size: 14px;">请登录以继续</p>
                 </div>
-                <div class="form-group">
-                    <label>用户名</label>
-                    <input type="text" id="overlayLoginUsername" placeholder="请输入用户名" style="padding: 12px;">
-                </div>
-                <div class="form-group">
-                    <label>密码</label>
-                    <input type="password" id="overlayLoginPassword" placeholder="请输入密码" style="padding: 12px;" onkeypress="if(event.key==='Enter')doOverlayLogin()">
+                <div id="overlayLoginForm">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="overlayLoginUsername" placeholder="请输入用户名" style="padding: 12px;">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="overlayLoginPassword" placeholder="请输入密码" style="padding: 12px;" onkeypress="if(event.key==='Enter')doOverlayLogin()">
+                    </div>
                 </div>
                 <div id="overlayLoginError" style="color: var(--danger); margin-bottom: 12px; display: none;"></div>
                 <button class="btn btn-primary btn-full" onclick="doOverlayLogin()" style="padding: 14px; font-size: 16px;">登 录</button>
+                
+                <!-- 企业微信登录入口 -->
+                <div style="margin-top: 20px; text-align: center; border-top: 1px solid var(--gray-200); padding-top: 20px;">
+                    <div style="color: var(--gray-400); font-size: 13px; margin-bottom: 12px;">
+                        ── 或使用企业微信登录 ──
+                    </div>
+                    <button type="button" onclick="showWecomLogin('overlayWecomContainer', 'overlayLoginForm')" style="width:100%; padding:12px; background:#07C160; color:white; 
+                        border:none; border-radius:8px; cursor:pointer; font-size:15px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        📱 企业微信扫码登录
+                    </button>
+                    <div id="overlayWecomContainer" style="display:none; margin-top:15px; background: #f9fafb; border-radius: 8px; padding: 10px;"></div>
+                </div>
+
                 <p style="text-align: center; margin-top: 16px; color: var(--gray-500); font-size: 13px;">
                     没有账户？<a href="javascript:void(0)" onclick="showRegisterFromOverlay()" style="color: var(--primary);">立即注册</a>
                 </p>
@@ -7690,9 +7705,9 @@ document.addEventListener('click', function (e) {
     }
 });
 
-async function showWecomLogin() {
-    const container = document.getElementById('wecom_login_container');
-    const loginForm = document.getElementById('loginForm');
+async function showWecomLogin(containerId = 'wecom_login_container', formId = 'loginForm') {
+    const container = document.getElementById(containerId);
+    const loginForm = document.getElementById(formId);
 
     if (container.style.display === 'block') {
         container.style.display = 'none';
@@ -7706,11 +7721,11 @@ async function showWecomLogin() {
 
         container.style.display = 'block';
         loginForm.style.display = 'none';
-        container.innerHTML = ''; // 清空
+        container.innerHTML = '正在加载二维码...'; // 清空并显示加载中
 
         // 初始化扫码
         window.wwLogin = new WwLogin({
-            "id": "wecom_login_container",
+            "id": containerId,
             "appid": config.corp_id,
             "agentid": config.agent_id,
             "redirect_uri": encodeURIComponent(config.redirect_uri),
