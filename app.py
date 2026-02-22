@@ -381,6 +381,32 @@ def init_db():
         )
     ''')
 
+    # 11a. AI 风险历史记录表
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS project_risk_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            record_date DATE,
+            risk_score REAL,
+            sentiment_score REAL,
+            trend_direction TEXT,
+            key_risk_factors TEXT,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        )
+    ''')
+    
+    # 11c. AI 建议与分析缓存
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ai_report_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            report_type TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        )
+    ''')
+
     # 11b. 报告归档表 (Report Archive - 永久按日期保存)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS report_archive (

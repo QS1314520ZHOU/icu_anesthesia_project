@@ -2,6 +2,10 @@ from datetime import datetime, timedelta
 from database import DatabasePool
 from services.ai_service import ai_service
 import json
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AIInsightService:
     @staticmethod
