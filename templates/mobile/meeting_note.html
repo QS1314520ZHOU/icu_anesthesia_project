@@ -232,7 +232,7 @@
     <script>
         let currentUser = null;
         let isRecording = false;
-        let recognition = null;
+        let wxReady = false;
 
         // 企业微信 JS-SDK 网页授权
         async function initAuth() {
@@ -291,62 +291,116 @@
             }
         }
 
+        async function initWechatJSSDK() {
+            try {
+                // 解决 iOS 下 URL 取值问题，获取去掉 hash 的完整 URL
+                const url = window.location.href.split('#')[0];
+                const res = await fetch('/api/wecom/jssdk/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+                const data = await res.json();
+
+                if (data.success && data.data) {
+                    wx.config({
+                        beta: true,
+                        debug: false,
+                        appId: data.data.appId,
+                        timestamp: data.data.timestamp,
+                        nonceStr: data.data.nonceStr,
+                        signature: data.data.signature,
+                        jsApiList: [
+                            'startRecord',
+                            'stopRecord',
+                            'onVoiceRecordEnd',
+                            'translateVoice'
+                        ]
+                    });
+
+                    wx.ready(function () {
+                        wxReady = true;
+                        // 预先拦截超时自动停止
+                        wx.onVoiceRecordEnd({
+                            complete: function (res) {
+                                isRecording = false;
+                                resetVoiceBtn();
+                                translateVoice(res.localId);
+                            }
+                        });
+                    });
+
+                    wx.error(function (res) {
+                        console.error('JS-SDK Config Error:', res);
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to init JS-SDK', e);
+            }
+        }
+
         function startVoice() {
             if (isRecording) return;
-            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                recognition = new SpeechRecognition();
-                recognition.lang = 'zh-CN';
-                recognition.continuous = true;
-                recognition.interimResults = true;
+            if (!wxReady) {
+                alert('语音组件未准备好或不在企业微信环境中');
+                return;
+            }
 
-                const statusMsg = document.getElementById('statusMsg');
-                const voiceBtn = document.getElementById('voiceBtn');
+            const statusMsg = document.getElementById('statusMsg');
+            const voiceBtn = document.getElementById('voiceBtn');
 
-                recognition.onstart = () => {
+            wx.startRecord({
+                success: function () {
                     isRecording = true;
                     voiceBtn.innerHTML = '🛑 松开结束';
                     voiceBtn.style.background = '#fee2e2';
                     voiceBtn.style.color = '#ef4444';
                     statusMsg.innerText = '正在倾听...';
-                };
-
-                recognition.onresult = (event) => {
-                    let finalTranscript = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) {
-                            finalTranscript += event.results[i][0].transcript;
-                        }
-                    }
-                    if (finalTranscript) {
-                        const textarea = document.getElementById('logContent');
-                        textarea.value += (textarea.value ? '\n' : '') + finalTranscript;
-                    }
-                };
-
-                recognition.onerror = (event) => {
-                    console.error('Speech recognition error', event.error);
-                    stopVoice();
-                    statusMsg.innerText = '语音识别出错: ' + event.error;
-                };
-
-                recognition.onend = () => {
-                    isRecording = false;
-                    resetVoiceBtn();
-                };
-
-                recognition.start();
-            } else {
-                alert('当前浏览器不支持语音识别，请直接输入文字或使用微信自带语音输入即可');
-            }
+                },
+                cancel: function () {
+                    alert('用户拒绝授权录音');
+                }
+            });
         }
 
         function stopVoice() {
-            if (recognition && isRecording) {
-                recognition.stop();
-            }
+            if (!isRecording) return;
             isRecording = false;
             resetVoiceBtn();
+
+            wx.stopRecord({
+                success: function (res) {
+                    translateVoice(res.localId);
+                },
+                fail: function (res) {
+                    const statusMsg = document.getElementById('statusMsg');
+                    statusMsg.innerText = '录音失败: ' + JSON.stringify(res);
+                }
+            });
+        }
+
+        function translateVoice(localId) {
+            const statusMsg = document.getElementById('statusMsg');
+            statusMsg.innerText = '正在转为文字...';
+
+            wx.translateVoice({
+                localId: localId, // 需要识别的音频的本地Id，由录音相关接口获得
+                isShowProgressTips: 0, // 默认为1，显示进度提示
+                success: function (res) {
+                    if (res.translateResult) {
+                        // 微信返回的识别结果通常带标点符号，处理一下
+                        let text = res.translateResult.replace(/。$/, '');
+                        const textarea = document.getElementById('logContent');
+                        textarea.value += (textarea.value ? '\n' : '') + text;
+                        statusMsg.innerText = '';
+                    } else {
+                        statusMsg.innerText = '未能识别出语音内容';
+                    }
+                },
+                fail: function (res) {
+                    statusMsg.innerText = '语音识别失败: ' + JSON.stringify(res);
+                }
+            });
         }
 
         function resetVoiceBtn() {
@@ -414,6 +468,7 @@
 
         // Initialize on Load
         (async function () {
+            await initWechatJSSDK();
             const authed = await initAuth();
             if (authed) {
                 loadProjects();

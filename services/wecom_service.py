@@ -12,6 +12,9 @@ import json
 import logging
 import requests
 import threading
+import random
+import string
+import hashlib
 from app_config import WECOM_CONFIG, NOTIFICATION_CONFIG
 from utils.wecom_crypto import WeComCrypto
 
@@ -27,6 +30,11 @@ class WeComService:
         self._access_token = None
         self._token_expires_at = 0
         self._token_lock = threading.Lock()
+        
+        self._jsapi_ticket = None
+        self._ticket_expires_at = 0
+        self._ticket_lock = threading.Lock()
+        
         self._crypto = None
         
         # 初始加载配置
@@ -135,6 +143,60 @@ class WeComService:
         except Exception as e:
             logger.error("获取 access_token 异常: %s", e)
             return None
+    
+    # ===== JS-SDK 签名 =====
+    
+    def get_jsapi_ticket(self) -> str:
+        """获取 jsapi_ticket（带缓存，线程安全）"""
+        if self._jsapi_ticket and time.time() < self._ticket_expires_at - 300:
+            return self._jsapi_ticket
+            
+        with self._ticket_lock:
+            # Double check
+            if self._jsapi_ticket and time.time() < self._ticket_expires_at - 300:
+                return self._jsapi_ticket
+                
+            token = self.get_access_token()
+            if not token:
+                return None
+                
+            try:
+                url = f"{self.BASE_URL}/get_jsapi_ticket"
+                resp = requests.get(url, params={"access_token": token}, timeout=10)
+                data = resp.json()
+                
+                if data.get("errcode") == 0:
+                    self._jsapi_ticket = data["ticket"]
+                    self._ticket_expires_at = time.time() + data.get("expires_in", 7200)
+                    logger.info("企业微信 jsapi_ticket 刷新成功")
+                    return self._jsapi_ticket
+                else:
+                    logger.error("获取 jsapi_ticket 失败: %s", data)
+                    return None
+            except Exception as e:
+                logger.error("获取 jsapi_ticket 异常: %s", e)
+                return None
+                
+    def get_jssdk_config(self, url: str) -> dict:
+        """生成 JS-SDK 权限验证配置"""
+        ticket = self.get_jsapi_ticket()
+        if not ticket:
+            return None
+            
+        # 去掉 url 的 hash 锚点部分
+        sign_url = url.split('#')[0]
+        timestamp = int(time.time())
+        nonce_str = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+        
+        string1 = f"jsapi_ticket={ticket}&noncestr={nonce_str}&timestamp={timestamp}&url={sign_url}"
+        signature = hashlib.sha1(string1.encode('utf-8')).hexdigest()
+        
+        return {
+            "appId": WECOM_CONFIG.get("CORP_ID"),
+            "timestamp": timestamp,
+            "nonceStr": nonce_str,
+            "signature": signature
+        }
     
     # ===== 消息推送 =====
     

@@ -196,6 +196,21 @@ def get_wecom_config():
         "redirect_uri": f"{WECOM_CONFIG['APP_HOME_URL']}/api/wecom/sso/callback"
     })
 
+@wecom_bp.route('/jssdk/config', methods=['POST'])
+def generate_jssdk_config():
+    """获取前端 JS-SDK 的鉴权配置"""
+    from services.wecom_service import wecom_service
+    
+    data = request.json or {}
+    url = data.get('url')
+    if not url:
+        return api_response(False, message="缺少页面 URL 参数")
+        
+    config = wecom_service.get_jssdk_config(url)
+    if config:
+        return api_response(True, data=config)
+    return api_response(False, message="获取 JS-SDK 配置失败")
+
 @wecom_bp.route('/oauth/login', methods=['GET'])
 def oauth_login():
     """发起 OAuth2 登录"""
