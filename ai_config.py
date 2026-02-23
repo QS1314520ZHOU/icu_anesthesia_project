@@ -50,7 +50,7 @@ class AIConfigManager:
     
     def __init__(self):
         self.endpoints: List[APIEndpoint] = []
-        self.timeout = int(os.environ.get('AI_TIMEOUT', 180))
+        self.timeout = int(os.environ.get('AI_TIMEOUT', 60))
         self.max_retries = 3
         self.error_cooldown = 60  # 错误后冷却时间(秒) - 缩短为1分钟，允许快速重试
         self._init_endpoints()

@@ -1314,6 +1314,8 @@ function renderProjectDetail(project) {
                             <span class="dot-separator">·</span>
                             <button onclick="generateDailyReport(${project.id})">📋 AI日报</button>
                             <span class="dot-separator">·</span>
+                            <button onclick="generateWeeklyReport(${project.id})">📋 AI周报</button>
+                            <span class="dot-separator">·</span>
                             <button onclick="showAiTaskSuggestions(${project.id})">🤖 AI任务分配</button>
                             
                             <!-- 更多按钮 -->
@@ -7416,8 +7418,29 @@ async function showBusinessReportModal(projectId) {
     if (!modal) return;
 
     window.currentReportProjectId = projectId;
+
+    // 初始化年份
+    const yearSelect = document.getElementById('reportYear');
+    if (yearSelect && yearSelect.options.length === 0) {
+        const currentYear = new Date().getFullYear();
+        for (let y = currentYear; y >= currentYear - 3; y--) {
+            yearSelect.add(new Option(y, y));
+        }
+    }
+
+    // 初始化周度
+    const weekSelect = document.getElementById('reportWeek');
+    if (weekSelect && weekSelect.options.length <= 1) {
+        for (let w = 1; w <= 53; w++) {
+            weekSelect.add(new Option(`第${w}周`, w));
+        }
+    }
+
     const qInput = document.getElementById('reportQuarter');
     if (qInput) qInput.value = '';
+    const mInput = document.getElementById('reportMonth');
+    if (mInput) mInput.value = '';
+    if (weekSelect) weekSelect.value = '';
 
     modal.classList.add('show');
     refreshReportPreview();
@@ -7428,6 +7451,7 @@ async function refreshReportPreview() {
     const year = document.getElementById('reportYear').value;
     const month = document.getElementById('reportMonth').value;
     const quarter = document.getElementById('reportQuarter').value;
+    const week = document.getElementById('reportWeek').value;
 
     const paper = document.getElementById('reportPaper');
     const aiBox = document.getElementById('aiBusinessSummary');
@@ -7445,11 +7469,16 @@ async function refreshReportPreview() {
         let url = `/reports/preview?project_id=${projectId}&year=${year}`;
         if (month) url += `&month=${month}`;
         else if (quarter) url += `&quarter=${quarter}`;
+        else if (week) url += `&week=${week}`;
 
         const res = await api.get(url);
         if (res) {
             document.getElementById('paperProjectName').textContent = res.project.project_name;
-            const periodStr = month ? `${year}年${month}月` : `${year}年第${quarter}季度`;
+            let periodStr = "";
+            if (month) periodStr = `${year}年${month}月`;
+            else if (quarter) periodStr = `${year}年第${quarter}季度`;
+            else if (week) periodStr = `${year}年第${week}周`;
+
             document.getElementById('paperReportPeriod').textContent = `${periodStr} 运行报表`;
 
             // AI 摘要

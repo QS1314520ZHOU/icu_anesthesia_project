@@ -432,20 +432,16 @@ class ReportScheduler:
                 logger.info("  ✅ 项目 %s 周报已归档", project['project_name'])
             except Exception as e:
                 logger.error("  ❌ 项目 %s 周报生成失败: %s", project['project_name'], e)
-            finally:
-                try:
-                    close_db()
-                except:
-                    pass
 
         logger.info("周报自动生成完成: %d/%d 个项目", success_count, len(projects))
 
     def _build_weekly_report(self, project_id, project, today):
         """构建单个项目的周报"""
-        conn = get_db()
+        from database import DatabasePool
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
-        stages = [dict(s) for s in conn.execute(
+        with DatabasePool.get_connection() as conn:
+            stages = [dict(s) for s in conn.execute(
             "SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order",
             (project_id,)
         ).fetchall()]
@@ -491,15 +487,30 @@ class ReportScheduler:
         try:
             from ai_utils import call_ai
 
-            system_prompt = """你是一位专业的医疗信息化项目经理，请生成一份正式周报。Markdown格式：
+            system_prompt = """你是一位专业的医疗信息化项目经理，请根据提供的项目底层数据生成一份结构化、专业的正式周报。
+要求：
+1. 语言严谨、客观，体现出项目经理的专业把控力。
+2. 包含：本周核心进展、阶段状态更新、现存问题与风险分析、下周工作详细计划、建议协调事项。
+3. 请使用 Markdown 格式排版，确保美观易读。
+4. 严禁空话，必须基于真实的任务和日志数据。
+
+Markdown格式示例：
 # 📋 [项目名称] 周报
 **报告周期**: YYYY-MM-DD ~ YYYY-MM-DD
 **项目经理**: XXX | **当前进度**: XX%
+
 ## 一、本周工作完成情况
-## 二、当前项目阶段状态 (表格)
-## 三、问题与风险
+...
+## 二、项目阶段状态
+| 阶段 | 进度 | 状态 | 
+|------|------|------|
+...
+## 三、问题与风险分析
+...
 ## 四、下周工作计划
-## 五、需要协调事项
+...
+## 五、需要协调与支持
+...
 """
 
             prompt = f"""{system_prompt}

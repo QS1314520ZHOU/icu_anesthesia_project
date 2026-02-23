@@ -109,15 +109,37 @@ def receive_callback():
             reply_content = wecom_msg_handler.handle_image_message(from_user, media_id)
             
         elif msg_type == 'voice':
-            # 兼容不同大小写（虽然官方是 Recognition）
+            # 优先尝试从消息中获取 Recognition 字段（企业微信某些版本或配置下可能包含）
             recognition = msg.get('Recognition') or msg.get('recognition') or ''
+            
+            if not recognition:
+                # 如果没有自带识别结果，则手动下载并调用 AI 转录
+                media_id = msg.get('MediaId', '')
+                if media_id:
+                    logger.info("语音消息识别结果为空，尝试手动转录 MediaID: %s", media_id)
+                    import os
+                    # 临时保存路径
+                    save_path = os.path.join('temp', f"voice_{media_id}.amr")
+                    os.makedirs('temp', exist_ok=True)
+                    
+                    try:
+                        downloaded_path = wecom_service.get_media(media_id, save_path)
+                        if downloaded_path:
+                            from services.ai_service import ai_service
+                            recognition = ai_service.transcribe_audio(downloaded_path)
+                            # 删除临时文件
+                            if os.path.exists(downloaded_path):
+                                os.remove(downloaded_path)
+                    except Exception as e:
+                        logger.error("手动转录语音失败: %s", e)
+
             if recognition:
                 logger.info("识别到语音内容: %s", recognition)
                 # 把识别出的文字当作普通文本消息处理
                 reply_content = wecom_msg_handler.handle_text_message(from_user, recognition)
             else:
-                logger.warning("语音消息未包含有效 Recognition 字段")
-                reply_content = "抱歉，没有识别出语音内容，请重新发送或使用文字。"
+                logger.warning("语音消息无法转录或未包含有效内容")
+                reply_content = "抱歉，由于企业微信限制，目前无法直接识别该语音内容。建议您在我的“移动端控制台”中使用语音输入，或者发送文字消息。"
             
         elif msg_type == 'event':
             event_type = msg.get('Event', '')

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -175,7 +175,7 @@ class ReportGenerationService:
             return f"AI 接口调用异常: {str(e)}"
 
     @staticmethod
-    def get_period_report_data(project_id, year, month=None, quarter=None):
+    def get_period_report_data(project_id, year, month=None, quarter=None, week=None):
         """
         获取特定时间段的项目报表数据
         """
@@ -202,6 +202,11 @@ class ReportGenerationService:
                         end_date = f"{int(year)+1}-01-01"
                     else:
                         end_date = f"{year}-{end_m}-01"
+                elif week:
+                    # 使用 ISO 周计算日期范围
+                    d = datetime.fromisocalendar(int(year), int(week), 1)
+                    start_date = d.strftime('%Y-%m-%d')
+                    end_date = (d + timedelta(days=7)).strftime('%Y-%m-%d')
                 
                 # 获取该期间的日志
                 logs = conn.execute(
@@ -213,28 +218,32 @@ class ReportGenerationService:
                 tasks = conn.execute(
                     '''SELECT t.*, s.stage_name FROM tasks t 
                        JOIN project_stages s ON t.stage_id = s.id 
-                       WHERE s.project_id = ? AND t.is_completed = 1 AND t.updated_at >= ? AND t.updated_at < ?''',
+                       WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date >= ? AND t.completed_date < ?''',
                     (project_id, start_date, end_date)
                 ).fetchall()
                 
                 # 获取该期间完成的里程碑
                 milestones = conn.execute(
-                    'SELECT * FROM milestones WHERE project_id = ? AND is_completed = 1 AND updated_at >= ? AND updated_at < ?',
+                    'SELECT * FROM milestones WHERE project_id = ? AND is_completed = 1 AND completed_date >= ? AND completed_date < ?',
                     (project_id, start_date, end_date)
                 ).fetchall()
                 
-                # 获取财务数据 (假设也有时间戳，如果没有则取当前总量)
-                financials = conn.execute(
-                    'SELECT * FROM project_financials WHERE project_id = ?', (project_id,)
+                # 获取财务数据 (汇总回款金额)
+                revenue_res = conn.execute(
+                    'SELECT SUM(amount) as collected_total FROM project_revenues WHERE project_id = ?', (project_id,)
                 ).fetchone()
+                collected_amount = revenue_res['collected_total'] if revenue_res['collected_total'] else 0
                 
                 return {
                     'project': dict(project),
                     'logs': [dict(l) for l in logs],
                     'tasks': [dict(t) for t in tasks],
                     'milestones': [dict(m) for m in milestones],
-                    'financials': dict(financials) if financials else None,
-                    'period': {'year': year, 'month': month, 'quarter': quarter}
+                    'financials': {
+                        'contract_amount': project['contract_amount'] or 0,
+                        'collected_amount': collected_amount
+                    },
+                    'period': {'year': year, 'month': month, 'quarter': quarter, 'week': week}
                 }
         except Exception as e:
             print(f"Get Period Report Data Error: {e}")
@@ -255,13 +264,20 @@ class ReportGenerationService:
 5. 长度控制在 600 字左右。"""
 
         context = f"项目: {data['project']['project_name']} ({data['project']['hospital_name']})\n"
-        period_str = f"{data['period']['year']}年" + (f"{data['period']['month']}月" if data['period']['month'] else f"第{data['period']['quarter']}季度")
+        period_str = f"{data['period']['year']}年"
+        if data['period']['month']:
+            period_str += f"{data['period']['month']}月"
+        elif data['period']['quarter']:
+            period_str += f"第{data['period']['quarter']}季度"
+        elif data['period']['week']:
+            period_str += f"第{data['period']['week']}周"
+        
         context += f"分析周期: {period_str}\n"
         context += f"本期完成里程碑: {[m['name'] for m in data['milestones']]}\n"
         context += f"本期完成任务数: {len(data['tasks'])}\n"
         context += f"本期投入工时概况: {len(data['logs'])} 条工作内容记录\n"
         if data['financials']:
-            context += f"财务快照: 总金额 {data['financials']['contract_amount']}, 已回款 {data['financials']['collected_amount']}, 净利润率 {data['financials']['net_profit_margin']}%\n"
+            context += f"财务快照: 合同总额 {data['financials']['contract_amount']}, 当前已回款 {data['financials']['collected_amount']}\n"
         
         try:
             content = AIService.call_ai_api(system_prompt, context, task_type="analysis")

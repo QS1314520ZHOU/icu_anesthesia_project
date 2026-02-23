@@ -1,34 +1,32 @@
-# 🏥 ICU-PM Intelligent Assistant
-> **ICU & Anesthesia Project Management Platform Powered by AIGC**
+# 🏥 ICU & Anesthesia Project Management Platform (ICU-PM)
+> **Intelligent Healthcare Implementation Management Powered by AIGC**
 
 ![System UI](https://img.shields.io/badge/Interface-Premium_Dark-blueviolet)
 ![Logic](https://img.shields.io/badge/AI_Engine-Multi--Provider_Fallback-success)
-![Data](https://img.shields.io/badge/Privacy-On--Premise_SQLite-blue)
+![Data](https://img.shields.io/badge/Architect-Driven_Design-blue)
 
-这是一套专为**重症及手麻医疗信息化项目**定制的智能管理系统。它结合了传统项目管理（PM）的严谨性与现代 AIGC 技术的高效性，旨在解决医疗工程现场复杂、碎片化的沟通与进度管理痛点。
+这是一套专为**重症及手麻医疗信息化实施项目**高度定制的智能管理系统。它结合了传统项目管理（PM）的严谨性与现代 AIGC 技术的高效性，旨在解决医疗现场复杂、碎片化的沟通与进度管理痛点。
 
 ---
 
 ## 💎 卓越特性
 
 ### 🧠 神经网络式 AI 驱动 (The Brain)
-*   **多源模型冗余架构**：内置 Cloudflare AI (Qwen/Llama) 与 DeepSeek 双重引擎。系统具备“自愈”能力，当首选供应商宕机时，秒级无缝倒换至备份节点。
-*   **AI 今日决策辅助**：自动抓取全量活跃项目的进度、阻塞点和近期里程碑，并**具备智能缓存机制**，在节省 Token 的同时提供秒级的决策建议。
-*   **AI 情感雷达 (Sentiment Radar)**：深度分析项目日志与风险项，提取核心负向信号（增加至5个关键词），并通过雷达图直观展现客户、团队、技术与进度的健康度。
-*   **智能化语义归纳**：
-    *   **每日“晨会简报”**：生成逻辑清晰的行为建议。
-    *   **站会分钟生成**：将碎片化的现场日志通过 LLM 聚合为标准的专业纪要。
-*   **企业微信深度集成**：支持多级 Webhook 配置，实现项目预警、日报的自动化分发。
+*   **多源模型冗余架构**：内置 DeepSeek, Cloudflare AI 等多模型网关。系统具备“自愈”能力，当首选供应商宕机时，秒级无缝倒换至热备节点。
+*   **企业微信深度集成**：支持企微群机器人自动化推送，以及直接与企微机器人进行文字/语音交互。首创 **WeCom 语音解析**，通过本地化转写支持实时语音派发任务和查询状态。
+*   **全局与项目级周报自动生成**：自动抓取全量活跃项目的进度、阻塞点和近期里程碑。**具备智能长效缓存机制**，极大节省 Token 开销的同时保证出报速度。能够清洗脏数据并输出格式齐整的高管视角的周报。
+*   **AI 智能诊断雷达 (Sentiment Radar)**：深度诊断进度与风险项，提取核心负向信号，生成多维风险雷达图直观展现健康度。
+*   **智能化语义归纳**：深度结合语境生成“晨会简报”以及“阶段性会议纪要”。
 
 ### 🏗️ 核心工程模型
-*   **CPM 关键路径法**：自动计算项目最短工期，动态识别可能导致延期的“致命节点”。
-*   **影响域分析 (Impact Analysis)**：当需求变更或任务延误时，AI 自动推演其所在的整个下游链条的影响范围。
-*   **可视化数据导出**：支持报表级 PDF 导出，采用 DOM 克隆技术解决复杂长页面的导出黑屏/截断问题。
-*   **数据资产闭环**：支持项目文档归档、支出追踪、验收管理，形成完整的项目数字化档案。
+*   **全局甘特图生态 (Gantt Chart)**：多级进度把控，自动计算任务的最优路径，直观展示里程碑完成度。
+*   **财务与收入监控**：新增全生命周期**项目收入追踪模型**，结合原有的费用报销系统，精准测算项目整体利润率。
+*   **云原生改造**：支持本地硬件部署，同时已全面打通 **Cloudflare R2 对象存储**，解决本地大文件（项目文档、验收资料）的长期归档难题。
+*   **资产与协同闭环**：包含软硬件资产绑定、知识库管理系统，同时深度打通 Notion API 以便形成完整的双向项目数字化网络档案。
 
 ### 🎨 极客级交互设计
-*   **Premium Dark UI**：基于现代审美打造的深色、半透明（Glassmorphism）视觉系统。
-*   **实时交互反馈**：具备完善的全局 Toast 气泡系统与加载状态反馈，确保在大模型计算过程中交互不卡顿。
+*   **Premium Glassmorphism UI**：基于现代审美打造的深色、半透明视觉系统，配合精美的动效和图表。
+*   **所见即所得的极速体验**：具备完善的全局状态保活和缓存策略，避免长时间等待。
 
 ---
 
@@ -39,12 +37,12 @@ graph TD
     A[UI Web Dashboard] --> B[Flask API Layer]
     B --> C[AI Intelligence Service]
     B --> D[Database - SQLite]
-    C --> E{AI Gateway}
+    C --> E{AI Gateway & Fallback}
     E -->|Priority 1| F[DeepSeek API]
     E -->|Priority 2| G[OpenAI Compatible API]
     E -->|Priority 3| H[Cloudflare Workers AI]
-    D --> I[AI Report Cache]
-    B --> J[WeCom Integration]
+    D --> I[Object Storage - R2 / Local]
+    B <-->|Chat & Voice| J[WeCom Bot Integration]
 ```
 
 ---
@@ -52,8 +50,9 @@ graph TD
 ## ⚙️ 部署指南 (私有化)
 
 ### 1. 软件环境
-*   **Python 3.10+**
+*   **Python 3.10+** (推荐 3.11)
 *   **SQLite 3**
+*   **FFmpeg** (用于企微 AMR 语音转写处理)
 
 ### 2. 初始化步骤
 ```bash
@@ -68,27 +67,28 @@ pip install -r requirements.txt
 python app.py
 ```
 
-### 3. 配置 AI 节点
-进入系统后，点击侧边栏 **“AI 配置管理”**，您可以直接在 UI 界面配置您的 API Token。配置会自动实现数据库持久化，无需修改源代码。
+### 3. 系统初始化配置
+进入系统后，点击侧边栏 **“系统管理中心”**：
+1. **AI 配置**：设置 DeepSeek 或对应兼容 API 的 Token。
+2. **云存储配置 (可选)**：设置您的 S3/R2 认证密钥。
+3. **企微配置 (可选)**：绑定您的企业微信应用 ID/Secret 以及接收消息的 Webhook URL。
 
 ---
 
 ## 🛡️ 数据隐私与安全
-*   **本地存储**：所有项目核心数据、财务记录均存储在本地 SQLite 中，不上传云端，满足医疗行业合规性需求。
-*   **脱敏调用**：AI 接口调用仅传输业务逻辑相关的文本片段，且支持在配置中心随时停用任何外部 API。
+*   **灵活隔离**：所有结构化财务和项目数据均存储在本地 SQLite 中。您可以自行决定文档是存在本地服务器还是上传至加密云端。
+*   **脱敏调用**：AI 接口调用仅传输业务逻辑相关的无害文本片段，且支持在服务端一键熔断所有云端通讯。
 
 ---
 
-## 📅 Roadmap
-- [x] AI 晨会简报自动化推送
-- [x] Cloudflare 多模型备份系统
-- [x] AI 决策辅助缓存机制 (Daily Caching)
-- [x] 情感雷达多维评分系统
-- [x] 报表级 PDF 导出优化
-- [x] 甘特图 (Gantt Chart) 展示
-- [ ] 移动端小程序适配
-- [ ] 自动化运维健康检查看板
+## 📅 版本迭代追踪
+- [x] AI 全局实施周报自动化生成与容错清理
+- [x] 基于 S3 协议的 Cloudflare R2 对象存储接入
+- [x] 企业微信（WeCom）回调机器人，支持**原生语音识别**交互
+- [x] R2 Endpoint 与路径标准化修复支持
+- [x] AI 决策辅助深度安全缓存管控
+- [x] 系统级仪表盘更新及项目群整体监控
 
 ---
-**QS1314520ZHOU 荣誉出品**  
-*致力于用人工智能重塑医疗工程管理流程*
+**QS1314520ZHOU**  
+*用极客精神与人工智能重塑医疗工程管理流程*

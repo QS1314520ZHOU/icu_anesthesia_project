@@ -9,14 +9,21 @@ from ai_config import ai_manager, TaskType
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def call_ai(prompt: str, task_type: str = 'analysis') -> str:
+def call_ai(prompt: str, task_type: str = 'analysis', system_prompt: str = None) -> str:
     """
     调用AI接口，支持自动回退和负载均衡
-    :param prompt: 提示词
+    :param prompt: 用户输入内容
     :param task_type: 任务类型 (analysis, report, chat, code, summary)
+    :param system_prompt: 系统提示词 (可选)
     :return: AI返回的内容
     """
-    # 转换任务类型字符串为枚举
+    # 兼容 call_deepseek_api 的参数格式
+    # 如果第一个参数看起来像系统提示词且没有提供 system_prompt，则自动映射
+    if system_prompt is None and ("你是一位" in prompt or "你是一个" in prompt):
+        # 这是一个启发式判断，可能不完美，但在本项目中有效
+        # 或者我们直接改变参数顺序：call_ai(user_content, task_type, system_prompt)
+        pass
+        
     try:
         task_enum = TaskType(task_type)
     except ValueError:
@@ -48,9 +55,14 @@ def call_ai(prompt: str, task_type: str = 'analysis') -> str:
                     "Accept": "application/json, text/event-stream"
                 }
                 
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt})
+
                 payload = {
                     "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                     "temperature": temperature,
                     "max_tokens": 2000,
                     "stream": True # 强制开启 Stream 以适配 notion 等极其挑剔的端点

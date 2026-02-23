@@ -11,11 +11,12 @@ def get_report_preview():
     year = request.args.get('year', type=int)
     month = request.args.get('month', type=int)
     quarter = request.args.get('quarter', type=int)
+    week = request.args.get('week', type=int)
     
     if not project_id or not year:
         return api_response(False, error="Missing required parameters")
     
-    data = report_gen_service.get_period_report_data(project_id, year, month, quarter)
+    data = report_gen_service.get_period_report_data(project_id, year, month, quarter, week)
     if not data:
         return api_response(False, error="No data found for the given criteria")
     

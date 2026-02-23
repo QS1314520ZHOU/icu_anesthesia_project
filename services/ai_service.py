@@ -184,7 +184,39 @@ class AIService:
 
                 return detected_risks, risk_score
         except Exception as e:
-            print(f"Project Risk Analysis Failed: {e}")
+            print(f"Risk Analysis Failed: {e}")
             return [], 0
+
+    @staticmethod
+    def transcribe_audio(file_path: str) -> str:
+        """根据音频文件进行转录"""
+        try:
+            # 这里的实现取决于具体的 ASR 服务。
+            # 假设我们使用的是 OpenAI-compatible 接口且支持 /v1/audio/transcriptions
+            sequence = ai_manager.get_available_endpoints()
+            for item in sequence:
+                endpoint = item["endpoint"]
+                # 尝试猜测音频转录路径
+                audio_url = endpoint.base_url.replace('/chat/completions', '/audio/transcriptions')
+                
+                headers = {
+                    "Authorization": f"Bearer {endpoint.api_key}"
+                }
+                
+                with open(file_path, 'rb') as f:
+                    files = {
+                        'file': (os.path.basename(file_path), f, 'audio/amr')
+                    }
+                    data = {
+                        "model": "sensevoice-v1" # 或者是 whisper-1 等
+                    }
+                    
+                    response = requests.post(audio_url, headers=headers, files=files, data=data, timeout=60)
+                    if response.status_code == 200:
+                        return response.json().get('text', '')
+            return ""
+        except Exception as e:
+            logger.error(f"语音转录异常: {e}")
+            return ""
 
 ai_service = AIService()
