@@ -201,8 +201,8 @@ def oauth_login():
     """发起 OAuth2 登录"""
     from services.wecom_service import wecom_service
     
-    home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://dxm.jylb.fun')
-    if 'dxm.jylb.fun' not in home_url and 'your-domain.com' in home_url:
+    home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://your-domain.com')
+    if 'your-domain.com' in home_url or 'dxm.jylb.fun' in home_url:
         home_url = request.url_root.rstrip('/')
         
     redirect_uri = request.args.get('redirect_uri', home_url)
@@ -232,8 +232,8 @@ def oauth_callback():
     if result.get('success'):
         # 重定向到前端，带上 token
         token = result['token']
-        home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://dxm.jylb.fun')
-        if 'dxm.jylb.fun' not in home_url and 'your-domain.com' in home_url:
+        home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://your-domain.com')
+        if 'your-domain.com' in home_url or 'dxm.jylb.fun' in home_url:
             home_url = request.url_root.rstrip('/')
         
         # 安全处理: 如果是单纯的 '/', 则不变，否则补充斜杠
