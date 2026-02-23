@@ -201,8 +201,12 @@ def oauth_login():
     """发起 OAuth2 登录"""
     from services.wecom_service import wecom_service
     
-    redirect_uri = request.args.get('redirect_uri', WECOM_CONFIG.get('APP_HOME_URL', ''))
-    callback_url = f"{WECOM_CONFIG['APP_HOME_URL']}/api/wecom/oauth/callback"
+    home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://your-domain.com')
+    if 'your-domain.com' in home_url:
+        home_url = request.url_root.rstrip('/')
+        
+    redirect_uri = request.args.get('redirect_uri', home_url)
+    callback_url = f"{home_url}/api/wecom/oauth/callback"
     oauth_url = wecom_service.get_oauth_url(callback_url)
     return redirect(oauth_url)
 
@@ -229,6 +233,13 @@ def oauth_callback():
         # 重定向到前端，带上 token
         token = result['token']
         home_url = WECOM_CONFIG.get('APP_HOME_URL', '/')
+        if 'your-domain.com' in home_url:
+            home_url = request.url_root.rstrip('/')
+        
+        # 安全处理: 如果是单纯的 '/', 则不变，否则补充斜杠
+        if not home_url.endswith('/'):
+            home_url += '/'
+            
         return redirect(f"{home_url}?token={token}")
     else:
         return api_response(False, message=result.get('message', '登录失败'), code=401)

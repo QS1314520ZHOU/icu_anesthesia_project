@@ -7874,12 +7874,18 @@ async function showWecomLogin(containerId = 'wecom_login_container', formId = 'l
         loginForm.style.display = 'none';
         container.innerHTML = '正在加载二维码...'; // 清空并显示加载中
 
+        // 动态构建回调地址，避免使用默认的 your-domain.com
+        let redirectUri = config.redirect_uri;
+        if (!redirectUri || redirectUri.includes('your-domain.com')) {
+            redirectUri = window.location.origin + '/api/wecom/sso/callback';
+        }
+
         // 初始化扫码
         window.wwLogin = new WwLogin({
             "id": containerId,
             "appid": config.corp_id,
             "agentid": config.agent_id,
-            "redirect_uri": encodeURIComponent(config.redirect_uri),
+            "redirect_uri": encodeURIComponent(redirectUri),
             "state": "wecom_login_" + Date.now(),
             "href": "", // 可以自定义样式
             "lang": "zh",

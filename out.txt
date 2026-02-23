@@ -1,0 +1,2 @@
+wecom_webhook: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=4c04c973-885d-48c6-9ec2-02f62edb9026
+wecom_enabled: true
