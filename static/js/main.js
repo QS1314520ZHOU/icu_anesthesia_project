@@ -1333,6 +1333,11 @@ function renderProjectDetail(project) {
                                         </button>
                                     ` : ''}
                                     
+                                    <div class="menu-group-title">移动端功能</div>
+                                    <div class="menu-divider"></div>
+                                    <button class="menu-item" onclick="window.open('/m/briefing/${project.id}', '_blank')">📱 移动端速查卡</button>
+                                    <button class="menu-item" onclick="window.open('/m/acceptance/${project.id}', '_blank')">✅ 移动端验收</button>
+                                    
                                     <div class="menu-group-title">数据导出</div>
                                     <div class="menu-divider"></div>
                                     <button class="menu-item" onclick="exportProjectReport(${project.id})">📄 导出为 Json</button>
