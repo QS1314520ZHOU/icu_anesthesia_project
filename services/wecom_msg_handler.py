@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from database import DatabasePool
 from services.wecom_service import wecom_service
+from app_config import WECOM_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,7 @@ class WeComMsgHandler:
                         f"   {p['hospital_name']} | {p['status']} | 进度 {p['progress']}%"
                     )
                 
+                lines.append(f"\n🔗 **[进入移动版控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)**")
                 return "\n".join(lines)
         except Exception as e:
             return f"查询异常：{str(e)}"
@@ -265,7 +267,8 @@ class WeComMsgHandler:
             "也可以先发图片，再发文字描述\n\n"
             "📊 **项目概览**\n"
             "发送：`状态`\n\n"
-            "💡 也可以不加前缀直接说话，系统会自动识别意图。"
+            "💡 也可以不加前缀直接说话，系统会自动识别意图。\n\n"
+            f"🔗 **[进入移动版控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)**"
         )
     
     # ===== 辅助方法 =====

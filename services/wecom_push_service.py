@@ -91,7 +91,7 @@ class WeComPushService:
             ],
             "card_action": {
                 "type": 1,
-                "url": f"{WECOM_CONFIG['APP_HOME_URL']}/#/project/{project_id}"
+                "url": f"{WECOM_CONFIG['APP_HOME_URL']}/m/briefing/{project_id}"
             }
         }
         
@@ -131,7 +131,7 @@ class WeComPushService:
             ],
             "card_action": {
                 "type": 1,
-                "url": f"{WECOM_CONFIG['APP_HOME_URL']}/#/project/{project_id}"
+                "url": f"{WECOM_CONFIG['APP_HOME_URL']}/m/briefing/{project_id}"
             }
         }
         
@@ -157,7 +157,8 @@ class WeComPushService:
             f"医院：{project['hospital_name']}\n"
             f"里程碑：**{milestone_name}**\n"
             f"完成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-            f"恭喜项目组全体成员！🏆"
+            f"恭喜项目组全体成员！🏆\n\n"
+            f"> [📱 进入移动版控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
         )
         
         wecom_service.send_markdown_to_all(content)
@@ -176,7 +177,8 @@ class WeComPushService:
             wecom_service.send_markdown(manager_userid,
                 f"⚠️ **项目闲置提醒**\n\n"
                 f"项目 **{project_name}** 已 **{idle_days}** 天无工作日志更新。\n"
-                f"请尽快更新进展或提交日志。"
+                f"请尽快更新进展或提交日志。\n\n"
+                f"> [📱 进入移动版操作台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
             )
         
         # 超过21天，升级通知 admin/PMO
@@ -191,7 +193,8 @@ class WeComPushService:
                     f"🚨 **闲置升级通知**\n\n"
                     f"项目 **{project_name}** 已 **{idle_days}** 天无任何更新！\n"
                     f"负责人：{manager_name}\n"
-                    f"请关注并协调处理。"
+                    f"请关注并协调处理。\n\n"
+                    f"> [📱 进入移动版操作台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
                 )
     
     # ===== 周报推送给甲方外部联系人 =====

@@ -337,6 +337,27 @@ class WeComService:
         except Exception as e:
             return {"errcode": -1, "errmsg": str(e)}
 
+    # ===== 自定义菜单 =====
+    
+    def create_menu(self, menu_data: dict) -> dict:
+        """创建应用自定义菜单"""
+        token = self.get_access_token()
+        if not token:
+            return {"errcode": -1, "errmsg": "access_token 获取失败"}
+        
+        try:
+            url = f"{self.BASE_URL}/menu/create?access_token={token}&agentid={WECOM_CONFIG['AGENT_ID']}"
+            resp = requests.post(url, json=menu_data, timeout=10)
+            result = resp.json()
+            if result.get("errcode") == 0:
+                logger.info("创建应用菜单成功")
+            else:
+                logger.warning("创建应用菜单失败: %s", result)
+            return result
+        except Exception as e:
+            logger.error("创建应用菜单异常: %s", e)
+            return {"errcode": -1, "errmsg": str(e)}
+
 
 # 全局单例
 wecom_service = WeComService()
