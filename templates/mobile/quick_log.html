@@ -199,7 +199,10 @@
             <textarea id="logContent"
                 placeholder="说说今天干了什么...&#10;&#10;例如：上午把HIS医嘱接口联调通过了，下午培训了ICU护士&#10;护士长反馈字体太小，明天准备改一下界面"></textarea>
             <div class="action-row">
-                <button class="voice-btn" id="voiceBtn">🎙️ 按住/点击说话</button>
+                <button class="voice-btn" id="voiceBtn" oncontextmenu="return false;"
+                    ontouchstart="event.preventDefault(); startVoice();"
+                    ontouchend="event.preventDefault(); stopVoice();" onmousedown="startVoice();"
+                    onmouseup="stopVoice();" onmouseleave="stopVoice();">🎙️ 按住说话</button>
                 <button class="submit-btn" id="submitBtn" onclick="submitLog()">📝 保存日志</button>
             </div>
             <div id="statusMsg" class="status-message"></div>
@@ -355,56 +358,7 @@
             statusMsg.innerText = '';
         }
 
-        // 绑定语音按钮事件 (支持点击切换 & 长按录音)
-        function bindVoiceEvents() {
-            const btn = document.getElementById('voiceBtn');
-            if (!btn) return;
 
-            let touchStartTime = 0;
-            let pressTimer = null;
-            let isLongPress = false;
-
-            // 移动端/触摸屏事件
-            btn.addEventListener('touchstart', (e) => {
-                e.preventDefault(); // 阻止默认的点击事件传导和文字选中
-                touchStartTime = Date.now();
-                isLongPress = false;
-
-                // 设置长按定时器, 300ms 后视为长按并开始录音
-                pressTimer = setTimeout(() => {
-                    isLongPress = true;
-                    if (!isRecording) startVoice();
-                }, 300);
-            }, { passive: false });
-
-            btn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                if (pressTimer) clearTimeout(pressTimer);
-
-                const touchDuration = Date.now() - touchStartTime;
-
-                if (isLongPress) {
-                    // 如果是长按模式，松手立刻停止录音
-                    if (isRecording) stopVoice();
-                } else if (touchDuration < 300) {
-                    // 如果是短按（点击），则触发 toggle 行为
-                    if (isRecording) {
-                        stopVoice();
-                    } else {
-                        startVoice();
-                    }
-                }
-            });
-
-            btn.addEventListener('touchcancel', (e) => {
-                e.preventDefault();
-                if (pressTimer) clearTimeout(pressTimer);
-                if (isLongPress && isRecording) stopVoice();
-            });
-
-            // 阻止系统菜单
-            btn.addEventListener('contextmenu', (e) => e.preventDefault());
-        }
 
         async function submitLog() {
             const projectId = document.getElementById('projectSelect').value;
@@ -460,7 +414,6 @@
 
         // Initialize on Load
         (async function () {
-            bindVoiceEvents();
             const authed = await initAuth();
             if (authed) {
                 loadProjects();
