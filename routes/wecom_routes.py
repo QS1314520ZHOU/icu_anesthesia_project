@@ -207,7 +207,7 @@ def oauth_login():
         
     redirect_uri = request.args.get('redirect_uri', home_url)
     callback_url = f"{home_url}/api/wecom/oauth/callback"
-    oauth_url = wecom_service.get_oauth_url(callback_url)
+    oauth_url = wecom_service.get_qr_login_url(callback_url)
     return redirect(oauth_url)
 
 

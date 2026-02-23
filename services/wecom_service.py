@@ -207,7 +207,9 @@ class WeComService:
     # ===== OAuth2 身份验证 =====
     
     def get_oauth_url(self, redirect_uri: str, state: str = "wecom_login") -> str:
-        """生成 OAuth2 授权链接（用于 Web 扫码登录）"""
+        """生成网页授权链接（用于手机端微信/企业微信内免密登录）
+           如果在电脑浏览器中访问此链接，因为不是微信环境，经常报错或必须先扫码登录网页版微信。
+        """
         return (
             f"https://open.weixin.qq.com/connect/oauth2/authorize"
             f"?appid={WECOM_CONFIG['CORP_ID']}"
@@ -217,6 +219,16 @@ class WeComService:
             f"&state={state}"
             f"&agentid={WECOM_CONFIG['AGENT_ID']}"
             f"#wechat_redirect"
+        )
+        
+    def get_qr_login_url(self, redirect_uri: str, state: str = "wecom_login") -> str:
+        """生成扫码登录授权链接（企业微信专属，用于 PC 端浏览器）"""
+        return (
+            f"https://open.work.weixin.qq.com/wwopen/sso/qrConnect"
+            f"?appid={WECOM_CONFIG['CORP_ID']}"
+            f"&agentid={WECOM_CONFIG['AGENT_ID']}"
+            f"&redirect_uri={requests.utils.quote(redirect_uri)}"
+            f"&state={state}"
         )
     
     def get_user_by_code(self, code: str) -> dict:
