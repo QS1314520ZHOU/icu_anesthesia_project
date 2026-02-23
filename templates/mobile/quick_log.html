@@ -108,6 +108,10 @@
             font-weight: 600;
             outline: none;
             transition: opacity 0.2s, transform 0.1s;
+            /* 阻止长按文字选中和上下文菜单，优化语音按钮体验 */
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
         }
 
         button:active {
@@ -195,7 +199,7 @@
             <textarea id="logContent"
                 placeholder="说说今天干了什么...&#10;&#10;例如：上午把HIS医嘱接口联调通过了，下午培训了ICU护士&#10;护士长反馈字体太小，明天准备改一下界面"></textarea>
             <div class="action-row">
-                <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙️ 语音输入</button>
+                <button class="voice-btn" id="voiceBtn">🎙️ 按住说话</button>
                 <button class="submit-btn" id="submitBtn" onclick="submitLog()">📝 保存日志</button>
             </div>
             <div id="statusMsg" class="status-message"></div>
@@ -284,15 +288,8 @@
             }
         }
 
-        function toggleVoice() {
-            if (isRecording) {
-                stopVoice();
-            } else {
-                startVoice();
-            }
-        }
-
         function startVoice() {
+            if (isRecording) return;
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 recognition = new SpeechRecognition();
@@ -305,7 +302,7 @@
 
                 recognition.onstart = () => {
                     isRecording = true;
-                    voiceBtn.innerHTML = '🛑 停止录音';
+                    voiceBtn.innerHTML = '🛑 松开结束';
                     voiceBtn.style.background = '#fee2e2';
                     voiceBtn.style.color = '#ef4444';
                     statusMsg.innerText = '正在倾听...';
@@ -342,7 +339,7 @@
         }
 
         function stopVoice() {
-            if (recognition) {
+            if (recognition && isRecording) {
                 recognition.stop();
             }
             isRecording = false;
@@ -352,10 +349,40 @@
         function resetVoiceBtn() {
             const voiceBtn = document.getElementById('voiceBtn');
             const statusMsg = document.getElementById('statusMsg');
-            voiceBtn.innerHTML = '🎙️ 语音输入';
+            voiceBtn.innerHTML = '🎙️ 按住说话';
             voiceBtn.style.background = 'var(--primary-light)';
             voiceBtn.style.color = 'var(--primary)';
             statusMsg.innerText = '';
+        }
+
+        // 绑定长按事件
+        function bindVoiceEvents() {
+            const btn = document.getElementById('voiceBtn');
+            if (!btn) return;
+
+            // 移动端触摸事件
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // 阻止默认行为（选中、菜单等）
+                startVoice();
+            }, { passive: false });
+
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                stopVoice();
+            });
+
+            btn.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                stopVoice();
+            });
+
+            // PC端鼠标事件 (方便调试)
+            btn.addEventListener('mousedown', startVoice);
+            btn.addEventListener('mouseup', stopVoice);
+            btn.addEventListener('mouseleave', stopVoice);
+
+            // 阻止右键菜单
+            btn.addEventListener('contextmenu', (e) => e.preventDefault());
         }
 
         async function submitLog() {
@@ -412,6 +439,7 @@
 
         // Initialize on Load
         (async function () {
+            bindVoiceEvents();
             const authed = await initAuth();
             if (authed) {
                 loadProjects();
