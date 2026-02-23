@@ -109,6 +109,7 @@
             line-height: 1.5;
             display: -webkit-box;
             -webkit-line-clamp: 2;
+            line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -187,6 +188,42 @@
     </div>
 
     <script>
+        // 企业微信 JS-SDK 网页授权
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) return true;
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
         let timer = null;
         async function searchKb() {
             const query = document.getElementById('searchInput').value;
@@ -217,7 +254,13 @@
                 }
             }, 300);
         }
-        searchKb(); // Initial pulse
+
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                searchKb();
+            }
+        })();
     </script>
 </body>
 

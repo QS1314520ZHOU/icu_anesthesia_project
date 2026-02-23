@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>每日简报 - 移动版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #eef2ff;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --text-light: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding-bottom: 80px;
+        }
+
+        .header {
+            padding: 24px 20px;
+            background: #0f172a;
+            color: white;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            display: flex;
+            align-items: justify-content;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .back-btn {
+            font-size: 20px;
+            text-decoration: none;
+            color: white;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            margin-bottom: 20px;
+            border: 1px solid #f1f5f9;
+        }
+
+        .loading-state {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-light);
+        }
+
+        .markdown-body {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text);
+        }
+
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3 {
+            margin-top: 24px;
+            margin-bottom: 12px;
+            color: #0f172a;
+        }
+
+        .markdown-body h1 {
+            font-size: 18px;
+        }
+
+        .markdown-body h2 {
+            font-size: 16px;
+        }
+
+        .markdown-body h3 {
+            font-size: 15px;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 20px;
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+
+        .markdown-body li {
+            margin-bottom: 8px;
+        }
+
+        .markdown-body strong {
+            color: #1e293b;
+            background-color: #f1f5f9;
+            padding: 0 4px;
+            border-radius: 4px;
+        }
+
+        .btn-primary {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border-radius: 12px;
+            text-align: center;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            border: none;
+            background: var(--primary);
+            color: white;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="javascript:history.back()" class="back-btn">⬅️</a>
+        <h1 style="flex:1;">📊 今日工作简报</h1>
+    </div>
+
+    <div class="container">
+        <div class="card" id="reportCard">
+            <div class="loading-state">
+                <div>🤖 AI 正在汇总今日的日志、问题和沟通记录...</div>
+                <div style="font-size: 12px; margin-top: 8px; opacity: 0.7;">（适合直接转发给甲方信息科）</div>
+            </div>
+        </div>
+
+        <button id="copyBtn" class="btn-primary" style="display: none;" onclick="copyReport()">
+            📋 一键复制简报
+        </button>
+    </div>
+
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.2.0.js"></script>
+    <script>
+        const projectId = window.location.pathname.split('/').pop();
+        let rawReport = '';
+
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) return true;
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
+        async function loadReport() {
+            try {
+                const response = await fetch(`/m/api/report/daily/${projectId}`);
+                const res = await response.json();
+
+                const card = document.getElementById('reportCard');
+                if (res.success) {
+                    rawReport = res.data.report;
+                    card.innerHTML = `
+                        <div style="margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px dashed #e2e8f0; text-align:center;">
+                            <h2 style="margin:0 0 4px 0; font-size:16px;">工作简报</h2>
+                            <div style="font-size: 13px; color: #64748b;">${res.data.date || new Date().toLocaleDateString()}</div>
+                        </div>
+                        <div class="markdown-body">
+                            ${marked.parse(res.data.report)}
+                        </div>
+                    `;
+                    document.getElementById('copyBtn').style.display = 'block';
+                } else {
+                    card.innerHTML = `<div class="loading-state" style="color: #ef4444;">❌ 加载失败: ${res.message}</div>`;
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById('reportCard').innerHTML = `<div class="loading-state" style="color: #ef4444;">❌ 系统连接异常</div>`;
+            }
+        }
+
+        function copyReport() {
+            if (!rawReport) return;
+            // Clean up basic markdown for plain text pasting
+            let textToCopy = rawReport
+                .replace(/\*\*/g, '')
+                .replace(/#/g, '')
+                .replace(/- /g, "• ");
+
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const btn = document.getElementById('copyBtn');
+                btn.innerText = '✅ 已复制到剪贴板可以去微信粘贴了';
+                btn.style.background = '#10b981';
+                setTimeout(() => {
+                    btn.innerText = '📋 一键复制简报';
+                    btn.style.background = 'var(--primary)';
+                }, 3000);
+            }).catch(err => {
+                alert('复制失败，请手动长按复制内容');
+            });
+        }
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadReport();
+            }
+        })();
+    </script>
+</body>
+
+</html>

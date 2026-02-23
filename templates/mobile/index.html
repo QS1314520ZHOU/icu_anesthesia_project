@@ -182,6 +182,14 @@
                 <div class="action-icon">📚</div>
                 <div class="action-label">知识库</div>
             </a>
+            <a href="/m/quick-log" class="action-card">
+                <div class="action-icon">📝</div>
+                <div class="action-label">快速日志</div>
+            </a>
+            <a href="/m/meeting-note" class="action-card">
+                <div class="action-icon">🤝</div>
+                <div class="action-label">沟通速记</div>
+            </a>
         </div>
 
         <div class="section-title">🕒 活跃项目</div>
@@ -209,7 +217,55 @@
         </a>
     </div>
 
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.2.0.js"></script>
     <script>
+        // 企业微信 JS-SDK 网页授权
+        async function initAuth() {
+            // 1. 检查是否已登录 (sessionStorage 命中)
+            const token = sessionStorage.getItem('user_token');
+            if (token) {
+                console.log('User already authenticated');
+                return true;
+            }
+
+            // 2. 获取必要配置 (CorpID)
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+
+            // 3. 从 URL 中提取 code (OAuth 回调后会带上)
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                // 4. 调用后端接口换取身份
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        // 清理 URL 中的 code
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                // 5. 没有 code，跳转企业微信授权页
+                const redirectUrl = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                window.location.href = redirectUrl;
+                return false;
+            }
+        }
+
         // Simple fetch for mobile
         async function loadProjects() {
             try {
@@ -218,7 +274,7 @@
                 if (res.success) {
                     const list = document.getElementById('projectList');
                     list.innerHTML = res.data.slice(0, 5).map(p => `
-                        <div class="project-card">
+                        <div class="project-card" onclick="location.href='/m/briefing/${p.id}'">
                             <div class="project-info">
                                 <h4>${p.project_name}</h4>
                                 <p>${p.hospital_name} | 进度 ${p.progress}%</p>
@@ -233,7 +289,14 @@
                 console.error(e);
             }
         }
-        loadProjects();
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadProjects();
+            }
+        })();
     </script>
 </body>
 

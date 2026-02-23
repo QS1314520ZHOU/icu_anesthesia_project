@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>沟通速记 - 移动版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #eef2ff;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --text-light: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding-bottom: 80px;
+        }
+
+        .header {
+            padding: 24px 20px;
+            background: white;
+            border-bottom: 1px solid #f1f5f9;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .back-btn {
+            font-size: 20px;
+            text-decoration: none;
+            color: var(--text);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .form-select {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            background: white;
+            font-size: 15px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        .log-input {
+            background: white;
+            border-radius: 16px;
+            border: 1px solid #f1f5f9;
+            padding: 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            margin-bottom: 20px;
+        }
+
+        textarea {
+            width: 100%;
+            border: none;
+            outline: none;
+            resize: none;
+            font-size: 15px;
+            font-family: inherit;
+            line-height: 1.5;
+            min-height: 140px;
+        }
+
+        .action-row {
+            display: flex;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        button {
+            border: none;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: 600;
+            outline: none;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        .voice-btn {
+            flex: 1;
+            background: var(--primary-light);
+            color: var(--primary);
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 15px;
+        }
+
+        .submit-btn {
+            flex: 2;
+            background: var(--primary);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 15px;
+        }
+
+        .status-message {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-light);
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        .nav-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid #f1f5f9;
+            padding: 0 20px 10px;
+            z-index: 100;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+            color: var(--text-light);
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .nav-item.active {
+            color: var(--primary);
+        }
+
+        .nav-item span {
+            font-size: 22px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="javascript:history.back()" class="back-btn">⬅️</a>
+        <h1>🤝 沟通速记</h1>
+    </div>
+
+    <div class="container">
+        <div class="form-group">
+            <label class="form-label">选择项目</label>
+            <select id="projectSelect" class="form-select">
+                <option value="">加载中...</option>
+            </select>
+        </div>
+
+        <div class="log-input">
+            <textarea id="logContent"
+                placeholder="说说刚才跟甲方聊了什么...&#10;&#10;例如：张院长要求月底前上线LIS接口，另外发现几台监护仪没有网口，需要我们去协调。"></textarea>
+            <div class="action-row">
+                <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙️ 语音输入</button>
+                <button class="submit-btn" id="submitBtn" onclick="submitLog()">📝 保存沟通记录</button>
+            </div>
+            <div id="statusMsg" class="status-message"></div>
+        </div>
+    </div>
+
+    <div class="nav-bar">
+        <a href="/m/" class="nav-item">
+            <span>🏠</span>
+            首页
+        </a>
+        <a href="/m/knowledge" class="nav-item">
+            <span>📚</span>
+            知识
+        </a>
+        <a href="/m/chat" class="nav-item">
+            <span>🤖</span>
+            AI
+        </a>
+        <a href="#" class="nav-item">
+            <span>👤</span>
+            我的
+        </a>
+    </div>
+
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.2.0.js"></script>
+    <script>
+        let currentUser = null;
+        let isRecording = false;
+        let recognition = null;
+
+        // 企业微信 JS-SDK 网页授权
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) {
+                currentUser = JSON.parse(token);
+                return true;
+            }
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        currentUser = data.data;
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
+        async function loadProjects() {
+            try {
+                const response = await fetch('/api/projects');
+                const res = await response.json();
+                if (res.success) {
+                    const select = document.getElementById('projectSelect');
+                    if (res.data.length > 0) {
+                        select.innerHTML = res.data.map(p => `<option value="${p.id}">${p.project_name}</option>`).join('');
+                    } else {
+                        select.innerHTML = '<option value="">暂无进行中的项目</option>';
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        function toggleVoice() {
+            if (isRecording) {
+                stopVoice();
+            } else {
+                startVoice();
+            }
+        }
+
+        function startVoice() {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'zh-CN';
+                recognition.continuous = true;
+                recognition.interimResults = true;
+
+                const statusMsg = document.getElementById('statusMsg');
+                const voiceBtn = document.getElementById('voiceBtn');
+
+                recognition.onstart = () => {
+                    isRecording = true;
+                    voiceBtn.innerHTML = '🛑 停止录音';
+                    voiceBtn.style.background = '#fee2e2';
+                    voiceBtn.style.color = '#ef4444';
+                    statusMsg.innerText = '正在倾听...';
+                };
+
+                recognition.onresult = (event) => {
+                    let finalTranscript = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        }
+                    }
+                    if (finalTranscript) {
+                        const textarea = document.getElementById('logContent');
+                        textarea.value += (textarea.value ? '\n' : '') + finalTranscript;
+                    }
+                };
+
+                recognition.onerror = (event) => {
+                    console.error('Speech recognition error', event.error);
+                    stopVoice();
+                    statusMsg.innerText = '语音识别出错: ' + event.error;
+                };
+
+                recognition.onend = () => {
+                    isRecording = false;
+                    resetVoiceBtn();
+                };
+
+                recognition.start();
+            } else {
+                alert('当前浏览器不支持语音识别，请直接输入文字或使用微信自带语音输入即可');
+            }
+        }
+
+        function stopVoice() {
+            if (recognition) {
+                recognition.stop();
+            }
+            isRecording = false;
+            resetVoiceBtn();
+        }
+
+        function resetVoiceBtn() {
+            const voiceBtn = document.getElementById('voiceBtn');
+            const statusMsg = document.getElementById('statusMsg');
+            voiceBtn.innerHTML = '🎙️ 语音输入';
+            voiceBtn.style.background = 'var(--primary-light)';
+            voiceBtn.style.color = 'var(--primary)';
+            statusMsg.innerText = '';
+        }
+
+        async function submitLog() {
+            const projectId = document.getElementById('projectSelect').value;
+            const content = document.getElementById('logContent').value.trim();
+            const submitBtn = document.getElementById('submitBtn');
+            const statusMsg = document.getElementById('statusMsg');
+
+            if (!projectId) {
+                alert('请选择项目');
+                return;
+            }
+            if (!content) {
+                alert('请输入记录内容');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerText = '🤖 AI 提取中...';
+            statusMsg.innerText = '';
+
+            try {
+                const response = await fetch('/m/api/meeting/quick', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: projectId,
+                        content: content,
+                        engineer_name: currentUser ? (currentUser.name || currentUser.userid) : '移动端用户'
+                    })
+                });
+
+                const res = await response.json();
+                if (res.success) {
+                    statusMsg.style.color = '#10b981';
+                    statusMsg.innerText = `✅ 已保存，自动生成了 ${res.data.auto_reminders} 个重要提醒`;
+                    document.getElementById('logContent').value = '';
+                    setTimeout(() => {
+                        window.location.href = '/m/';
+                    }, 2000);
+                } else {
+                    statusMsg.style.color = '#ef4444';
+                    statusMsg.innerText = '❌ 保存失败: ' + res.message;
+                }
+            } catch (e) {
+                console.error(e);
+                statusMsg.style.color = '#ef4444';
+                statusMsg.innerText = '❌ 系统连接异常';
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerText = '📝 保存沟通记录';
+            }
+        }
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadProjects();
+            }
+        })();
+    </script>
+</body>
+
+</html>

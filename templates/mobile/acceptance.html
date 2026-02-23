@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>项目验收检查 - 移动版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #eef2ff;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding-bottom: 80px;
+        }
+
+        .header {
+            padding: 24px 20px;
+            background: #0f172a;
+            color: white;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .back-btn {
+            font-size: 20px;
+            text-decoration: none;
+            color: white;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+            margin-bottom: 20px;
+            border: 1px solid #f1f5f9;
+        }
+
+        .score-circle {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .score-circle .number {
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .score-circle .label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }
+
+        .checklist-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 16px 0;
+            border-bottom: 1px dashed #e2e8f0;
+        }
+
+        .checklist-item:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .checklist-icon {
+            font-size: 20px;
+            margin-top: -2px;
+        }
+
+        .checklist-content {
+            flex: 1;
+        }
+
+        .checklist-title {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
+
+        .checklist-detail {
+            font-size: 13px;
+            color: var(--text-light);
+            line-height: 1.5;
+        }
+
+        .blocking-items {
+            margin-top: 8px;
+            background: #fef2f2;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--danger);
+        }
+
+        .blocking-items ul {
+            margin: 4px 0 0 0;
+            padding-left: 16px;
+        }
+
+        .summary-text {
+            text-align: center;
+            font-weight: 600;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+
+        .loading-state {
+            text-align: center;
+            padding: 40px 0;
+            color: var(--text-light);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="javascript:history.back()" class="back-btn">⬅️</a>
+        <h1>✅ 验收准备度检查</h1>
+    </div>
+
+    <div class="container">
+        <div class="card" id="acceptanceCard">
+            <div class="loading-state">
+                <div>🔄 自动扫描验收条件中...</div>
+                <div style="font-size: 12px; margin-top: 8px; opacity: 0.7;">（包含任务、接口、问题与文档）</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://res.wx.qq.com/open/js/jweixin-1.2.0.js"></script>
+    <script>
+        const projectId = window.location.pathname.split('/').pop();
+
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) return true;
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
+        function getScoreColor(score) {
+            if (score >= 80) return 'var(--success)';
+            if (score >= 60) return 'var(--warning)';
+            return 'var(--danger)';
+        }
+
+        async function loadAcceptance() {
+            try {
+                const response = await fetch(`/m/api/project/acceptance-check/${projectId}`);
+                const res = await response.json();
+
+                const card = document.getElementById('acceptanceCard');
+                if (res.success) {
+                    let checklistHtml = res.data.checklist.map(item => `
+                        <div class="checklist-item">
+                            <div class="checklist-icon">${item.status}</div>
+                            <div class="checklist-content">
+                                <div class="checklist-title">${item.item}</div>
+                                <div class="checklist-detail">${item.detail}</div>
+                                ${item.blocking && item.blocking.length > 0 ? `
+                                    <div class="blocking-items">
+                                        <strong>阻塞项:</strong>
+                                        <ul>${item.blocking.map(b => `<li>${b}</li>`).join('')}</ul>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        </div>
+                    `).join('');
+
+                    card.innerHTML = `
+                        <div class="score-circle" style="background: ${getScoreColor(res.data.readiness_score)};">
+                            <div class="number">${res.data.readiness_score}</div>
+                            <div class="label">准备度分数</div>
+                        </div>
+                        <div class="summary-text" style="color: ${getScoreColor(res.data.readiness_score)};">
+                            ${res.data.summary}
+                        </div>
+                        <div style="margin-top: 24px;">
+                            ${checklistHtml}
+                        </div>
+                    `;
+                } else {
+                    card.innerHTML = `<div class="loading-state" style="color: #ef4444;">❌ 检查失败: ${res.message}</div>`;
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById('acceptanceCard').innerHTML = `<div class="loading-state" style="color: #ef4444;">❌ 系统连接异常</div>`;
+            }
+        }
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadAcceptance();
+            }
+        })();
+    </script>
+</body>
+
+</html>

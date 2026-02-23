@@ -3164,9 +3164,29 @@ def ai_ask_kb():
         cursor = conn.cursor()
         
         try:
-            cursor.execute("SELECT id, title, content, category, tags, embedding FROM knowledge_base")
-            columns = [column[0] for column in cursor.description]
-            kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            # 第一阶段：关键词粗筛
+            cursor.execute("""
+                SELECT id, title, content, category, tags 
+                FROM knowledge_base 
+                WHERE title LIKE ? OR content LIKE ? OR tags LIKE ? 
+                LIMIT 100
+            """, (f'%{question}%', f'%{question}%', f'%{question}%'))
+            
+            candidates = cursor.fetchall()
+            columns_basic = [column[0] for column in cursor.description]
+            
+            if len(candidates) < 5:
+                # 兜底：如果关键词没中，加载一部分最新数据
+                cursor.execute("SELECT id, title, content, category, tags, embedding FROM knowledge_base ORDER BY id DESC LIMIT 200")
+                columns = [column[0] for column in cursor.description]
+                kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            else:
+                # 第二阶段：根据候选集拉取 embedding
+                ids = [dict(zip(columns_basic, r))['id'] for r in candidates]
+                placeholders = ','.join('?' * len(ids))
+                cursor.execute(f"SELECT id, title, content, category, tags, embedding FROM knowledge_base WHERE id IN ({placeholders})", ids)
+                columns = [column[0] for column in cursor.description]
+                kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
         except sqlite3.OperationalError:
             # 表不存在时的降级处理
             kb_items = []

@@ -192,11 +192,93 @@
     </div>
 
     <script>
+        // 企业微信 JS-SDK 网页授权
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) return true;
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
         let chatHistory = [];
+
+        function saveHistory() {
+            sessionStorage.setItem('chat_history', JSON.stringify(chatHistory));
+        }
+
+        function loadHistory() {
+            const saved = sessionStorage.getItem('chat_history');
+            if (saved) {
+                chatHistory = JSON.parse(saved);
+                chatHistory.forEach(h => {
+                    // Check if it's an AI message with references (simulated or simplified for persistence)
+                    const isAi = h.role === 'assistant' || h.role === 'ai';
+                    addMessage(h.content, isAi ? 'ai' : 'user', false);
+                });
+            }
+        }
 
         function autoExpand(el) {
             el.style.height = 'auto';
             el.style.height = (el.scrollHeight) + 'px';
+        }
+
+        async function saveToKb(btn, content) {
+            btn.innerHTML = '正在保存...';
+            btn.disabled = true;
+            try {
+                // Use the first part of content as title
+                const title = "AI 生成经验: " + content.replace(/<\/?[^>]+(>|$)/g, "").substring(0, 20) + "...";
+                const response = await fetch('/m/api/kb/contribute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title,
+                        content: content,
+                        engineer_name: currentUser ? (currentUser.name || currentUser.userid) : '移动端人员'
+                    })
+                });
+                const res = await response.json();
+                if (res.success) {
+                    btn.innerHTML = '✅ 已收录至知识库';
+                    btn.style.color = '#10b981';
+                } else {
+                    btn.innerHTML = '❌ 保存失败: ' + res.message;
+                    btn.style.color = '#ef4444';
+                }
+            } catch (e) {
+                console.error(e);
+                btn.innerHTML = '❌ 系统异常';
+                btn.style.color = '#ef4444';
+            }
         }
 
         async function sendMessage() {
@@ -231,6 +313,7 @@
                     addMessage(res.data.reply, 'ai', res.data.has_rag_context);
                     chatHistory.push({ role: 'user', content: message });
                     chatHistory.push({ role: 'assistant', content: res.data.reply });
+                    saveHistory(); // Persistence
                 } else {
                     addMessage("抱歉，我遇到了一点问题：" + res.message, 'ai');
                 }
@@ -251,6 +334,12 @@
                     html += '<span class="rag-badge">🎯 基于知识库</span>';
                 }
                 html += `<div class="message-content">${marked.parse(content)}</div>`;
+
+                // Add the save to kb button
+                const btnContent = encodeURIComponent(content);
+                html += `<div style="text-align: right; margin-top: 8px;">
+                            <button onclick="saveToKb(this, decodeURIComponent('${btnContent}'))" style="background: none; border: none; color: var(--primary); font-size: 13px; font-weight: 500; cursor: pointer; padding: 4px 8px;">💡 沉淀为知识</button>
+                         </div>`;
             } else {
                 html += `<div class="message-content">${content}</div>`;
             }
@@ -267,6 +356,14 @@
                 sendMessage();
             }
         });
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadHistory();
+            }
+        })();
     </script>
 </body>
 
