@@ -16,7 +16,7 @@ WECOM_CONFIG = {
     "CALLBACK_AES_KEY": os.environ.get("WECOM_CALLBACK_AES_KEY", ""),
     
     # 应用主页URL（用户点击应用时跳转的地址）
-    "APP_HOME_URL": os.environ.get("WECOM_APP_HOME_URL", "https://your-domain.com"),
+    "APP_HOME_URL": os.environ.get("WECOM_APP_HOME_URL", "https://dxm.jylb.fun"),
     
     # 是否启用自建应用模式（False则仅用Webhook）
     "ENABLED": os.environ.get("WECOM_ENABLED", "false").lower() == "true",
