@@ -64,7 +64,10 @@ class WeComService:
                     elif key == 'WECOM_CALLBACK_AES_KEY':
                         WECOM_CONFIG['CALLBACK_AES_KEY'] = val
                     elif key == 'WECOM_APP_HOME_URL':
-                        WECOM_CONFIG['APP_HOME_URL'] = val
+                        # 兼容用户错误填写：如果在主页URL贴了完整的callback路径，自动去除
+                        if val.endswith('/api/wecom/callback'):
+                            val = val.replace('/api/wecom/callback', '')
+                        WECOM_CONFIG['APP_HOME_URL'] = val.rstrip('/')
                     elif key == 'WECOM_WEBHOOK':
                         # 同时更新 Webhook 兜底配置
                         NOTIFICATION_CONFIG['WECOM_WEBHOOK'] = val
