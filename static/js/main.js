@@ -3449,7 +3449,7 @@ async function generateAiWeeklySummary() {
 
     try {
         const res = await api.post('/ai/summarize-weekly', { project_id: currentReportProjectId });
-        const summary = res.summary;
+        const summary = (res.summary || '').replace(/\*/g, ''); // 全局移除星号
 
         // 将总结插入到报告内容的开头或作为一部分
         const reportContent = document.getElementById('reportContent');
@@ -3554,6 +3554,7 @@ function renderBeautifulReport(markdown, type) {
         .replace(/\*\*联系方式\*\*[^\n]+\n?/g, '')
         .replace(/^[ \t]*[|｜][ \t]*/gm, '') // 移除行首的管道符噪音
         .replace(/\n{3,}/g, '\n\n')        // 压缩多余换行
+        .replace(/\*/g, '')               // 全局移除星号
         .trim();
 
     const sections = cleanedMarkdown.split(/(?=##\s)/);
@@ -7340,7 +7341,8 @@ async function loadPmoSummary() {
 
     try {
         const data = await api.get('/pmo/summary');
-        const summary = data.summary || '暂无摘要';
+        let summary = data.summary || '暂无摘要';
+        summary = summary.replace(/\*/g, ''); // 全局移除星号
         container.innerHTML = `
             <div class="report-container" style="box-shadow: none; border: none; padding: 24px; font-size: 14px;">
                 ${typeof marked !== 'undefined' ? marked.parse(summary) : summary.replace(/\n/g, '<br>')}
