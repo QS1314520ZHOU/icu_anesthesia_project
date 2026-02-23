@@ -1020,14 +1020,11 @@ async function loadProjectDetail(projectId, preserveTab = false) {
         }
     }
 
-    // AI 特性加载 (这些不应该依赖于是否有活跃阶段)
+    // AI 特性加载
+    refreshAiDecisionCenter(projectId);
     loadProjectPrediction(projectId);
     loadProjectSlaCountdown(projectId);
-    loadRecommendedActions(projectId);
     loadSimilarProjects(projectId);
-
-    // 加载 AI 每日建议
-    loadAiDailyInsight(projectId);
 
     // 检查里程碑庆祝
     checkMilestoneCelebrations(projectId);
@@ -1388,22 +1385,32 @@ function renderProjectDetail(project) {
                     </div>
                 </div>
 
-                <div class="panel" id="recommendedActionsPanel" style="margin-bottom:20px; border:1px solid #fee2e2; background:#fff1f2; display:none;">
-                    <div class="panel-header" style="background:linear-gradient(90deg, #fff1f2, #ffffff); border-bottom:1px solid #fee2e2; padding:10px 20px;">
-                        <div class="panel-title" style="color:#b91c1c; font-size:14px;">⚡ 今日决策建议 (Recommended Actions)</div>
+                <div class="panel" id="aiDecisionCenterPanel" style="margin-bottom:20px; border:1px solid #e0e7ff; background:#ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+                    <div class="panel-header" style="background:linear-gradient(90deg, #f0f4ff, #ffffff); border-bottom:1px solid #e0e7ff; padding:12px 20px; display:flex; justify-content:space-between; align-items:center;">
+                        <div class="panel-title" style="color:#4f46e5; font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px;">
+                            <span>🤖 AI 决策中心</span>
+                            <span style="font-size:11px; font-weight:normal; color:#6b7280; background:#f3f4f6; padding:2px 8px; border-radius:10px;">Decision Center</span>
+                        </div>
+                        <button class="btn btn-xs btn-outline" onclick="refreshAiDecisionCenter(${project.id})" style="border-radius:6px; font-size:11px;">🔄 刷新决策</button>
                     </div>
-                    <div class="panel-body" id="recommendedActionsContent" style="padding:15px 20px;">
-                        <div class="loading-spinner"></div>
-                    </div>
-                </div>
-
-                <div class="panel" id="aiInsightPanel" style="margin-bottom:20px; border:1px solid #e0e7ff; background:#f8faff;">
-                    <div class="panel-header" style="background:linear-gradient(90deg, #f0f4ff, #ffffff); border-bottom:1px solid #e0e7ff; padding:10px 20px;">
-                        <div class="panel-title" style="color:#4f46e5; font-size:14px;">🤖 AI 今日决策辅助</div>
-                        <button class="btn btn-xs btn-outline" onclick="loadAiDailyInsight(${project.id}, true)">🔄 刷新建议</button>
-                    </div>
-                    <div class="panel-body" id="aiInsightContent" style="padding:15px 20px;">
-                        <div class="loading-spinner" style="padding:15px; font-size:13px; color:#6b7280;">AI 正在分析昨日进展与剩余任务...</div>
+                    <div class="panel-body" style="padding:0;">
+                        <!-- 1. AI 战略研判 (以前的 aiInsightPanel) -->
+                        <div id="aiInsightSection" style="padding:15px 20px; border-bottom:1px solid #f1f5f9;">
+                             <div id="aiInsightContent">
+                                <div class="loading-spinner" style="font-size:13px; color:#6b7280;">AI 正在分析执行现状...</div>
+                             </div>
+                        </div>
+                        
+                        <!-- 2. 战术行动建议 (以前的 recommendedActionsPanel) -->
+                        <div id="recommendedActionsSection" style="padding:15px 20px; background:#f8faff;">
+                            <div style="font-size:12px; font-weight:600; color:#64748b; margin-bottom:10px; display:flex; align-items:center; gap:4px;">
+                                <span style="width:4px; height:12px; background:#4f46e5; border-radius:2px;"></span>
+                                战术行动指令 (DirectActions)
+                            </div>
+                            <div id="recommendedActionsContent">
+                                <div style="color:#94a3b8; font-size:12px; text-align:center; padding:10px;">暂无紧急行动建议</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1762,19 +1769,24 @@ function renderProjectDetail(project) {
     enableTabDragging();
 }
 
+async function refreshAiDecisionCenter(projectId, isRefresh = false) {
+    loadAiDailyInsight(projectId, isRefresh);
+    loadRecommendedActions(projectId, isRefresh);
+}
+
 async function loadAiDailyInsight(projectId, isRefresh = false) {
     const contentEl = document.getElementById('aiInsightContent');
     if (!contentEl) return;
 
-    contentEl.innerHTML = '<div class="loading-spinner" style="padding:15px; font-size:13px; color:#6b7280;">AI 正在分析昨日进展与剩余任务...</div>';
+    contentEl.innerHTML = '<div class="loading-spinner" style="font-size:13px; color:#6b7280;">AI 正在进行战略研判...</div>';
     try {
         const url = `/ai/daily-insight/${projectId}` + (isRefresh ? '?refresh=1' : '');
         const advice = await api.get(url);
         // 确保 marked.js 已加载
         const adviceHtml = typeof marked !== 'undefined' ? marked.parse(advice || '') : (advice || '').replace(/\n/g, '<br>');
-        contentEl.innerHTML = `<div class="report-content" style="font-size:14px; color:#4b5563; line-height:1.6;">${adviceHtml}</div>`;
+        contentEl.innerHTML = `<div class="report-content" style="font-size:14px; color:#334155; line-height:1.7;">${adviceHtml}</div>`;
     } catch (e) {
-        contentEl.innerHTML = `<div style="padding:15px; color:var(--danger); font-size:13px;">⚠️ 无法获取 AI 建议: ${e.message}</div>`;
+        contentEl.innerHTML = `<div style="color:var(--danger); font-size:12px;">⚠️ 战略研判暂时离线</div>`;
     }
 }
 
@@ -6505,36 +6517,94 @@ function fillWorklogForm(data) {
 }
 
 // ========== 决策建议引擎 ==========
-async function loadRecommendedActions(projectId) {
+async function refreshAiDecisionCenter(projectId) {
+    const btn = event ? event.target : null;
+    const originalText = btn ? btn.innerHTML : '🔄 刷新决策';
+    if (btn) {
+        btn.innerHTML = '⌛ 分析中...';
+        btn.disabled = true;
+    }
+
+    try {
+        // 同时触发战略研判和战术行动的刷新
+        await Promise.all([
+            loadAiInsight(projectId, true),
+            loadRecommendedActions(projectId, true)
+        ]);
+        if (window.showToast) showToast('AI 决策已更新', 'success');
+    } catch (e) {
+        console.error('Refresh AI Decision Center failed', e);
+    } finally {
+        if (btn) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
+    }
+}
+
+async function loadAiInsight(projectId, isRefresh = false) {
+    const container = document.getElementById('aiInsightContent');
+    if (!container) return;
+
+    if (isRefresh) {
+        container.innerHTML = '<div class="loading-spinner" style="font-size:13px; color:#6b7280;">AI 正在重新进行深度穿透分析...</div>';
+    }
+
+    try {
+        const url = `/ai/daily-insight/${projectId}` + (isRefresh ? '?refresh=1' : '');
+        const res = await api.get(url);
+
+        if (res) {
+            container.innerHTML = `
+                <div class="ai-insight-text" style="line-height:1.7; color:#374151; font-size:13.5px;">
+                    ${typeof marked !== 'undefined' ? marked.parse(res) : res.replace(/\n/g, '<br>')}
+                </div>
+            `;
+        } else {
+            container.innerHTML = '<div style="color:#94a3b8; font-size:13px;">暂无 AI 深度研判建议</div>';
+        }
+    } catch (e) {
+        console.error('Load AI Insight failed', e);
+        container.innerHTML = '<div style="color:var(--danger); font-size:12px;">⚠️ 研判载入异常</div>';
+    }
+}
+
+async function loadRecommendedActions(projectId, isRefresh = false) {
     const container = document.getElementById('recommendedActionsContent');
-    const panel = document.getElementById('recommendedActionsPanel');
+    const panel = document.getElementById('aiDecisionCenterPanel');
     if (!container || !panel) return;
 
     try {
-        const res = await api.get(`/projects/${projectId}/recommended-actions`);
-        if (res.success && res.data && res.data.length > 0) {
-            panel.style.display = 'block';
-            container.innerHTML = res.data.map(action => `
-                <div class="action-card priority-${action.priority.toLowerCase()}" style="background:white; padding:12px; border-radius:8px; margin-bottom:10px; border-left:4px solid ${getPriorityColor(action.priority)}; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        const url = `/projects/${projectId}/recommended-actions` + (isRefresh ? '?refresh=1' : '');
+        const res = await api.get(url);
+        if (res && res.length > 0) {
+            container.innerHTML = res.map(action => {
+                const isAiCommand = action.type === 'ai_command';
+                const bgColor = isAiCommand ? '#f5f3ff' : 'white';
+                const borderColor = isAiCommand ? '#8b5cf6' : getPriorityColor(action.priority);
+                const titleColor = isAiCommand ? '#6d28d9' : '#374151';
+
+                return `
+                <div class="action-card" style="background:${bgColor}; padding:14px; border-radius:10px; margin-bottom:10px; border-left:4px solid ${borderColor}; border-top:1px solid #f1f5f9; border-right:1px solid #f1f5f9; border-bottom:1px solid #f1f5f9; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
                     <div style="display:flex; justify-content:space-between; align-items:start;">
-                        <div>
-                            <div style="font-weight:600; color:#374151; font-size:14px;">
-                                <span class="badge" style="background:${getPriorityColor(action.priority)}20; color:${getPriorityColor(action.priority)}; font-size:11px; margin-right:6px;">${action.priority}</span>
+                        <div style="flex:1;">
+                            <div style="font-weight:700; color:${titleColor}; font-size:13.5px; display:flex; align-items:center;">
+                                ${!isAiCommand ? `<span style="background:${getPriorityColor(action.priority)}20; color:${getPriorityColor(action.priority)}; font-size:10px; padding:1px 6px; border-radius:4px; margin-right:8px; font-weight:800;">${action.priority.toUpperCase()}</span>` : ''}
                                 ${action.title}
                             </div>
-                            <div style="font-size:13px; color:#4b5563; margin-top:4px;">${action.description}</div>
-                            <div style="font-size:12px; color:#6b7280; margin-top:4px; background:#f3f4f6; padding:4px 8px; border-radius:4px;">💡 ${action.suggestion}</div>
+                            <div style="font-size:13px; color:#4b5563; margin-top:6px; font-weight:500;">${action.description}</div>
+                            ${action.suggestion ? `<div style="font-size:11.5px; color:#6b7280; margin-top:6px; background:rgba(0,0,0,0.02); padding:6px 10px; border-radius:6px; border:1px dashed #e2e8f0;">${isAiCommand ? '🎯' : '💡'} ${action.suggestion}</div>` : ''}
                         </div>
-                        <button class="btn btn-sm btn-outline" onclick="handleActionClick('${action.action_tab}', '${action.action_label}')" style="font-size:12px; white-space:nowrap; margin-left:12px;">${action.action_label} →</button>
+                        <button class="btn btn-xs ${isAiCommand ? 'btn-ai' : 'btn-outline'}" onclick="handleActionClick('${action.action_tab}', '${action.action_label}')" style="font-size:11px; white-space:nowrap; margin-left:12px; border-radius:6px; height:28px;">${action.action_label} →</button>
                     </div>
                 </div>
-            `).join('');
+            `}).join('');
         } else {
-            panel.style.display = 'none';
+            container.innerHTML = '<div style="color:#94a3b8; font-size:12px; text-align:center; padding:10px;">暂无紧急行动建议</div>';
         }
     } catch (e) {
         console.error('Load actions failed', e);
-        panel.style.display = 'none';
+        container.innerHTML = '<div style="color:var(--danger); font-size:12px; text-align:center; padding:10px;">⚠️ 指令加载失败</div>';
     }
 }
 
@@ -6565,6 +6635,7 @@ function handleActionClick(tab, label) {
 
 // ========== AI 智能催单功能 ==========
 let currentStaleItems = [];
+let lastGeneratedChaser = null;
 
 async function showAiChaserModal() {
     showModal('aiChaserModal');
@@ -6609,39 +6680,67 @@ async function generateChaser(index) {
     const container = document.getElementById('chaserResult');
 
     // Highlight selected item
-    const cards = document.querySelectorAll('.stale-item-card');
-    cards.forEach(c => c.style.borderColor = '#eee');
-    // use childNodes because querySelectorAll returns a NodeList, we need to access the specific element we just rendered
-    // actually re-querying inside is safer
-    const currentCard = container.parentElement.previousElementSibling.querySelector('#staleItemsList').children[index];
-    if (currentCard) {
-        Array.from(container.parentElement.previousElementSibling.querySelector('#staleItemsList').children).forEach(c => {
-            c.style.borderColor = '#eee';
-            c.style.backgroundColor = 'transparent';
+    const staleItemsList = document.getElementById('staleItemsList');
+    if (staleItemsList) {
+        Array.from(staleItemsList.children).forEach((c, idx) => {
+            if (idx === index) {
+                c.style.borderColor = '#4f46e5';
+                c.style.backgroundColor = '#f5f3ff';
+            } else {
+                c.style.borderColor = '#eee';
+                c.style.backgroundColor = 'transparent';
+            }
         });
-        currentCard.style.borderColor = '#f59e0b';
-        currentCard.style.backgroundColor = '#fffbeb';
     }
 
-
-    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div> 正在生成话术...</div>';
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div> 正在生成多维话术 (GPT-4)...</div>';
 
     try {
         const res = await api.post('/ai/chaser/generate', item);
-        if (res.success) {
-            const data = res.data;
-            container.innerHTML = `
-                <div style="margin-bottom: 12px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px;">
-                    主题: ${data.subject}
-                </div>
-                <div style="white-space: pre-wrap; line-height: 1.6;">${data.content}</div>
-            `;
+        if (res.professional) {
+            lastGeneratedChaser = res;
+            renderChaserStyles('professional');
         } else {
-            container.innerHTML = `<div class="error-text">生成失败: ${res.message}</div>`;
+            container.innerHTML = `<div class="error-text">生成格式异常</div>`;
         }
     } catch (e) {
         container.innerHTML = `<div class="error-text">请求异常: ${e.message}</div>`;
     }
+}
+
+function renderChaserStyles(activeStyle) {
+    const container = document.getElementById('chaserResult');
+    if (!lastGeneratedChaser) return;
+
+    const data = lastGeneratedChaser[activeStyle];
+    const styles = [
+        { id: 'professional', label: '👔 专业', color: '#4f46e5' },
+        { id: 'soft', label: '🍃 委婉', color: '#10b981' },
+        { id: 'direct', label: '⚡ 果敢', color: '#f59e0b' }
+    ];
+
+    container.innerHTML = `
+        <div style="display:flex; gap:8px; margin-bottom:16px; border-bottom:1px solid #f1f5f9; padding-bottom:12px;">
+            ${styles.map(s => `
+                <button onclick="switchChaserStyle('${s.id}')" 
+                    style="flex:1; padding:6px 10px; border-radius:12px; border:2px solid ${activeStyle === s.id ? s.color : '#e2e8f0'}; 
+                    background:${activeStyle === s.id ? s.color + '10' : 'white'}; color:${activeStyle === s.id ? s.color : '#64748b'};
+                    font-size:12px; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                    ${s.label}
+                </button>
+            `).join('')}
+        </div>
+        <div id="chaserContentArea" style="animation: fadeIn 0.3s ease;">
+            <div style="margin-bottom: 12px; font-weight: 800; color: #1e293b; font-size: 14px; background: #f8fafc; padding: 10px; border-radius: 8px; border-left: 4px solid #cbd5e1;">
+                主题: ${data.subject}
+            </div>
+            <div style="white-space: pre-wrap; line-height: 1.8; color: #334155; font-size: 14px; padding: 10px;">${data.content}</div>
+        </div>
+    `;
+}
+
+function switchChaserStyle(style) {
+    renderChaserStyles(style);
 }
 
 function copyChaserContent() {
@@ -7159,14 +7258,43 @@ async function openPmoDashboard() {
 
 async function loadPmoOverview() {
     const pmContainer = document.getElementById('pmoPmWorkload');
+    const actionContainer = document.getElementById('pmoPortfolioActions');
     if (!pmContainer) return;
 
     pmContainer.innerHTML = '<div class="loading-spinner"></div>';
+    if (actionContainer) actionContainer.innerHTML = '';
 
     try {
         const data = await api.get('/pmo/overview');
 
-        // Render PM Workload List
+        // 1. Render Portfolio Actions
+        if (actionContainer && data.portfolio_actions && data.portfolio_actions.length > 0) {
+            actionContainer.innerHTML = `
+                <div class="panel" style="border: none; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border-radius: 20px; background: #fff1f2; border: 1px solid #fee2e2;">
+                    <div class="panel-header" style="background: transparent; border-bottom: 1px solid #fee2e2; padding: 16px 24px;">
+                        <div class="panel-title" style="font-size: 15px; font-weight: 700; color: #b91c1c;">⚡ PMO 风险干预指令 (Action Center)</div>
+                    </div>
+                    <div class="panel-body" style="padding: 15px 24px;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">
+                            ${data.portfolio_actions.map(action => `
+                                <div style="background: white; padding: 16px; border-radius: 12px; border-left: 4px solid ${action.priority === 'High' ? '#ef4444' : '#f59e0b'}; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                                    <div style="font-weight: 700; color: #1e293b; font-size: 14px; margin-bottom: 4px;">
+                                        <span style="font-size: 10px; background: ${action.priority === 'High' ? '#fee2e2' : '#fef3c7'}; color: ${action.priority === 'High' ? '#b91c1c' : '#92400e'}; padding: 2px 6px; border-radius: 4px; margin-right: 6px;">${action.priority}</span>
+                                        ${action.title}
+                                    </div>
+                                    <div style="font-size: 13px; color: #4b5563; margin-bottom: 8px;">${action.description}</div>
+                                    <div style="font-size: 12px; color: #b91c1c; font-weight: 600; background: #fff1f2; padding: 6px 10px; border-radius: 6px;">💡 建议：${action.suggestion}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else if (actionContainer) {
+            actionContainer.style.display = 'none';
+        }
+
+        // 2. Render PM Workload List (Rest of existing logic...)
         let pmHtml = '<div style="padding: 12px 0;">';
         if (data.pm_workload && Array.isArray(data.pm_workload)) {
             data.pm_workload.forEach(pm => {

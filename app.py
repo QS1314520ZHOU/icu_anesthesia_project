@@ -91,6 +91,7 @@ from routes.operational_routes import operational_bp
 from routes.interface_spec_routes import spec_bp
 from routes.wecom_routes import wecom_bp
 from routes.form_generator_routes import form_generator_bp
+from routes.mobile_routes import mobile_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
@@ -116,6 +117,7 @@ app.register_blueprint(operational_bp)
 app.register_blueprint(spec_bp)
 app.register_blueprint(wecom_bp)
 app.register_blueprint(form_generator_bp, url_prefix='/api/form-generator')
+app.register_blueprint(mobile_bp)
 
 # thread executor for async tasks
 executor = ThreadPoolExecutor(max_workers=4)

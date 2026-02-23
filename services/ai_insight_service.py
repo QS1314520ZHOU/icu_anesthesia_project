@@ -57,13 +57,15 @@ class AIInsightService:
                 task_text = "\n".join([f"- {t['stage_name']}: {t['task_name']}" for t in tasks]) if tasks else "当前无待办任务"
 
                 # 5. 构造 Prompt
-                system_prompt = """你是一位经验丰富的 ICU 医疗信息化项目经理。
-请基于提供的项目近期表现（日报）和剩余任务，分析当前项目的 Top 3 瓶颈，并给出“今日必须收尾”的任务建议。
-你的回答应包含：
-1. 💡 现状洞察（精炼）
-2. ⚠️ 风险预警（如果有）
-3. 🚀 今日决胜（3条核心建议）
-请使用 Markdown 格式，保持专业且具有行动导向性。"""
+                system_prompt = """你是一名世界顶级 ICU 医疗信息化项目总监 (Project Director)。
+你的任务是根据项目数据进行深度穿透分析。严禁使用“您好”、“有什么可以帮您”等任何客套话。
+你的回复必须直接、专业、极简，像是一份呈送给高管的紧急简报。
+
+格式要求 (严格执行)：
+1. 🎯 **现状定性**：一句话说明项目当前的核心基调。
+2. 🚩 **红线预警**：仅列出最致命的1个风险。
+3. ⚡ **当日必办**：给出3条“如果不做就会导致延期”的极其具体的指令。
+注意：直接输出内容，不要任何前缀或后缀。"""
 
                 user_content = f"""项目名称: {project['project_name']}
 当前状态: {project['status']} (进度: {project['progress']}%)
@@ -362,30 +364,36 @@ class AIInsightService:
 
     @staticmethod
     def generate_chaser_message(item_details):
-        """生成催单/提醒话术"""
-        system_prompt = """你是一位专业、情商高的项目经理。请根据以下待办事项详情，写一段“催单”或“提醒”消息。
-要求：
-1. 语气委婉但坚定，体现专业性。
-2. 明确指出问题和期望的解决时间。
-3. 针对不同对象（如果是内部团队用语可以稍微直接，如果是发给甲方需非常客气）。假设默认是发给【内部团队/配合方】。
-4. 返回 JSON 格式: {"subject": "邮件/消息标题", "content": "正文内容"}"""
+        """生成支持多风格的催单/提醒话术"""
+        system_prompt = """你是一位情商极高的项目交付专家。请根据提供的待办事项，生成三种不同风格的催单/提醒消息。
+    要求：
+    1. **Professional (专业型)**: 语气客观、专业，强调影响力和计划性，适合正式场合。
+    2. **Soft (委婉型)**: 语气亲和、关怀，先肯定对方再提出提醒，适合日常沟通。
+    3. **Direct (果敢型)**: 语气直接、高效，清晰指出延期后果，适合紧急或多次提醒未果。
 
+    输出必须是合法的 JSON 格式：
+    {
+      "professional": {"subject": "标题", "content": "正文"},
+      "soft": {"subject": "标题", "content": "正文"},
+      "direct": {"subject": "标题", "content": "正文"}
+    }
+    """
         import json
         try:
-            user_content = f"事项类型: {item_details.get('type')}\n标题: {item_details.get('title')}\n背景/原因: {item_details.get('reason')}\n详情: {json.dumps(item_details, ensure_ascii=False)}"
+            user_content = f"事项详情: {json.dumps(item_details, ensure_ascii=False)}"
+            ai_resp = ai_service.call_ai_api(system_prompt, user_content, task_type="code")
             
-            ai_resp = ai_service.call_ai_api(system_prompt, user_content, task_type="code") # Use code or chat task type
+            # 清洗 Markdown 代码块
+            if '```' in ai_resp:
+                ai_resp = ai_resp.split('```')[1]
+                if ai_resp.startswith('json'):
+                    ai_resp = ai_resp[4:]
             
-            if ai_resp.startswith('```json'):
-                ai_resp = ai_resp.replace('```json', '').replace('```', '')
-            
-            return json.loads(ai_resp)
+            return json.loads(ai_resp.strip())
         except Exception as e:
-            print(f"Generate Chaser Error: {e}")
-            return {
-                "subject": f"关于 {item_details.get('title')} 的提醒",
-                "content": f"请关注此事项：{item_details.get('title')}。\n原因：{item_details.get('reason')}。\n请尽快处理。"
-            }
+            logger.error(f"Generate Chaser Error: {e}")
+            fallback = {"subject": f"关于 {item_details.get('title')} 的同步需求", "content": f"请关注：{item_details.get('title')}。原因：{item_details.get('reason')}。请尽快处理。"}
+            return {"professional": fallback, "soft": fallback, "direct": fallback}
 
     @staticmethod
     def auto_extract_knowledge(issue_id):
@@ -809,9 +817,22 @@ class AIInsightService:
                 pass
 
             # 3. (可选) AI 综合分析增强
-            # 如果规则生成的太少，或者为了更自然，可以调用 AI 生成一条 "综合建议"
-            # 为了性能，暂时只返回规则建议
-            
+            # 如果规则生成的建议较多，我们调用 AI 进行一次“决策压缩”
+            if len(actions) > 2:
+                summary_prompt = """你是一名资深 PMO 专家。请将以下多条零散的建议提炼为一条最重要的“项目经理唯一核心任务”。
+直接输出内容，严禁任何解释或引导性语言。15字以内，动词开头，极具号召力。"""
+                actions_summary = "\n".join([f"- {a['title']}: {a['description']}" for a in actions])
+                refined_command = ai_service.call_ai_api(summary_prompt, actions_summary, task_type="analysis")
+                if refined_command and len(refined_command) < 50:
+                    actions.insert(0, {
+                        "type": "ai_command",
+                        "priority": "High",
+                        "title": "⚡ AI 决策指令",
+                        "description": refined_command.strip('\"'),
+                        "suggestion": "这是基于多项风险因素提炼的核心指令。",
+                        "action_label": "立即处理",
+                        "action_tab": "dashboard"
+                    })
             # 按优先级排序
             priority_map = {"High": 0, "Medium": 1, "Low": 2}
             actions.sort(key=lambda x: priority_map.get(x['priority'], 99))

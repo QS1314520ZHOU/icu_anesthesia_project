@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>项目管理 - 移动版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-light: #eef2ff;
+            --bg: #f8fafc;
+            --text: #1e293b;
+            --text-light: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            padding-bottom: 80px;
+        }
+
+        .header {
+            background-color: #0f172a;
+            color: white;
+            padding: 24px 20px;
+            border-bottom-left-radius: 24px;
+            border-bottom-right-radius: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .header p {
+            margin: 4px 0 0 0;
+            font-size: 13px;
+            opacity: 0.7;
+        }
+
+        .container {
+            padding: 20px;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .action-card {
+            background: white;
+            padding: 20px;
+            border-radius: 20px;
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            border: 1px solid #f1f5f9;
+            transition: transform 0.2s;
+        }
+
+        .action-card:active {
+            transform: scale(0.95);
+        }
+
+        .action-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--primary-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .action-label {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .project-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .project-card {
+            background: white;
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid #f1f5f9;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .project-info h4 {
+            margin: 0;
+            font-size: 15px;
+        }
+
+        .project-info p {
+            margin: 4px 0 0 0;
+            font-size: 12px;
+            color: var(--text-light);
+        }
+
+        .nav-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            border-top: 1px solid #f1f5f9;
+            padding: 0 20px 10px;
+        }
+
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            text-decoration: none;
+            color: var(--text-light);
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .nav-item.active {
+            color: var(--primary);
+        }
+
+        .nav-item span {
+            font-size: 22px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>PM 交付驾驶舱</h1>
+        <p>ICU/麻醉项目移动管理端</p>
+    </div>
+
+    <div class="container">
+        <div class="quick-actions">
+            <a href="/m/chat" class="action-card">
+                <div class="action-icon">🤖</div>
+                <div class="action-label">AI 智询</div>
+            </a>
+            <a href="/m/knowledge" class="action-card">
+                <div class="action-icon">📚</div>
+                <div class="action-label">知识库</div>
+            </a>
+        </div>
+
+        <div class="section-title">🕒 活跃项目</div>
+        <div class="project-list" id="projectList">
+            <div style="text-align: center; color: #94a3b8; padding: 40px 0;">同步中...</div>
+        </div>
+    </div>
+
+    <div class="nav-bar">
+        <a href="/m/" class="nav-item active">
+            <span>🏠</span>
+            首页
+        </a>
+        <a href="/m/knowledge" class="nav-item">
+            <span>📚</span>
+            知识
+        </a>
+        <a href="/m/chat" class="nav-item">
+            <span>🤖</span>
+            AI
+        </a>
+        <a href="#" class="nav-item">
+            <span>👤</span>
+            我的
+        </a>
+    </div>
+
+    <script>
+        // Simple fetch for mobile
+        async function loadProjects() {
+            try {
+                const response = await fetch('/api/projects');
+                const res = await response.json();
+                if (res.success) {
+                    const list = document.getElementById('projectList');
+                    list.innerHTML = res.data.slice(0, 5).map(p => `
+                        <div class="project-card">
+                            <div class="project-info">
+                                <h4>${p.project_name}</h4>
+                                <p>${p.hospital_name} | 进度 ${p.progress}%</p>
+                            </div>
+                            <div style="color: ${p.status === '进行中' ? '#3b82f6' : '#94a3b8'}; font-size: 11px; font-weight: 700;">
+                                ${p.status}
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        loadProjects();
+    </script>
+</body>
+
+</html>
