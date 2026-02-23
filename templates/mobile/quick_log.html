@@ -199,7 +199,7 @@
             <textarea id="logContent"
                 placeholder="说说今天干了什么...&#10;&#10;例如：上午把HIS医嘱接口联调通过了，下午培训了ICU护士&#10;护士长反馈字体太小，明天准备改一下界面"></textarea>
             <div class="action-row">
-                <button class="voice-btn" id="voiceBtn">🎙️ 按住说话</button>
+                <button class="voice-btn" id="voiceBtn" onclick="toggleVoice()">🎙️ 按住/点击说话</button>
                 <button class="submit-btn" id="submitBtn" onclick="submitLog()">📝 保存日志</button>
             </div>
             <div id="statusMsg" class="status-message"></div>
@@ -288,6 +288,14 @@
             }
         }
 
+        function toggleVoice() {
+            if (isRecording) {
+                stopVoice();
+            } else {
+                startVoice();
+            }
+        }
+
         function startVoice() {
             if (isRecording) return;
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -360,29 +368,34 @@
             const btn = document.getElementById('voiceBtn');
             if (!btn) return;
 
+            let pressTimer = null;
+
             // 移动端触摸事件
             btn.addEventListener('touchstart', (e) => {
-                e.preventDefault(); // 阻止默认行为（选中、菜单等）
-                startVoice();
-            }, { passive: false });
+                // 不使用 preventDefault 允许 click 触发 toggleVoice
+                pressTimer = setTimeout(() => {
+                    startVoice();
+                }, 300); // 长按300ms触发
+            }, { passive: true });
 
             btn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                stopVoice();
+                if (pressTimer) clearTimeout(pressTimer);
+                // 只有在长按模式下且录音进行中，松开才会停止（如果是点击触发的，交给toggle控制）
+                if (isRecording && e.cancelable) {
+                    stopVoice();
+                    e.preventDefault(); // 防止立即触发 click
+                }
             });
 
             btn.addEventListener('touchcancel', (e) => {
-                e.preventDefault();
-                stopVoice();
+                if (pressTimer) clearTimeout(pressTimer);
+                if (isRecording) stopVoice();
             });
 
-            // PC端鼠标事件 (方便调试)
-            btn.addEventListener('mousedown', startVoice);
-            btn.addEventListener('mouseup', stopVoice);
-            btn.addEventListener('mouseleave', stopVoice);
-
-            // 阻止右键菜单
-            btn.addEventListener('contextmenu', (e) => e.preventDefault());
+            // 阻止右键菜单/移动端长按系统菜单
+            btn.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+            });
         }
 
         async function submitLog() {
