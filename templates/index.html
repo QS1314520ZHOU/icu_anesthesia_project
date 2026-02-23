@@ -4509,10 +4509,12 @@
                 <button class="modal-close" onclick="closeModal('reportModal')"
                     style="background:rgba(255,255,255,0.2);color:white;">&times;</button>
             </div>
-            <div class="modal-body" id="reportContent" style="padding:30px;">
-                <div style="text-align:center;padding:40px;color:var(--gray-500);">加载中...</div>
+            <div class="modal-body" style="padding:30px;">
+                <div id="reportLoading" style="text-align:center;padding:40px;color:var(--gray-500);">加载中...</div>
+                <div id="reportContent" style="display:none;"></div>
             </div>
             <div class="modal-footer">
+                <button class="btn btn-primary" onclick="refreshWeeklyReport()">🔄 重新生成</button>
                 <button class="btn btn-outline" onclick="closeModal('reportModal')">关闭</button>
             </div>
         </div>
@@ -5212,6 +5214,9 @@
                             <option value="2">Q2</option>
                             <option value="3">Q3</option>
                             <option value="4">Q4</option>
+                        </select>
+                        <select id="reportWeek" class="btn btn-outline btn-xs" style="width:70px;">
+                            <option value="">周度</option>
                         </select>
                         <button class="btn btn-primary btn-xs" onclick="refreshReportPreview()">生成预览</button>
                     </div>

@@ -511,17 +511,18 @@ class AnalyticsService:
         current_hash = self.calculate_project_hash(project_id) if project_id else self.calculate_all_projects_hash()
         
         row = conn.execute('''
-            SELECT content FROM report_cache 
+            SELECT content, created_at FROM report_cache 
             WHERE project_id = ? AND report_type = ? AND data_hash = ?
+            ORDER BY created_at DESC LIMIT 1
         ''', (project_id or 0, report_type, current_hash)).fetchone()
         
-        return row['content'] if row else None
+        return dict(row) if row else None
 
     def save_report_cache(self, project_id: int, report_type: str, content: str, data_hash: str):
         """保存报告缓存"""
         with get_db() as conn:
             conn.execute('''
-                INSERT OR REPLACE INTO report_cache (project_id, report_type, content, data_hash, update_time)
+                INSERT OR REPLACE INTO report_cache (project_id, report_type, content, data_hash, created_at)
                 VALUES (?, ?, ?, ?, ?)
             ''', (project_id, report_type, content, data_hash, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()

@@ -94,6 +94,7 @@ from routes.form_generator_routes import form_generator_bp
 from routes.mobile_routes import mobile_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
+from ai_utils import call_ai
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
 app.register_blueprint(alignment_bp)
 app.register_blueprint(project_bp)
@@ -2244,79 +2245,9 @@ def get_project_status_config():
 # ========== AI 核心逻辑 ==========
 def call_deepseek_api(system_prompt, user_content, task_type="analysis"):
     """
-    调用AI API，支持多端点智能自动回退和健康监测
-    基于 ai_config.ai_manager 的全局序列进行调度
+    代理函数，映射到更稳健的 call_ai 实现
     """
-    from ai_config import ai_manager, TaskType
-    
-    # 转换任务类型为枚举
-    task_enum = TaskType.ANALYSIS
-    for t in TaskType:
-        if t.value == task_type:
-            task_enum = t
-            break
-            
-    # 获取完整的调用序列
-    sequence = ai_manager.get_call_sequence(task_enum)
-    errors = []
-    
-    for item in sequence:
-        endpoint = item["endpoint"]
-        models = item["models"]
-        temperature = item["temperature"]
-        
-        headers = {
-            "Authorization": f"Bearer {endpoint.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        for model in models:
-            try:
-                payload = {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content}
-                    ],
-                    "temperature": temperature
-                }
-                
-                response = requests.post(
-                    endpoint.base_url, 
-                    headers=headers, 
-                    json=payload, 
-                    timeout=ai_manager.timeout
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result['choices'][0]['message']['content']
-                    # 标记成功，恢复接口状态
-                    ai_manager.mark_endpoint_success(endpoint)
-                    return content
-                else:
-                    error_msg = f"{endpoint.name}({model}): HTTP {response.status_code} {response.text[:50]}"
-                    errors.append(error_msg)
-                    # 如果遇到严重的连接或服务错误，跳过该端点的剩余模型，避免无效重试刷屏
-                    if response.status_code in [404, 401, 502, 503, 504]:
-                        ai_manager.mark_endpoint_error(endpoint)
-                        break 
-                    if response.status_code in [429, 500]: # 429/500 可能只是模型问题，继续尝试其他模型
-                         ai_manager.mark_endpoint_error(endpoint)
-                    
-            except requests.Timeout:
-                error_msg = f"{endpoint.name}({model}): 请求超时"
-                errors.append(error_msg)
-                ai_manager.mark_endpoint_error(endpoint)
-                continue
-            except Exception as e:
-                error_msg = f"{endpoint.name}({model}): {str(e)}"
-                errors.append(error_msg)
-                ai_manager.mark_endpoint_error(endpoint)
-                continue
-                
-    last_error = errors[-1] if errors else "无可用端点"
-    return f"AI 服务当前不可用 (尝试了 {len(errors)} 次调用，最后错误: {last_error})"
+    return call_ai(user_content, task_type=task_type, system_prompt=system_prompt)
 
 
 # ========== AI 核心逻辑 (部分已迁移) ==========
@@ -2401,6 +2332,20 @@ def get_task_result(task_id):
 # ========== 周报生成 API ==========
 # --- Removed buggy partial definition of generate_weekly_report ---
     
+# ========== Background Task Helpers ==========
+def safe_submit(fn, *args, **kwargs):
+    """
+    更加健壮的任务提交包装器，旨在解决 ThreadPoolExecutor 在解释器关闭时可能抛出的 RuntimeError
+    """
+    global executor
+    try:
+        return executor.submit(fn, *args, **kwargs)
+    except RuntimeError:
+        # 如果 executor 已被意外关闭，尝试重新创建
+        from concurrent.futures import ThreadPoolExecutor
+        executor = ThreadPoolExecutor(max_workers=4)
+        return executor.submit(fn, *args, **kwargs)
+
 def _run_weekly_report_task(task_id, project_id):
     """后台运行周报生成任务"""
     try:
@@ -2429,6 +2374,10 @@ def _run_weekly_report_task(task_id, project_id):
         ## 三、问题与风险
         ## 四、下周工作计划
         ## 五、需要协调事项
+        
+        重要要求：
+        1. 表格的表头以及表格内容中严禁使用 `**` (加粗星号)。
+        2. 严禁使用任何形式的自定义语法，绝对不能出现 `::: callout` 或类似的提示框语法。
         """
         
         project_data = {
@@ -2444,9 +2393,30 @@ def _run_weekly_report_task(task_id, project_id):
         # Update call with task_type='report'
         report = call_deepseek_api(system_prompt, f"请为以下项目生成周报：\n{json.dumps(project_data, ensure_ascii=False)}", task_type="report")
         
+        # 移除前端不支持的标记和意外的加粗星号（尤其是表格中的）
+        import re
+        report = re.sub(r':::\s*callout[^\n]*', '', report)
+        report = report.replace(':::', '')
+        
+        lines = report.split('\n')
+        in_html_table = False
+        for i, line in enumerate(lines):
+            if '<table' in line:
+                in_html_table = True
+            
+            if in_html_table or '|' in line or '<td' in line or '<th' in line or '<tr' in line:
+                lines[i] = line.replace('**', '')
+                
+            if '</table' in line:
+                in_html_table = False
+        report = '\n'.join(lines)
+        
+        if "AI 服务当前不可用" in report or "AI服务暂时不可用" in report:
+            raise Exception(report)
+            
         data_hash = analytics_service.calculate_project_hash(project_id)
         analytics_service.save_report_cache(project_id, 'weekly_report', report, data_hash)
-        
+            
         task_results[task_id] = {"status": "completed", "result": report}
         
     except Exception as e:
@@ -2458,16 +2428,19 @@ def generate_weekly_report(project_id):
     try:
         force_refresh = request.args.get('force', '0') == '1'
         if not force_refresh:
-            cached = analytics_service.get_cached_report(project_id, 'weekly_report')
-            if cached:
-                # Note: cached is just the content string in get_cached_report version
-                return api_response(True, {'report': cached, 'cached': True})
+            cached_data = analytics_service.get_cached_report(project_id, 'weekly_report')
+            if cached_data:
+                return api_response(True, {
+                    'report': cached_data['content'], 
+                    'cached': True,
+                    'cached_at': cached_data['created_at']
+                })
         
         # Generate Task ID
         task_id = str(uuid.uuid4())
         task_results[task_id] = {"status": "processing"}
         
-        executor.submit(_run_weekly_report_task, task_id, project_id)
+        safe_submit(_run_weekly_report_task, task_id, project_id)
         
         return api_response(True, {"task_id": task_id, "status": "processing"})
     except Exception as e:
@@ -2506,16 +2479,18 @@ def _run_all_report_task(task_id):
             interface_completed = len([i for i in interfaces if i['status'] == '已完成'])
             work_hours = conn.execute('SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = ? AND log_date >= ?', (pid, week_ago)).fetchone()['total'] or 0
             
+            # 数据清洗与摘要 (Summarize to save tokens)
+            current_stage = next((s['stage_name'] for s in stages if s.get('status') == '进行中'), "未定")
+            
             all_data.append({
-                "project": dict(p),
-                "stages": stages,
-                "pending_issues": issues,
-                "pending_issues_count": len(issues),
-                "critical_issues": [i for i in issues if i['severity'] == '高'],
-                "completed_tasks_this_week": completed_tasks,
-                "new_issues_this_week": new_issues,
-                "interface_stats": f"{interface_completed}/{len(interfaces)}",
-                "work_hours_this_week": work_hours
+                "项目名称": p['hospital_name'],
+                "项目经理": p['project_manager'] or "未分配",
+                "当前阶段": current_stage,
+                "总体进度": f"{p['progress']}%",
+                "异常风险项": len(issues),
+                "本周完工任务数": len(completed_tasks),
+                "接口状态": f"{interface_completed}/{len(interfaces)}",
+                "本周投入工时": work_hours
             })
         
         close_db()
@@ -2527,10 +2502,37 @@ def _run_all_report_task(task_id):
         3. ## 三、共性问题与风险
         4. ## 四、下一步统筹计划
         5. ## 五、需要资源支持
+        
+        重要要求：
+        1. 表格的表头以及表格内容中严禁使用 `**` (加粗星号)。
+        2. 严禁使用任何形式的自定义语法，绝对不能出现 `::: callout` 或类似的提示框语法。
         """
         report = call_deepseek_api(system_prompt, f"请基于以下项目数据生成管理周报：\n{json.dumps(all_data, ensure_ascii=False)}", task_type="report")
+        
+        # 移除前端不支持的标记和意外的加粗星号
+        import re
+        report = re.sub(r':::\s*callout[^\n]*', '', report)
+        report = report.replace(':::', '')
+        
+        lines = report.split('\n')
+        in_html_table = False
+        for i, line in enumerate(lines):
+            if '<table' in line:
+                in_html_table = True
+            
+            if in_html_table or '|' in line or '<td' in line or '<th' in line or '<tr' in line:
+                lines[i] = line.replace('**', '')
+                
+            if '</table' in line:
+                in_html_table = False
+        report = '\n'.join(lines)
+        
+        if "AI 服务当前不可用" in report or "AI服务暂时不可用" in report:
+            raise Exception(report)
+            
         data_hash = analytics_service.calculate_all_projects_hash()
         analytics_service.save_report_cache(0, 'all_weekly_report', report, data_hash)
+            
         task_results[task_id] = {"status": "completed", "result": report}
     except Exception as e:
         task_results[task_id] = {"status": "failed", "error": str(e)}
@@ -2540,12 +2542,16 @@ def _run_all_report_task(task_id):
 def generate_all_projects_report():
     force_refresh = request.args.get('force', '0') == '1'
     if not force_refresh:
-        cached = analytics_service.get_cached_report(0, 'all_weekly_report')
-        if cached:
-            return api_response(True, {'report': cached, 'cached': True})
+        cached_data = analytics_service.get_cached_report(0, 'all_weekly_report')
+        if cached_data:
+            return api_response(True, {
+                'report': cached_data['content'], 
+                'cached': True,
+                'cached_at': cached_data['created_at']
+            })
     task_id = str(uuid.uuid4())
     task_results[task_id] = {"status": "processing"}
-    executor.submit(_run_all_report_task, task_id)
+    safe_submit(_run_all_report_task, task_id)
     return api_response(True, {"task_id": task_id, "status": "processing"})
 
 # ========== 燃尽图数据 API ==========
