@@ -57,7 +57,14 @@ const FormGenerator = {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    document.getElementById('fgResult').value = JSON.stringify(data.data, null, 2);
+                    let resultText = data.formatted_text;
+                    if (!resultText) {
+                        resultText = JSON.stringify(data.data, null, 2);
+                        if (data.is_array === false) {
+                            resultText = resultText.replace(/^\[\s*/, '').replace(/\s*\]$/, '');
+                        }
+                    }
+                    document.getElementById('fgResult').value = resultText;
                     statusEl.innerText = `生成成功：共 ${data.total_count} 个元素`;
                     showToast('生成成功');
                 } else {

@@ -37,6 +37,31 @@ class WeComPushService:
             if project and project['project_manager']:
                 return self._get_wecom_userid(project['project_manager'])
         return None
+
+    def _get_project_member_userids(self, project_id: int) -> str:
+        """获取项目经理及所有在岗成员的企业微信 userid 列表（用|分隔）"""
+        userids = set()
+        
+        # 1. 获取项目经理
+        pm_id = self._get_project_manager_userid(project_id)
+        if pm_id:
+            userids.add(pm_id)
+            
+        # 2. 获取其他所有在岗成员
+        with DatabasePool.get_connection() as conn:
+            members = conn.execute(
+                "SELECT name FROM project_members WHERE project_id = ? AND status = '在岗'",
+                (project_id,)
+            ).fetchall()
+            
+            for m in members:
+                uid = self._get_wecom_userid(m['name'])
+                if uid:
+                    userids.add(uid)
+                    
+        if userids:
+            return "|".join(userids)
+        return None
     
     # ===== 预警定向推送 =====
     
@@ -55,12 +80,12 @@ class WeComPushService:
         wecom_service.send_markdown(userid, md_content)
     
     def push_daily_report_card(self, project_id: int, report_content: str, report_date: str):
-        """以模板卡片形式推送日报"""
+        """以模板卡片形式推送日报给项目成员"""
         if not wecom_service.is_enabled:
             return
         
-        userid = self._get_project_manager_userid(project_id)
-        if not userid:
+        userids = self._get_project_member_userids(project_id)
+        if not userids:
             return
         
         with DatabasePool.get_connection() as conn:
@@ -95,15 +120,15 @@ class WeComPushService:
             }
         }
         
-        wecom_service.send_template_card(userid, card)
+        wecom_service.send_template_card(userids, card)
     
     def push_weekly_report_card(self, project_id: int, report_content: str, report_date: str):
-        """以模板卡片形式推送周报"""
+        """以模板卡片形式推送周报给项目成员"""
         if not wecom_service.is_enabled:
             return
         
-        userid = self._get_project_manager_userid(project_id)
-        if not userid:
+        userids = self._get_project_member_userids(project_id)
+        if not userids:
             return
         
         with DatabasePool.get_connection() as conn:
@@ -135,7 +160,7 @@ class WeComPushService:
             }
         }
         
-        wecom_service.send_template_card(userid, card)
+        wecom_service.send_template_card(userids, card)
     
     # ===== 里程碑庆祝通报 =====
     
@@ -162,6 +187,26 @@ class WeComPushService:
         )
         
         wecom_service.send_markdown_to_all(content)
+
+    # ===== 项目系统预警推送 =====
+
+    def push_project_alert(self, project_id: int, title: str, content: str, notification_type: str = 'info'):
+        """向项目所有相关成员推送告警消息（逾期、高危问题等）"""
+        if not wecom_service.is_enabled:
+            return False, "企业微信通知未启用"
+
+        userids = self._get_project_member_userids(project_id)
+        if not userids:
+            logger.warning("项目 %d 没找到关联的企微成员，跳过推送", project_id)
+            return False, "没找到项目关联的企微成员"
+
+        type_emoji = {'danger': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}.get(notification_type, 'ℹ️')
+        md_content = f"{type_emoji} **{title}**\n\n{content}\n\n> <font color='comment'>系统自动预警</font> | [查看控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
+        
+        result = wecom_service.send_markdown(userids, md_content)
+        if result.get('errcode') == 0:
+            return True, "项目定向推送成功"
+        return False, f"企微接口返回失败: {result}"
     
     # ===== 闲置催办升级 =====
     

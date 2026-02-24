@@ -37,7 +37,7 @@ def replace_value_prefix(original_value, new_prefix):
 
 def parse_template(raw_text):
     if not raw_text:
-        return []
+        return [], False
     text = raw_text.strip()
     text = text.lstrip('\ufeff\u200b')
     
@@ -64,14 +64,14 @@ def parse_template(raw_text):
     try:
         data = json.loads(text)
         if isinstance(data, dict):
-            return [data]
+            return [data], is_array
         elif isinstance(data, list):
-            return data
-        return []
+            return data, is_array
+        return [], is_array
     except Exception as e:
         logger.error(f"Failed to parse template JSON. Original text length: {len(raw_text)}. Error: {e}")
         # 返回 None 表示解析失败
-        return None
+        return None, False
 
 @form_generator_bp.route('/generate', methods=['POST'])
 def generate():
@@ -79,11 +79,13 @@ def generate():
         data = request.json
         template_text = data.get('template_text')
         
+        is_array = True
         if template_text:
-            elements = parse_template(template_text)
-            if elements is None:
+            parsed_result = parse_template(template_text)
+            if parsed_result[0] is None:
                 # Try to get more info if possible? No, parse_template logs it.
                 return jsonify({"success": False, "error": "模板 JSON 格式错误，请检查是否有语法问题（如多余的逗号）"}), 400
+            elements, is_array = parsed_result
         else:
             elements = data.get('elements', [])
         mode = data.get('mode', 'y')  # 'x', 'y', 'xy'
@@ -124,10 +126,20 @@ def generate():
                     item["value"] = replace_value_prefix(item.get("value"), current_prefix)
                     result.append(item)
 
+        if not is_array:
+            formatted_text = json.dumps(result, ensure_ascii=False, indent=2)
+            # Remove brackets
+            formatted_text = re.sub(r'^\[\s*', '', formatted_text)
+            formatted_text = re.sub(r'\s*\]$', '', formatted_text)
+        else:
+            formatted_text = json.dumps(result, ensure_ascii=False, indent=2)
+
         return jsonify({
             "success": True,
             "data": result,
-            "total_count": len(result)
+            "formatted_text": formatted_text,
+            "total_count": len(result),
+            "is_array": is_array
         })
     except Exception as e:
         logger.error(f"Form generation failed: {e}")

@@ -97,12 +97,20 @@ class MonitorService:
         except Exception as e:
             return False, str(e)
 
-    def send_notification_async(self, title, content, notification_type='info'):
+    def send_notification_async(self, title, content, notification_type='info', project_id=None):
         """异步发送通知（WeCom + Email）"""
         def _send():
             if NOTIFICATION_CONFIG.get('ENABLE_WECOM'):
-                type_emoji = {'danger': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}.get(notification_type, 'ℹ️')
-                self.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
+                # 如果是项目相关通知，进行定向推送
+                if project_id:
+                    from services.wecom_push_service import wecom_push_service
+                    success, msg = wecom_push_service.push_project_alert(project_id, title, content, notification_type)
+                    
+                    # 只有在确定的环境错误时（如未启用企业微信），才考虑降级，但这里的目标是避免全员推送。
+                    # 如果找不到成员，就干脆不发全员推送，所以这里不做退化到 send_wecom_message。
+                else:
+                    type_emoji = {'danger': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}.get(notification_type, 'ℹ️')
+                    self.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
             if NOTIFICATION_CONFIG.get('ENABLE_EMAIL'):
                 html = f"<h3>{title}</h3><p>{content.replace(chr(10), '<br>')}</p>"
                 self.send_email(title, html)
@@ -130,7 +138,7 @@ class MonitorService:
         ''', (data.get('project_id'), data['title'], data.get('content', ''), 
               data.get('type', 'info'), data.get('due_date'), data.get('remind_type', 'once')))
         conn.commit()
-        self.send_notification_async(data['title'], data.get('content', ''), data.get('type', 'info'))
+        self.send_notification_async(data['title'], data.get('content', ''), data.get('type', 'info'), data.get('project_id'))
         return True
 
     def mark_as_read(self, nid=None):
