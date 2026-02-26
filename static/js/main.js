@@ -5219,20 +5219,26 @@ function showWecomLogin(containerId, hideId, state = 'login') {
             return;
         }
 
-        if (typeof window.WwLogin !== 'function') {
-            container.innerHTML = '<div style="color:red;padding:20px;">WeCom SDK 加载失败，请刷新页面</div>';
+        const WwLoginConstructor = window.WwLogin || window.wwLogin;
+        if (typeof WwLoginConstructor !== 'function') {
+            container.innerHTML = '<div style="color:red;padding:20px;">WeCom SDK 加载失败，请检查网络或刷新页面</div>';
             return;
         }
 
-        window.WwLogin({
-            "id": containerId,
-            "appid": appid,
-            "agentid": agentid,
-            "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
-            "state": state,
-            "href": "",
-            "lang": "zh",
-        });
+        try {
+            new WwLoginConstructor({
+                "id": containerId,
+                "appid": appid,
+                "agentid": agentid,
+                "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
+                "state": state,
+                "href": "",
+                "lang": "zh",
+            });
+        } catch (e) {
+            console.error('WwLogin init failed', e);
+            container.innerHTML = '<div style="color:red;padding:20px;">二维码初始化失败: ' + e.message + '</div>';
+        }
     }).catch(err => {
         container.innerHTML = '<div style="color:red;padding:20px;">加载配置失败: ' + err.message + '</div>';
     });
