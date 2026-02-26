@@ -26,11 +26,14 @@ class ReportScheduler:
     WEEKLY_DAY = 4  # Friday (0=Monday)
     BRIEFING_HOUR = 8    # 早上8:30推送晨会简报
     BRIEFING_MINUTE = 30
+    MONITOR_HOUR = 9     # 早上9:00运行项目哨兵扫描
+    MONITOR_MINUTE = 0
 
     def __init__(self):
         self._daily_timer = None
         self._weekly_timer = None
         self._briefing_timer = None
+        self._monitor_timer = None
         self._running = False
 
     # ------------------------------------------------------------------
@@ -44,10 +47,12 @@ class ReportScheduler:
         self._schedule_daily()
         self._schedule_weekly()
         self._schedule_briefing()
-        logger.info("📅 报告自动归档调度器已启动 (日报 %02d:%02d / 周报 周五 %02d:%02d / 晨会简报 %02d:%02d)",
+        self._schedule_monitor()
+        logger.info("📅 报告自动归档调度器已启动 (日报 %02d:%02d / 周报 周五 %02d:%02d / 晨会简报 %02d:%02d / 项目哨兵 %02d:%02d)",
                      self.DAILY_HOUR, self.DAILY_MINUTE,
                      self.WEEKLY_HOUR, self.WEEKLY_MINUTE,
-                     self.BRIEFING_HOUR, self.BRIEFING_MINUTE)
+                     self.BRIEFING_HOUR, self.BRIEFING_MINUTE,
+                     self.MONITOR_HOUR, self.MONITOR_MINUTE)
 
     def stop(self):
         """停止调度器"""
@@ -58,6 +63,8 @@ class ReportScheduler:
             self._weekly_timer.cancel()
         if self._briefing_timer:
             self._briefing_timer.cancel()
+        if self._monitor_timer:
+            self._monitor_timer.cancel()
         logger.info("报告自动归档调度器已停止")
 
     # ------------------------------------------------------------------
@@ -110,6 +117,16 @@ class ReportScheduler:
         next_run = datetime.now() + timedelta(seconds=delay)
         logger.info("下次晨会简报推送时间: %s", next_run.strftime('%Y-%m-%d %H:%M'))
 
+    def _schedule_monitor(self):
+        if not self._running:
+            return
+        delay = self._seconds_until(self.MONITOR_HOUR, self.MONITOR_MINUTE)
+        self._monitor_timer = threading.Timer(delay, self._run_monitor)
+        self._monitor_timer.daemon = True
+        self._monitor_timer.start()
+        next_run = datetime.now() + timedelta(seconds=delay)
+        logger.info("下次项目哨兵扫描时间: %s", next_run.strftime('%Y-%m-%d %H:%M'))
+
     # ------------------------------------------------------------------
     # Runners
     # ------------------------------------------------------------------
@@ -147,6 +164,21 @@ class ReportScheduler:
             logger.error("晨会简报推送异常: %s", e, exc_info=True)
         finally:
             self._schedule_briefing()
+
+    def _run_monitor(self):
+        """执行每日项目哨兵扫描（逾期、高危问题检测并推送）"""
+        try:
+            if datetime.now().weekday() < 5:
+                logger.info("⏰ 开始执行项目哨兵扫描...")
+                from services.monitor_service import monitor_service
+                reminders = monitor_service.check_and_create_reminders()
+                logger.info("✅ 项目哨兵扫描完成，创建了 %d 条提醒: %s", len(reminders), reminders[:5])
+            else:
+                logger.info("今天是周末，跳过项目哨兵扫描")
+        except Exception as e:
+            logger.error("项目哨兵扫描异常: %s", e, exc_info=True)
+        finally:
+            self._schedule_monitor()
 
     def _push_daily_briefing(self):
         """生成并推送每日晨会简报到企业微信"""

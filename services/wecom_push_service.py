@@ -192,28 +192,27 @@ class WeComPushService:
 
     def push_project_alert(self, project_id: int, title: str, content: str, notification_type: str = 'info'):
         """向项目所有相关成员推送告警消息（逾期、高危问题等）"""
-        if not wecom_service.is_enabled:
-            return False, "企业微信通知未启用"
-
-        userids = self._get_project_member_userids(project_id)
-        if not userids:
-            logger.warning("项目 %d 没找到关联的企微成员，跳过推送", project_id)
-            return False, "没找到项目关联的企微成员"
-
         type_emoji = {'danger': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}.get(notification_type, 'ℹ️')
-        md_content = f"{type_emoji} **{title}**\n\n{content}\n\n> <font color='comment'>系统自动预警</font> | [查看控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
         
-        result = wecom_service.send_markdown(userids, md_content)
-        if result.get('errcode') == 0:
-            return True, "项目定向推送成功"
+        # 尝试通过自建应用定向推送
+        if wecom_service.is_enabled:
+            userids = self._get_project_member_userids(project_id)
+            if userids:
+                md_content = f"{type_emoji} **{title}**\n\n{content}\n\n> <font color='comment'>系统自动预警</font> | [查看控制台]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
+                result = wecom_service.send_markdown(userids, md_content)
+                if result.get('errcode') == 0:
+                    return True, "项目定向推送成功"
+                logger.warning("项目 %d 自建应用定向推送失败: %s，尝试 Webhook 兜底", project_id, result)
+            else:
+                logger.warning("项目 %d 没找到关联的企微成员，尝试 Webhook 兜底", project_id)
         
-        # 如果定向推送失败（如 userid 不存在），尝试通过 Webhook 全局推送
+        # 兜底：通过 Webhook 推送到群
         from services.monitor_service import monitor_service
-        success, msg = monitor_service.send_wecom_message(title, content, 'markdown')
+        success, msg = monitor_service.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
         if success:
-            return True, "定向推送失败，已通过 Webhook 兜底推送全员"
+            return True, "已通过 Webhook 兜底推送到群"
             
-        return False, f"企微接口返回失败: {result}"
+        return False, f"所有推送渠道均失败: {msg}"
     
     # ===== 闲置催办升级 =====
     

@@ -149,6 +149,7 @@ var adminSettings = {
                     <div class="admin-tabs" style="padding: 0 24px; background: white; border-bottom: 1px solid var(--gray-200); display: flex; gap: 24px;">
                         <div class="admin-tab active" onclick="adminSettings.switchTab(event, 'tabAiConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">AI 模型配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">企业微信配置</div>
+                        <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomBind')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">用户企微绑定</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabStorageConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">云存储配置</div>
                     </div>
                     
@@ -227,6 +228,20 @@ var adminSettings = {
                                         <button class="btn btn-primary" style="width: 100%; height: 45px;" onclick="adminSettings.saveWecomConfig()">保存并应用配置</button>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- WeCom Bind Tab -->
+                        <div id="tabWecomBind" class="admin-tab-pane" style="display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                <div>
+                                    <div style="font-size: 15px; font-weight: 600; color: var(--gray-800);">用户企微 UserID 绑定</div>
+                                    <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">绑定后可实现项目预警定向推送到个人企业微信</div>
+                                </div>
+                                <button class="btn btn-outline btn-sm" onclick="adminSettings.loadWecomBindList()">🔄 刷新</button>
+                            </div>
+                            <div id="wecomBindList">
+                                <div class="text-center" style="padding: 40px; color: var(--gray-500);">⏳ 加载中...</div>
                             </div>
                         </div>
 
@@ -382,6 +397,7 @@ var adminSettings = {
         this.loadAiConfigs();
         this.loadWecomConfig();
         this.loadStorageConfig();
+        this.loadWecomBindList();
     },
 
     switchTab: function (event, tabId) {
@@ -835,6 +851,81 @@ var adminSettings = {
         } finally {
             btn.disabled = false;
             btn.innerText = originalText;
+        }
+    },
+
+    // ========== WeCom User Binding Logic ==========
+
+    loadWecomBindList: async function () {
+        const container = document.getElementById('wecomBindList');
+        if (!container) return;
+        container.innerHTML = '<div class="text-center" style="padding: 40px; color: var(--gray-500);">⏳ 加载中...</div>';
+        try {
+            const res = await api.get('/admin/users/wecom-bindlist');
+            const users = Array.isArray(res) ? res : (res && res.data ? res.data : []);
+            if (users.length === 0) {
+                container.innerHTML = '<div style="text-align:center; color:var(--gray-400); padding:30px;">暂无用户数据</div>';
+                return;
+            }
+            container.innerHTML = `
+                <div class="table-container" style="overflow-x:auto;">
+                    <table class="table" style="font-size:13px; width:100%;">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>显示名称</th>
+                                <th>角色</th>
+                                <th>企微 UserID</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${users.map(u => `
+                                <tr>
+                                    <td>${u.id}</td>
+                                    <td><b>${u.display_name || u.username}</b></td>
+                                    <td>${u.role}</td>
+                                    <td>
+                                        <input type="text" id="wecomBind_${u.id}" value="${u.wecom_userid || ''}" 
+                                            placeholder="输入企微 userid" 
+                                            style="width:160px; padding:4px 8px; border:1px solid ${u.is_bound ? 'var(--success)' : '#ddd'}; border-radius:6px; font-family:monospace; font-size:12px;">
+                                    </td>
+                                    <td>${u.is_bound ? '<span style="color:var(--success); font-weight:600;">✅ 已绑</span>' : '<span style="color:var(--gray-400);">未绑</span>'}</td>
+                                    <td>
+                                        <button class="btn-icon" style="color:var(--primary); background:#eef2ff; padding:4px 10px; font-size:12px;" 
+                                            onclick="adminSettings.saveWecomBind(${u.id})">
+                                            💾 保存
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div style="font-size:12px; color:var(--gray-400); margin-top:12px; line-height:1.6;">
+                    💡 提示：企微 UserID 可在企业微信管理后台 → 通讯录 → 点击成员 → 账号字段中找到。绑定后项目预警将定向推送到该用户的企微。
+                </div>
+            `;
+        } catch (e) {
+            container.innerHTML = `<div style="color:var(--danger); padding:20px;">加载失败: ${e.message}</div>`;
+        }
+    },
+
+    saveWecomBind: async function (userId) {
+        const input = document.getElementById(`wecomBind_${userId}`);
+        if (!input) return;
+        const wecomUserid = input.value.trim();
+        try {
+            const res = await api.post(`/admin/users/${userId}/bind-wecom`, { wecom_userid: wecomUserid });
+            if (res.success) {
+                alert('✅ ' + res.message);
+                this.loadWecomBindList();
+            } else {
+                alert('❌ ' + (res.message || '保存失败'));
+            }
+        } catch (e) {
+            alert('❌ 请求失败: ' + e.message);
         }
     }
 };

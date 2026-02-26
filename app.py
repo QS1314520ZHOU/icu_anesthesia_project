@@ -3869,6 +3869,65 @@ def save_wecom_config():
         close_db()
 
 
+# ========== 管理员：用户企微绑定 API ==========
+
+@app.route('/api/admin/users/wecom-bindlist', methods=['GET'])
+@require_auth('admin')
+def get_wecom_bindlist():
+    """获取所有用户及其企微绑定状态"""
+    conn = get_db()
+    try:
+        users = conn.execute('''
+            SELECT id, username, display_name, role, wecom_userid, is_active
+            FROM users ORDER BY id
+        ''').fetchall()
+        result = []
+        for u in users:
+            result.append({
+                'id': u['id'],
+                'username': u['username'],
+                'display_name': u['display_name'],
+                'role': u['role'],
+                'wecom_userid': u['wecom_userid'] or '',
+                'is_bound': bool(u['wecom_userid']),
+                'is_active': bool(u['is_active'])
+            })
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
+
+@app.route('/api/admin/users/<int:user_id>/bind-wecom', methods=['POST'])
+@require_auth('admin')
+def bind_wecom_userid(user_id):
+    """手动绑定/更新用户的企微 userid"""
+    data = request.json or {}
+    wecom_userid = data.get('wecom_userid', '').strip()
+    
+    conn = get_db()
+    try:
+        user = conn.execute('SELECT id, display_name FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not user:
+            return jsonify({'success': False, 'message': '用户不存在'}), 404
+        
+        if wecom_userid:
+            existing = conn.execute(
+                'SELECT id, display_name FROM users WHERE wecom_userid = ? AND id != ?',
+                (wecom_userid, user_id)
+            ).fetchone()
+            if existing:
+                return jsonify({'success': False, 'message': f'该企微ID已被用户 [{existing["display_name"]}] 绑定'}), 400
+            conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (wecom_userid, user_id))
+        else:
+            conn.execute('UPDATE users SET wecom_userid = NULL WHERE id = ?', (user_id,))
+        
+        conn.commit()
+        return jsonify({'success': True, 'message': f'用户 [{user["display_name"]}] 的企微绑定已更新'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
 
 # ========== 存储配置 API (Baidu Netdisk) ==========
 from storage_service import storage_service
@@ -3972,7 +4031,10 @@ if __name__ == '__main__':
     with app.app_context():
         init_db()
         reload_notification_config()
-    # 启动报告自动归档调度器
-    report_scheduler.start()
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # 启动报告自动归档调度器（含晨会简报、项目哨兵等定时任务）
+    # 注意：debug 模式下 Flask reloader 会 fork 子进程，
+    # 必须在子进程中启动调度器（或关闭 reloader），否则 Timer 线程会丢失
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+        report_scheduler.start()
+    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
 
