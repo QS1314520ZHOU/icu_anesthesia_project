@@ -5200,6 +5200,8 @@ window.startWecomBind = function () {
  */
 function showWecomLogin(containerId, hideId, state = 'login') {
     const container = document.getElementById(containerId);
+    if (!container) return;
+
     container.style.display = 'block';
     if (hideId) {
         const hideEl = document.getElementById(hideId);
@@ -5208,15 +5210,23 @@ function showWecomLogin(containerId, hideId, state = 'login') {
 
     // 获取配置并初始化 WWLogin
     api.get('/wecom/config').then(config => {
-        if (!config.appid || !config.agentid) {
+        const appid = config.corp_id || config.appid;
+        const agentid = config.agent_id || config.agentid;
+
+        if (!appid || !agentid) {
             container.innerHTML = '<div style="color:red;padding:20px;">未配置企业微信参数</div>';
+            return;
+        }
+
+        if (typeof window.WwLogin !== 'function') {
+            container.innerHTML = '<div style="color:red;padding:20px;">WeCom SDK 加载失败，请刷新页面</div>';
             return;
         }
 
         window.WwLogin({
             "id": containerId,
-            "appid": config.appid,
-            "agentid": config.agentid,
+            "appid": appid,
+            "agentid": agentid,
             "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
             "state": state,
             "href": "",
@@ -8025,46 +8035,6 @@ document.addEventListener('click', function (e) {
         openWrappers.forEach(w => w.classList.remove('open'));
     }
 });
-
-async function showWecomLogin(containerId = 'wecom_login_container', formId = 'loginForm') {
-    const container = document.getElementById(containerId);
-    const loginForm = document.getElementById(formId);
-
-    if (container.style.display === 'block') {
-        container.style.display = 'none';
-        loginForm.style.display = 'block';
-        return;
-    }
-
-    try {
-        // 获取配置
-        const config = await api.get('/wecom/config');
-
-        container.style.display = 'block';
-        loginForm.style.display = 'none';
-        container.innerHTML = '正在加载二维码...'; // 清空并显示加载中
-
-        // 动态构建回调地址，避免使用默认的 your-domain.com
-        let redirectUri = config.redirect_uri;
-        if (!redirectUri || redirectUri.includes('your-domain.com')) {
-            redirectUri = window.location.origin + '/api/wecom/sso/callback';
-        }
-
-        // 初始化扫码
-        window.wwLogin = new WwLogin({
-            "id": containerId,
-            "appid": config.corp_id,
-            "agentid": config.agent_id,
-            "redirect_uri": encodeURIComponent(redirectUri),
-            "state": "wecom_login_" + Date.now(),
-            "href": "", // 可以自定义样式
-            "lang": "zh",
-        });
-    } catch (e) {
-        console.error('获取企业微信配置失败', e);
-        alert('无法启动企业微信登录，请联系管理员');
-    }
-}
 
 // 页面加载时检查 URL 中是否有 token（扫码登录回调回来）
 (function checkWecomLoginCallback() {
