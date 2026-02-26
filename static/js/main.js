@@ -1037,10 +1037,10 @@ async function loadProjectDetail(projectId, preserveTab = false) {
         setTimeout(() => {
             const tabMap = {
                 'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
-                'interfaces': 5, 'flow': 6, 'devices': 7, 'issues': 8, 'communications': 9,
-                'departures': 10, 'worklogs': 11, 'documents': 12, 'expenses': 13, 'changes': 14,
-                'acceptance': 15, 'satisfaction': 16, 'dependencies': 17, 'standup': 18, 'deviation': 19,
-                'interfaceSpec': 20, 'financials': 21
+                'flow': 5, 'devices': 6, 'issues': 7, 'communications': 8, 'departures': 9,
+                'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13, 'acceptance': 14,
+                'satisfaction': 15, 'dependencies': 16, 'standup': 17, 'deviation': 18,
+                'interfaceSpec': 19, 'financials': 20
             };
             const tabs = document.querySelectorAll('.tabs .tab');
             const tabIndex = tabMap[previousTab];
@@ -2784,55 +2784,7 @@ async function showGlobalGanttModal() {
 }
 
 // ========== 项目状态变更 ==========
-function showStatusModal() {
-    if (!currentProject) return;
-    const statuses = ['待启动', '进行中', '试运行', '暂停', '离场待返', '已完成', '已验收', '质保期', '已终止'];
-    const statusColors = {
-        '待启动': '#94a3b8', '进行中': '#3b82f6', '试运行': '#f59e0b',
-        '暂停': '#ef4444', '离场待返': '#8b5cf6', '已完成': '#22c55e',
-        '已验收': '#06b6d4', '质保期': '#14b8a6', '已终止': '#6b7280'
-    };
-    const currentStatus = currentProject.status;
-    const html = `
-        <div class="modal show" id="statusModal" style="z-index:10001;">
-            <div class="modal-content" style="max-width:420px;">
-                <div class="modal-header">
-                    <h3>变更项目状态</h3>
-                    <button class="modal-close" onclick="document.getElementById('statusModal').remove()">&times;</button>
-                </div>
-                <div style="padding:20px;">
-                    <p style="margin-bottom:12px;color:#64748b;">当前状态：<strong style="color:${statusColors[currentStatus]}">${currentStatus}</strong></p>
-                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
-                        ${statuses.map(s => `
-                            <button onclick="changeProjectStatus('${s}')" 
-                                style="padding:10px 8px;border-radius:8px;border:2px solid ${s === currentStatus ? statusColors[s] : '#e2e8f0'};
-                                background:${s === currentStatus ? statusColors[s] + '20' : '#fff'};cursor:pointer;font-size:13px;font-weight:${s === currentStatus ? '700' : '500'};
-                                color:${statusColors[s] || '#334155'};transition:all .2s;"
-                                onmouseover="this.style.borderColor='${statusColors[s]}';this.style.background='${statusColors[s]}15'"
-                                onmouseout="this.style.borderColor='${s === currentStatus ? statusColors[s] : '#e2e8f0'}';this.style.background='${s === currentStatus ? statusColors[s] + '20' : '#fff'}'"
-                                ${s === currentStatus ? 'disabled' : ''}>
-                                ${s}
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', html);
-}
-
-async function changeProjectStatus(newStatus) {
-    if (!currentProject) return;
-    try {
-        await api.put(`/projects/${currentProject.id}/status`, { status: newStatus });
-        const modal = document.getElementById('statusModal');
-        if (modal) modal.remove();
-        await loadProjectDetail(currentProject.id);
-    } catch (e) {
-        alert('状态变更失败: ' + e.message);
-    }
-}
+// Duplicate function blocks (2787-2835) removed to avoid conflicts.
 
 // ========== 添加阶段 ==========
 function showAddStageModal() {
@@ -4414,16 +4366,24 @@ async function saveInterface() {
     loadProjectDetail(currentProjectId, true);
 }
 
+let isSavingIssue = false;
 async function saveIssue() {
+    if (isSavingIssue) return;
     const data = {
         issue_type: document.getElementById('issueType').value,
         severity: document.getElementById('issueSeverity').value,
         description: document.getElementById('issueDesc').value
     };
     if (!data.description) { alert('请填写问题描述'); return; }
-    await api.post(`/projects/${currentProjectId}/issues`, data);
-    closeModal('issueModal');
-    loadProjectDetail(currentProjectId, true);
+
+    isSavingIssue = true;
+    try {
+        await api.post(`/projects/${currentProjectId}/issues`, data);
+        closeModal('issueModal');
+        loadProjectDetail(currentProjectId, true);
+    } finally {
+        isSavingIssue = false;
+    }
 }
 
 async function saveDevice() {
@@ -5145,6 +5105,23 @@ function updateUserUI() {
         document.getElementById('userRole').textContent = currentUser.role;
         document.getElementById('userAvatar').textContent = (currentUser.display_name || currentUser.username).charAt(0).toUpperCase();
 
+        // 更新企微绑定状态
+        const wecomBadge = document.getElementById('wecomStatusBadge');
+        const wecomBtn = document.getElementById('wecomBindBtn');
+        const wecomTips = document.getElementById('wecomBindTips');
+
+        if (currentUser.wecom_userid) {
+            wecomBadge.textContent = '已绑定';
+            wecomBadge.className = 'badge badge-success';
+            wecomBtn.style.display = 'none';
+            wecomTips.textContent = 'UserID: ' + currentUser.wecom_userid;
+        } else {
+            wecomBadge.textContent = '未绑定';
+            wecomBadge.className = 'badge badge-gray';
+            wecomBtn.style.display = 'block';
+            wecomTips.textContent = '绑定后可接收实时预警';
+        }
+
         // 管理员专属功能入口
         if (adminSettingsBtn) {
             adminSettingsBtn.style.display = currentUser.role === 'admin' ? 'block' : 'none';
@@ -5153,6 +5130,77 @@ function updateUserUI() {
         if (loginBtnText) loginBtnText.textContent = '登录';
         if (adminSettingsBtn) adminSettingsBtn.style.display = 'none';
     }
+}
+
+/**
+ * 开始企微绑定流程
+ */
+function startWecomBind() {
+    if (!currentUser) {
+        toast('请先登录');
+        return;
+    }
+    // 显示扫码弹窗
+    const containerId = 'wecomBindContainer';
+    let container = document.getElementById(containerId);
+    if (!container) {
+        const modal = document.createElement('div');
+        modal.id = 'wecomBindModal';
+        modal.className = 'modal show';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h3>绑定企业微信</h3>
+                    <button class="modal-close" onclick="closeModal('wecomBindModal')">&times;</button>
+                </div>
+                <div class="modal-body" style="text-align: center; padding: 20px;">
+                    <div id="${containerId}"></div>
+                    <p style="margin-top: 15px; font-size: 13px; color: #666;">请使用企业微信扫码以完成绑定</p>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    } else {
+        openModal('wecomBindModal');
+    }
+
+    // 初始化扫码
+    showWecomLogin(containerId, null, 'bind');
+}
+
+/**
+ * 显示企业微信登录/绑定二维码
+ * @param {string} containerId 容器ID
+ * @param {string} hideId 扫码成功后隐藏的元素ID
+ * @param {string} state OAuth state
+ */
+function showWecomLogin(containerId, hideId, state = 'login') {
+    const container = document.getElementById(containerId);
+    container.style.display = 'block';
+    if (hideId) {
+        const hideEl = document.getElementById(hideId);
+        if (hideEl) hideEl.style.display = 'none';
+    }
+
+    // 获取配置并初始化 WWLogin
+    api.get('/wecom/config').then(config => {
+        if (!config.appid || !config.agentid) {
+            container.innerHTML = '<div style="color:red;padding:20px;">未配置企业微信参数</div>';
+            return;
+        }
+
+        window.WwLogin({
+            "id": containerId,
+            "appid": config.appid,
+            "agentid": config.agentid,
+            "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
+            "state": state,
+            "href": "",
+            "lang": "zh",
+        });
+    }).catch(err => {
+        container.innerHTML = '<div style="color:red;padding:20px;">加载配置失败: ' + err.message + '</div>';
+    });
 }
 
 function toggleUserPanel() {

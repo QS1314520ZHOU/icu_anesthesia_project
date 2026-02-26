@@ -3061,37 +3061,6 @@
         </div>
     </div>
 
-    <!-- 状态变更模态框 -->
-    <div class="modal" id="statusModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>变更项目状态</h3>
-                <button class="modal-close" onclick="closeModal('statusModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>新状态</label>
-                    <select id="newProjectStatus"
-                        style="width:100%; padding:8px; border-radius:4px; border:1px solid #ddd;">
-                        <option value="待启动">待启动</option>
-                        <option value="进行中">进行中</option>
-                        <option value="试运行">试运行</option>
-                        <option value="验收中">验收中</option>
-                        <option value="已验收">已验收</option>
-                        <option value="质保期">质保期</option>
-                        <option value="暂停">暂停</option>
-                        <option value="已终止">已终止</option>
-                        <option value="已完成">已完成</option>
-                    </select>
-                </div>
-                <div style="margin-top:20px; text-align:right;">
-                    <button class="btn btn-outline" onclick="closeModal('statusModal')"
-                        style="margin-right:10px;">取消</button>
-                    <button class="btn btn-primary" onclick="updateProjectStatus()">确认变更</button>
-                </div>
-            </div>
-        </div>
-    </div>
     <!-- 离场申请模态框 -->
     <div class="modal" id="departureModal">
         <div class="modal-content modal-large">
@@ -5145,6 +5114,16 @@
                 <div style="font-weight: 600;" id="userDisplayName">用户</div>
                 <div style="font-size: 12px; color: #6b7280;" id="userRole">成员</div>
             </div>
+        </div>
+        <div id="wecomBindStatus"
+            style="padding: 10px; background: #f9fafb; border-radius: 8px; margin-bottom: 12px; font-size: 12px; border: 1px dashed #ddd;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="color: #64748b;">企业微信绑定</span>
+                <span id="wecomStatusBadge" class="badge badge-gray">未检测</span>
+            </div>
+            <div id="wecomBindTips" style="color: #94a3b8; font-size: 11px; margin-bottom: 8px;">绑定后可接收实时预警</div>
+            <button id="wecomBindBtn" class="btn btn-primary btn-xs btn-full" onclick="startWecomBind()">🔗
+                立即绑定</button>
         </div>
         <div id="adminSettingsBtn" style="display:none; margin-bottom:8px;">
             <button class="btn btn-outline btn-full" onclick="adminSettings.open()">🛠️ 系统配置</button>

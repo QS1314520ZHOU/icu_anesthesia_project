@@ -12,7 +12,7 @@ class MonitorService:
     """监控与通知服务"""
 
 
-    def send_wecom_message(self, title, content, msg_type='text'):
+    def send_wecom_message(self, title, content, msg_type='text', allow_fallback=True):
         """发送企业微信通知（优先自建应用，降级到Webhook）"""
         from services.wecom_service import wecom_service
         
@@ -29,6 +29,9 @@ class MonitorService:
                 logger.warning("自建应用推送失败，降级到Webhook: %s", e)
         
         # 降级：Webhook（原有逻辑）
+        if not allow_fallback:
+            return False, "自建应用推送失败，且禁用了 Webhook 兜底"
+
         if not NOTIFICATION_CONFIG.get('ENABLE_WECOM') or not NOTIFICATION_CONFIG.get('WECOM_WEBHOOK'):
             return False, "企业微信通知未启用或未配置"
         try:

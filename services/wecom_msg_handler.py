@@ -27,6 +27,7 @@ class WeComMsgHandler:
         "log": re.compile(r'^(日志|log|记录)\s+(.+)', re.IGNORECASE),
         "issue": re.compile(r'^(问题|bug|故障|上报)\s+(.+)', re.IGNORECASE),
         "status": re.compile(r'^(状态|进度|overview)$', re.IGNORECASE),
+        "bind": re.compile(r'^(绑定|bind)$', re.IGNORECASE),
         "help": re.compile(r'^(帮助|help|\?)$', re.IGNORECASE),
     }
     
@@ -46,6 +47,8 @@ class WeComMsgHandler:
                     return self._handle_quick_issue(userid, match.group(2))
                 elif cmd_type == "status":
                     return self._handle_status(userid)
+                elif cmd_type == "bind":
+                    return self._handle_bind(userid)
                 elif cmd_type == "help":
                     return self._get_help_text()
         
@@ -240,6 +243,46 @@ class WeComMsgHandler:
         except Exception as e:
             return f"查询异常：{str(e)}"
     
+    def _handle_bind(self, userid: str) -> str:
+        """自定绑定/关联用户账户"""
+        try:
+            with DatabasePool.get_connection() as conn:
+                # 1. 检查是否已绑定
+                user = conn.execute(
+                    'SELECT id, display_name FROM users WHERE wecom_userid = ?', (userid,)
+                ).fetchone()
+                
+                if user:
+                    return f"✅ 你已绑定到系统账户: **{user['display_name']}**\n无需重复操作。"
+                
+                # 2. 尝试通过姓名自动匹配 (忽略空格，支持模糊匹配或完全匹配)
+                # 先从企微查真实姓名
+                wecom_user = wecom_service.get_user_detail(userid)
+                name = wecom_user.get('name')
+                
+                if name:
+                    name_match = conn.execute(
+                        'SELECT id, display_name FROM users WHERE display_name = ? AND wecom_userid IS NULL',
+                        (name,)
+                    ).fetchone()
+                    
+                    if name_match:
+                        conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (userid, name_match['id']))
+                        conn.commit()
+                        return f"✅ 自动绑定成功！\n系统已根据姓名识别出你的账户: **{name_match['display_name']}**。\n现在你可以接收项目预警消息了。"
+                
+                # 3. 无法自动匹配 -> 提供 OAuth2 绑定链接
+                auth_url = wecom_service.get_oauth_url(f"{WECOM_CONFIG['APP_HOME_URL']}/api/wecom/oauth/callback", state="bind")
+                return (
+                    "🔍 抱歉，未能自动识别你的身份。\n\n"
+                    "请点击下方链接登录你的系统账号完成绑定：\n"
+                    f"🔗 [立即绑定账户]({auth_url})\n\n"
+                    "💡 注意：请使用浏览器打开链接。"
+                )
+        except Exception as e:
+            logger.error("Handle bind failed: %s", e)
+            return f"绑定处理失败: {str(e)}"
+
     def _handle_smart_route(self, userid: str, content: str) -> str:
         """智能路由：无命令前缀时，AI 判断意图"""
         # 简单规则兜底（避免每条消息都调 AI）

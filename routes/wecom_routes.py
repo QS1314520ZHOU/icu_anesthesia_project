@@ -263,20 +263,62 @@ def oauth_callback():
     if not wecom_user:
         return api_response(False, message="获取用户身份失败", code=401)
     
+    wecom_userid = wecom_user.get('userid')
+    state = request.args.get('state', 'login')
+    
+    # 获取首页 URL
+    home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://your-domain.com')
+    if 'your-domain.com' in home_url:
+        home_url = request.url_root.rstrip('/')
+    if not home_url.endswith('/'):
+        home_url += '/'
+
+    # Case 1: 绑定模式 (state='bind')
+    if state == 'bind':
+        # 验证当前是否有登录态
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('auth_token')
+        
+        user = auth_service.validate_token(token)
+        if not user:
+            # 可能是扫码后重定向到了这里但 Token 丢了（比如跨域或Cookie问题）
+            # 对于 QR 扫码，通常是新的页面，所以需要用户已经有 Cookie
+            return render_template_string("""
+                <script>
+                    alert('绑定失败：请先登录系统再进行绑定');
+                    window.close();
+                </script>
+            """)
+        
+        bind_result = auth_service.bind_wecom(user['id'], wecom_userid)
+        if bind_result.get('success'):
+            return render_template_string("""
+                <script>
+                    alert('企业微信绑定成功！');
+                    if (window.opener) {
+                        window.opener.location.reload();
+                        window.close();
+                    } else {
+                        window.location.href = "{{ home_url }}";
+                    }
+                </script>
+            """, home_url=home_url)
+        else:
+            return render_template_string("""
+                <script>
+                    alert('绑定失败：{{ message }}');
+                    window.close();
+                </script>
+            """, message=bind_result.get('message', '未知错误'))
+
+    # Case 2: 登录模式 (默认)
     # 查找或创建本地用户
     result = auth_service.login_via_wecom(wecom_user)
     
     if result.get('success'):
         # 重定向到前端，带上 token
         token = result['token']
-        home_url = WECOM_CONFIG.get('APP_HOME_URL', 'https://your-domain.com')
-        if 'your-domain.com' in home_url:
-            home_url = request.url_root.rstrip('/')
-        
-        # 安全处理: 如果是单纯的 '/', 则不变，否则补充斜杠
-        if not home_url.endswith('/'):
-            home_url += '/'
-            
         return redirect(f"{home_url}?token={token}")
     else:
         return api_response(False, message=result.get('message', '登录失败'), code=401)

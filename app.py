@@ -2719,42 +2719,7 @@ def get_dashboard_stats():
 
 # ========== 接口管理 API (已迁移至 Blueprint) ==========
 
-# ========== 问题管理 API ==========
-@app.route('/api/projects/<int:project_id>/issues', methods=['POST'])
-def add_issue(project_id):
-    data = request.json
-    conn = get_db()
-    conn.execute('INSERT INTO issues (project_id, issue_type, description, severity, status) VALUES (?, ?, ?, ?, ?)',
-                 (project_id, data['issue_type'], data['description'], data['severity'], data.get('status', '待处理')))
-    conn.commit()
-    project = conn.execute('SELECT project_name FROM projects WHERE id = ?', (project_id,)).fetchone()
-    close_db()
-    
-    if data['severity'] == '高':
-        monitor_service.send_notification_async(
-            f"🚨 新增高危问题",
-            f"项目: {project['project_name']}\n类型: {data['issue_type']}\n描述: {data['description']}",
-            'danger'
-        )
-    return jsonify({'success': True})
-
-@app.route('/api/issues/<int:issue_id>', methods=['PUT'])
-def update_issue(issue_id):
-    data = request.json
-    conn = get_db()
-    resolved_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if data.get('status') == '已解决' else None
-    conn.execute('UPDATE issues SET issue_type=?, description=?, severity=?, status=?, resolved_at=? WHERE id=?',
-                 (data.get('issue_type'), data.get('description'), data.get('severity'), data.get('status'), resolved_at, issue_id))
-    conn.commit()
-    close_db()
-    return jsonify({'success': True})
-
-
-# ========== Geolocation Analytics - Handled by analytics_bp
-
-# ========== 问题管理 API (Migrated to task_routes) ==========
-
-# ========== 医疗设备管理 API (Migrated to task_routes/project_routes) ==========
+# ========== 问题管理 API (已迁移至 project_routes.py) ==========
 
 
 # ========== Gantt Chart Data - Handled by analytics_bp

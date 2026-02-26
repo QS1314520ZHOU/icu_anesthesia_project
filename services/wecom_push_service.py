@@ -81,12 +81,15 @@ class WeComPushService:
             else:
                 logger.warning("项目 %d 的经理未绑定企业微信，尝试 Webhook 兜底", project_id)
         
-        # 兜底：推送到企微群
-        from services.monitor_service import monitor_service
-        success, msg = monitor_service.send_wecom_message(f"{emoji} {title}", content, 'markdown')
-        if success:
-            return True, "经理未绑定，已通过 Webhook 兜底推送到群"
-        return False, f"所有推送渠道均失败: {msg}"
+        # 兜底：仅对高危预警推送到企微群，避免普通消息刷屏
+        if severity == "high":
+            from services.monitor_service import monitor_service
+            success, msg = monitor_service.send_wecom_message(f"{emoji} {title}", content, 'markdown')
+            if success:
+                return True, "经理未绑定，已通过 Webhook 兜底推送到群"
+            return False, f"所有推送渠道均失败: {msg}"
+        
+        return False, "项目经理未绑定企微，且非高危预警已跳过群兜底"
     
     def push_daily_report_card(self, project_id: int, report_content: str, report_date: str):
         """以模板卡片形式推送日报给项目成员"""
@@ -215,13 +218,15 @@ class WeComPushService:
             else:
                 logger.warning("项目 %d 没找到关联的企微成员，尝试 Webhook 兜底", project_id)
         
-        # 兜底：通过 Webhook 推送到群
-        from services.monitor_service import monitor_service
-        success, msg = monitor_service.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
-        if success:
-            return True, "已通过 Webhook 兜底推送到群"
+        # 兜底：仅对 'danger' 级别的告警推送到企微群
+        if notification_type == 'danger':
+            from services.monitor_service import monitor_service
+            success, msg = monitor_service.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
+            if success:
+                return True, "已通过 Webhook 兜底推送到群"
+            return False, f"Webhook 推送失败: {msg}"
             
-        return False, f"所有推送渠道均失败: {msg}"
+        return False, "未找到关联企微成员，且非紧急告警已跳过群兜底"
     
     # ===== 闲置催办升级 =====
     

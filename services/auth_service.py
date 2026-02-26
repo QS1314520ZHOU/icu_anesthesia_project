@@ -108,6 +108,26 @@ class AuthService:
         except Exception as e:
             return {"success": False, "message": f"自动注册失败: {str(e)}"}
 
+    def bind_wecom(self, user_id: int, wecom_userid: str) -> dict:
+        """为现有用户绑定企微ID"""
+        conn = get_db()
+        # 1. 检查该企微ID是否已被其他用户占用
+        existing = conn.execute('SELECT id, display_name FROM users WHERE wecom_userid = ?', (wecom_userid,)).fetchone()
+        if existing:
+            if existing['id'] == user_id:
+                return {"success": True, "message": "已绑定"}
+            return {"success": False, "message": f"该企微账号已被用户 {existing['display_name']} 绑定"}
+        
+        # 2. 检查当前用户是否已经绑定了其他企微ID
+        user = conn.execute('SELECT wecom_userid FROM users WHERE id = ?', (user_id,)).fetchone()
+        if user and user['wecom_userid'] and user['wecom_userid'] != wecom_userid:
+             return {"success": False, "message": f"您的账号已绑定了其他企微ID ({user['wecom_userid']})，请先解绑或联系管理员"}
+
+        # 3. 执行绑定
+        conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (wecom_userid, user_id))
+        conn.commit()
+        return {"success": True, "message": "绑定成功"}
+
     def __init__(self):
         self._ensure_tables()
     
