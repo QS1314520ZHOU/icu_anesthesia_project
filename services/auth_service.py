@@ -222,7 +222,7 @@ class AuthService:
         password_hash = self._hash_password(password)
         
         user = conn.execute('''
-            SELECT id, username, display_name, role, is_active
+            SELECT id, username, display_name, role, is_active, wecom_userid
             FROM users WHERE username = ? AND password_hash = ?
         ''', (username, password_hash)).fetchone()
         
@@ -253,7 +253,8 @@ class AuthService:
                 "username": user['username'],
                 "display_name": user['display_name'],
                 "role": user['role'],
-                "role_name": ROLES.get(user['role'], {}).get('name', '未知')
+                "role_name": ROLES.get(user['role'], {}).get('name', '未知'),
+                "wecom_userid": user['wecom_userid']
             }
         }
     
@@ -271,7 +272,7 @@ class AuthService:
         
         conn = get_db()
         result = conn.execute('''
-            SELECT u.id, u.username, u.display_name, u.role, t.expires_at
+            SELECT u.id, u.username, u.display_name, u.role, u.wecom_userid, t.expires_at
             FROM user_tokens t
             JOIN users u ON t.user_id = u.id
             WHERE t.token = ? AND u.is_active = 1
@@ -291,6 +292,7 @@ class AuthService:
             "username": result['username'],
             "display_name": result['display_name'],
             "role": result['role'],
+            "wecom_userid": result['wecom_userid'],
             "permissions": ROLES.get(result['role'], {}).get('permissions', [])
         }
     
