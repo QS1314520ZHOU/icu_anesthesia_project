@@ -4,7 +4,14 @@ scheduler_service.py - 自动日报/周报定时生成与归档服务
 使用 threading.Timer 实现轻量级定时调度（零依赖）:
 - 每日 22:00 为所有活跃项目自动生成日报
 - 每周五 22:30 为所有活跃项目自动生成周报
+- 每日 08:30 推送晨会简报到企微群
+- 每日 09:00 运行项目哨兵扫描（逾期、高危问题检测 → 推送给项目经理）
 - AI 失败时兜底保存纯数据摘要
+
+⚠️ 部署注意事项:
+  - threading.Timer 在进程被 OOM kill 或 worker 重启后不会自动恢复
+  - 多 worker 部署时 (gunicorn --workers > 1) 会导致定时任务多次执行
+  - 推荐: gunicorn --workers 1 --threads 4 (单 worker 多线程) 或 --preload
 """
 
 import threading

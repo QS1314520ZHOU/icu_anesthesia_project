@@ -101,14 +101,14 @@ class MonitorService:
         """异步发送通知（WeCom + Email）"""
         def _send():
             if NOTIFICATION_CONFIG.get('ENABLE_WECOM'):
-                # 如果是项目相关通知，进行定向推送
+                # 如果是项目相关通知，定向推送给项目经理个人
                 if project_id:
                     from services.wecom_push_service import wecom_push_service
-                    success, msg = wecom_push_service.push_project_alert(project_id, title, content, notification_type)
-                    
-                    # 只有在确定的环境错误时（如未启用企业微信），才考虑降级，但这里的目标是避免全员推送。
-                    # 如果找不到成员，就干脆不发全员推送，所以这里不做退化到 send_wecom_message。
+                    severity_map = {'danger': 'high', 'warning': 'medium', 'info': 'low'}
+                    severity = severity_map.get(notification_type, 'low')
+                    wecom_push_service.push_warning_to_manager(project_id, title, content, severity)
                 else:
+                    # 非项目通知 → 推送到群
                     type_emoji = {'danger': '🚨', 'warning': '⚠️', 'info': 'ℹ️'}.get(notification_type, 'ℹ️')
                     self.send_wecom_message(f"{type_emoji} {title}", content, 'markdown')
             if NOTIFICATION_CONFIG.get('ENABLE_EMAIL'):

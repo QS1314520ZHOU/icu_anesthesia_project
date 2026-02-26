@@ -66,18 +66,27 @@ class WeComPushService:
     # ===== 预警定向推送 =====
     
     def push_warning_to_manager(self, project_id: int, title: str, content: str, severity: str = "high"):
-        """将预警推送给项目经理个人"""
-        if not wecom_service.is_enabled:
-            return
-        
-        userid = self._get_project_manager_userid(project_id)
-        if not userid:
-            logger.warning("项目 %d 的经理未绑定企业微信，跳过定向推送", project_id)
-            return
-        
+        """将预警推送给项目经理个人（兜底推群）"""
         emoji = {"high": "🚨", "medium": "⚠️", "low": "ℹ️"}.get(severity, "ℹ️")
-        md_content = f"{emoji} **{title}**\n\n{content}\n\n> 点击查看详情"
-        wecom_service.send_markdown(userid, md_content)
+        
+        # 尝试通过自建应用定向推送给项目经理
+        if wecom_service.is_enabled:
+            userid = self._get_project_manager_userid(project_id)
+            if userid:
+                md_content = f"{emoji} **{title}**\n\n{content}\n\n> 点击查看详情"
+                result = wecom_service.send_markdown(userid, md_content)
+                if result.get('errcode') == 0:
+                    return True, "已定向推送给项目经理"
+                logger.warning("项目 %d 经理定向推送失败: %s，尝试 Webhook 兜底", project_id, result)
+            else:
+                logger.warning("项目 %d 的经理未绑定企业微信，尝试 Webhook 兜底", project_id)
+        
+        # 兜底：推送到企微群
+        from services.monitor_service import monitor_service
+        success, msg = monitor_service.send_wecom_message(f"{emoji} {title}", content, 'markdown')
+        if success:
+            return True, "经理未绑定，已通过 Webhook 兜底推送到群"
+        return False, f"所有推送渠道均失败: {msg}"
     
     def push_daily_report_card(self, project_id: int, report_content: str, report_date: str):
         """以模板卡片形式推送日报给项目成员"""
