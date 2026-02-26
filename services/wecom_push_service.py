@@ -206,6 +206,13 @@ class WeComPushService:
         result = wecom_service.send_markdown(userids, md_content)
         if result.get('errcode') == 0:
             return True, "项目定向推送成功"
+        
+        # 如果定向推送失败（如 userid 不存在），尝试通过 Webhook 全局推送
+        from services.monitor_service import monitor_service
+        success, msg = monitor_service.send_wecom_message(title, content, 'markdown')
+        if success:
+            return True, "定向推送失败，已通过 Webhook 兜底推送全员"
+            
         return False, f"企微接口返回失败: {result}"
     
     # ===== 闲置催办升级 =====

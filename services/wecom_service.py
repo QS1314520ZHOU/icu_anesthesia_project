@@ -82,10 +82,17 @@ class WeComService:
 
             if WECOM_CONFIG.get("ENABLED"):
                 self._init_crypto()
+                # 同步更新通知开关，确保 monitor_service 知道可以尝试 Webhook 兜底
+                NOTIFICATION_CONFIG['ENABLE_WECOM'] = True
                 logger.info("企业微信自建应用服务已重载 (CorpID: %s, AgentID: %s)", 
                            WECOM_CONFIG.get("CORP_ID", "")[:6] + "***", WECOM_CONFIG.get("AGENT_ID"))
             else:
                 self._crypto = None
+                # 如果禁用了自建应用，但只要有 Webhook，也可以允许通知
+                if NOTIFICATION_CONFIG.get('WECOM_WEBHOOK'):
+                    NOTIFICATION_CONFIG['ENABLE_WECOM'] = True
+                else:
+                    NOTIFICATION_CONFIG['ENABLE_WECOM'] = False
                 logger.info("企业微信自建应用服务已禁用")
                 
         except Exception as e:

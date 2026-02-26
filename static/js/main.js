@@ -2268,15 +2268,57 @@ async function loadWorklogs(pid) {
         return;
     }
     container.innerHTML = logs.slice(0, 20).map(l => `
-                <div class="worklog-item">
+                <div class="worklog-item" id="worklog-${l.id}">
                     <div class="worklog-header">
-                        <span class="worklog-date">${l.log_date}</span>
-                        <span class="worklog-meta">${l.member_name || '未知'} | ${l.work_type} | ${l.work_hours}h</span>
+                        <div style="display:flex; flex-direction:column; gap:2px;">
+                            <span class="worklog-date">${l.log_date}</span>
+                            <span class="worklog-meta">${l.member_name || '未知'} | ${l.work_type} | ${l.work_hours}h</span>
+                        </div>
+                        <div class="worklog-actions" style="display:flex; gap:8px;">
+                            <button class="btn btn-outline btn-xs" onclick="editWorklog(${l.id}, ${pid})">编辑</button>
+                            <button class="btn btn-danger btn-xs" onclick="deleteWorklog(${l.id}, ${pid})">删除</button>
+                        </div>
                     </div>
                     <div class="worklog-content">${l.work_content || '无内容'}</div>
                     ${l.issues_encountered ? `<div style="margin-top:8px;color:var(--danger);font-size:12px;">问题: ${l.issues_encountered}</div>` : ''}
                 </div>
             `).join('');
+}
+
+async function deleteWorklog(id, pid) {
+    if (!confirm('确定删除此条工作日志吗？')) return;
+    try {
+        await api.delete(`/worklogs/${id}`);
+        if (window.showToast) showToast('日志已删除', 'success');
+        loadWorklogs(pid);
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+let currentEditingLogId = null;
+
+async function editWorklog(id, pid) {
+    currentEditingLogId = id;
+    const item = document.querySelector(`#worklog-${id}`);
+    if (!item) return;
+
+    // We don't have a single log fetch, so we find it in the list or just use what we have in DOM
+    // For better reliability, let's fetch the list again or find the data
+    const logs = await api.get(`/projects/${pid}/worklogs`);
+    const log = logs.find(l => l.id === id);
+    if (!log) return;
+
+    // Switch modal to edit mode
+    document.getElementById('worklogModalTitle').textContent = '📝 编辑工作日志';
+    document.getElementById('logDate').value = log.log_date;
+    document.getElementById('workType').value = log.work_type || '现场';
+    document.getElementById('workHours').value = log.work_hours || 8;
+    document.getElementById('workContent').value = log.work_content || '';
+    document.getElementById('issuesEncountered').value = log.issues_encountered || '';
+    document.getElementById('tomorrowPlan').value = log.tomorrow_plan || '';
+
+    showModal('worklogModal');
 }
 
 async function loadDocuments(pid) {
@@ -3969,6 +4011,8 @@ function showDepartureModal() {
 }
 
 function showWorklogModal() {
+    currentEditingLogId = null;
+    document.getElementById('worklogModalTitle').textContent = '📝 填写工作日志';
     document.getElementById('worklogForm').reset();
     document.getElementById('logDate').value = new Date().toISOString().split('T')[0];
     showModal('worklogModal');
@@ -4110,9 +4154,20 @@ async function saveWorklog() {
         tomorrow_plan: document.getElementById('tomorrowPlan').value
     };
     if (!data.work_content) { alert('请填写工作内容'); return; }
-    await api.post(`/projects/${currentProjectId}/worklogs`, data);
-    closeModal('worklogModal');
-    loadWorklogs(currentProjectId);
+
+    try {
+        if (currentEditingLogId) {
+            await api.put(`/worklogs/${currentEditingLogId}`, data);
+            if (window.showToast) showToast('日志已更新', 'success');
+        } else {
+            await api.post(`/projects/${currentProjectId}/worklogs`, data);
+            if (window.showToast) showToast('日志已保存', 'success');
+        }
+        closeModal('worklogModal');
+        loadWorklogs(currentProjectId);
+    } catch (e) {
+        alert('保存失败: ' + e.message);
+    }
 }
 
 async function saveExpense() {
@@ -6475,18 +6530,20 @@ async function parseAiWorklog() {
     }
 
     const btn = document.getElementById('btnAiParse');
+    const originalContent = btn.innerHTML;
     btn.innerHTML = '<span class="loading-spinner-sm"></span> AI 正在分析...';
     btn.disabled = true;
 
     try {
         const res = await api.post('/ai/parse-log', { raw_text: rawText });
-        if (res.success) {
+        // api.post returns data portion directly if success is true
+        if (res) {
             closeModal('aiWorklogModal');
-            fillWorklogForm(res.data);
+            fillWorklogForm(res);
             showModal('worklogModal');
             if (window.showToast) showToast('AI 识别成功，请确认后保存', 'success');
         } else {
-            document.getElementById('aiWorklogError').textContent = '识别失败: ' + (res.message || '未知错误');
+            document.getElementById('aiWorklogError').textContent = '识别失败: AI 未返回有效数据';
             document.getElementById('aiWorklogError').style.display = 'block';
         }
     } catch (e) {
@@ -6494,7 +6551,7 @@ async function parseAiWorklog() {
         document.getElementById('aiWorklogError').textContent = '请求失败: ' + e.message;
         document.getElementById('aiWorklogError').style.display = 'block';
     } finally {
-        btn.innerHTML = '🚀 智能识别并填报';
+        btn.innerHTML = originalContent;
         btn.disabled = false;
     }
 }
