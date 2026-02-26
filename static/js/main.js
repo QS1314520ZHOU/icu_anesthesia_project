@@ -1,3 +1,4 @@
+// ICUPM_VERSION_5
 // ========== 全局变量 ==========
 let currentProjectId = null;
 let currentProject = null;
