@@ -1960,7 +1960,9 @@ def user_login():
         result = auth_service.login(username, password)
         if result['success']:
             # 设置 Cookie
-            response = make_response(api_response(True, data=result.get('user'), message="登录成功"))
+            user_data = result.get('user', {})
+            user_data['token'] = result.get('token')
+            response = make_response(api_response(True, data=user_data, message="登录成功"))
             response.set_cookie('auth_token', result['token'], httponly=True, max_age=86400)
             return response
         return api_response(False, message=result.get('message', '登录失败'))

@@ -5005,11 +5005,10 @@ async function checkAuth() {
     const header = document.querySelector('.header');
 
     try {
-        // 使用 silent 模式避免弹出 alert
-        const response = await fetch('/api/auth/me');
-        const res = await response.json();
-        if (res.success && res.data) {
-            currentUser = res.data;
+        // 使用 api 对象进行验证，它会自动带上 localStorage 里的 token
+        const userData = await api.get('/auth/me', { silent: true });
+        if (userData) {
+            currentUser = userData;
             // 显示主界面
             if (mainContainer) mainContainer.style.display = 'flex';
             if (header) header.style.display = 'flex';
@@ -5017,12 +5016,10 @@ async function checkAuth() {
             // 加载项目列表
             loadProjects();
         } else {
-            // 未登录，隐藏主界面，显示登录弹窗
-            currentUser = null;
-            if (mainContainer) mainContainer.style.display = 'none';
-            showFullPageLogin();
+            throw new Error('No user data');
         }
     } catch (e) {
+        console.log('[AUTH] Not logged in or session expired');
         currentUser = null;
         if (mainContainer) mainContainer.style.display = 'none';
         showFullPageLogin();
@@ -5097,6 +5094,12 @@ async function doOverlayLogin() {
     try {
         const userData = await api.post('/auth/login', { username, password }, { silent: true });
         currentUser = userData;
+
+        // 如果返回了 token，保存起来（支持双重验证）
+        if (userData && userData.token) {
+            localStorage.setItem('token', userData.token);
+        }
+
         // 隐藏登录遮罩，显示主界面
         const loginOverlay = document.getElementById('loginOverlay');
         if (loginOverlay) loginOverlay.style.display = 'none';
@@ -5325,9 +5328,10 @@ async function doRegister() {
 
 async function doLogout() {
     try {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        await api.post('/auth/logout', {}, { silent: true });
     } catch (e) { }
     currentUser = null;
+    localStorage.removeItem('token');
     // 刷新页面以更新状态
     window.location.reload();
 }

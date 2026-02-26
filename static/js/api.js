@@ -7,6 +7,10 @@ class ApiClient {
     async request(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
         const defaultHeaders = {};
+        const token = localStorage.getItem('token');
+        if (token) {
+            defaultHeaders['Authorization'] = `Bearer ${token}`;
+        }
 
         // Only set Content-Type to JSON if body is NOT FormData
         if (options.body && !(options.body instanceof FormData)) {
