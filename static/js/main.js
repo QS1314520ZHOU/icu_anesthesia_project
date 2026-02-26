@@ -63,6 +63,14 @@ function openModal(modalId) {
         console.error('[DEBUG] openModal failed: element not found', modalId);
         return;
     }
+
+    // Reset forms when opening to clear previous data (especially for Issue/Device modals)
+    const forms = el.querySelectorAll('form');
+    forms.forEach(f => f.reset());
+    // Special case for standalone textareas not in forms if any
+    const textareas = el.querySelectorAll('textarea');
+    textareas.forEach(t => t.value = '');
+
     el.classList.add('show');
     el.style.display = 'flex'; // Ensure visibility
     console.log('[DEBUG] openModal success:', modalId);
@@ -1033,21 +1041,34 @@ async function loadProjectDetail(projectId, preserveTab = false) {
     loadStageBaselines();
 
 
-    if (preserveTab && previousTab !== 'gantt') {
+    if (preserveTab && previousTab) {
         setTimeout(() => {
-            const tabMap = {
-                'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
-                'flow': 5, 'devices': 6, 'issues': 7, 'communications': 8, 'departures': 9,
-                'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13, 'acceptance': 14,
-                'satisfaction': 15, 'dependencies': 16, 'standup': 17, 'deviation': 18,
-                'interfaceSpec': 19, 'financials': 20
-            };
-            const tabs = document.querySelectorAll('.tabs .tab');
-            const tabIndex = tabMap[previousTab];
-            if (tabIndex !== undefined && tabs[tabIndex]) {
-                tabs[tabIndex].click();
+            // More robust method: search for the tab that matches the previousTab name
+            const tabs = document.querySelectorAll('#projectDetailView .tabs .tab');
+            let found = false;
+            tabs.forEach(tab => {
+                const onclickStr = tab.getAttribute('onclick') || '';
+                if (onclickStr.includes(`'${previousTab}'`)) {
+                    tab.click();
+                    found = true;
+                }
+            });
+
+            // Fallback to index if string match fails (legacy support)
+            if (!found && previousTab !== 'gantt') {
+                const tabMap = {
+                    'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
+                    'flow': 5, 'devices': 6, 'issues': 7, 'communications': 8, 'departures': 9,
+                    'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13, 'acceptance': 14,
+                    'satisfaction': 15, 'dependencies': 16, 'standup': 17, 'deviation': 18,
+                    'interfaceSpec': 19, 'financials': 20
+                };
+                const tabIndex = tabMap[previousTab];
+                if (tabIndex !== undefined && tabs[tabIndex]) {
+                    tabs[tabIndex].click();
+                }
             }
-        }, 50);
+        }, 100);
     }
 }
 
@@ -5136,9 +5157,9 @@ function updateUserUI() {
 }
 
 /**
- * 开始企微绑定流程
+ * 开始企办绑定流程 (Exposed globally)
  */
-function startWecomBind() {
+window.startWecomBind = function () {
     if (!currentUser) {
         toast('请先登录');
         return;
