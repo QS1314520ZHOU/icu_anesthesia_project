@@ -442,9 +442,19 @@ class AIInsightService:
             if start != -1 and end != -1:
                 cleaned = cleaned[start:end+1]
                 result = json.loads(cleaned)
+                
+                # 直接包含 professional
                 if 'professional' in result:
                     print(f"[DEBUG] Chaser - parsed OK, keys: {list(result.keys())}")
                     return result
+                
+                # AI 可能把三种风格嵌套在某个子字段里，如 scripts/styles/messages
+                for key, val in result.items():
+                    if isinstance(val, dict) and 'professional' in val:
+                        print(f"[DEBUG] Chaser - 在 '{key}' 子字段找到, keys: {list(val.keys())}")
+                        return val
+                
+                print(f"[DEBUG] Chaser - JSON 结构不匹配, keys: {list(result.keys())}")
             
             # JSON 解析失败，用 AI 的文本内容构造结构化结果
             print(f"[DEBUG] Chaser - AI 未返回JSON，用原始文本构造结果")
