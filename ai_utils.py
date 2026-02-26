@@ -80,11 +80,15 @@ def call_ai(prompt: str, task_type: str = 'analysis', system_prompt: str = None)
                 if response.status_code == 200:
                     # 处理流式响应并聚合成完整文本
                     full_content = ""
+                    line_count = 0
                     try:
                         for line in response.iter_lines():
                             if not line:
                                 continue
+                            line_count += 1
                             line_decode = line.decode('utf-8').strip()
+                            if line_count <= 3:
+                                print(f"[AI-UTILS] {model} 原始行{line_count}: {line_decode[:150]}")
                             if line_decode.startswith('data: '):
                                 data_str = line_decode[6:].strip()
                                 if data_str == '[DONE]':
@@ -96,18 +100,40 @@ def call_ai(prompt: str, task_type: str = 'analysis', system_prompt: str = None)
                                     # 某些 API 可能是 choices[0].text (如果是旧版)
                                     if not content:
                                         content = data.get('choices', [{}])[0].get('text', '')
+                                    # 某些 API 可能是 choices[0].message.content (非流式格式)
+                                    if not content:
+                                        content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
                                     full_content += content
                                 except:
                                     continue
+                        
+                        print(f"[AI-UTILS] {model} 流式读取完成: {line_count}行, 内容长度: {len(full_content)}")
                         
                         if full_content:
                             # 标记成功
                             ai_manager.mark_endpoint_success(endpoint)
                             return full_content
                         else:
-                            # 如果流读完了但没内容，可能是不支持流或者格式不对
-                            logger.warning(f"端点 {endpoint.name} 流式读取完成但未获取到内容")
-                            # 尝试非流式兜底（通常不会走到这里，但作为安全措施）
+                            # 流式解析失败，尝试非流式兜底
+                            logger.warning(f"端点 {endpoint.name} 模型 {model} 流式读取完成但未获取到内容，尝试非流式请求...")
+                            try:
+                                payload_no_stream = dict(payload)
+                                payload_no_stream["stream"] = False
+                                resp2 = requests.post(
+                                    endpoint.base_url,
+                                    headers=headers,
+                                    data=json.dumps(payload_no_stream),
+                                    timeout=ai_manager.timeout
+                                )
+                                if resp2.status_code == 200:
+                                    result = resp2.json()
+                                    content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                                    if content:
+                                        print(f"[AI-UTILS] {model} 非流式兜底成功! 返回 {len(content)} 字符")
+                                        ai_manager.mark_endpoint_success(endpoint)
+                                        return content
+                            except Exception as e2:
+                                logger.warning(f"非流式兜底也失败: {e2}")
                     except Exception as e:
                         logger.error(f"解析流式响应异常: {str(e)}")
 

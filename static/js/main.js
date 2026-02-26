@@ -4374,12 +4374,15 @@ async function saveIssue() {
         severity: document.getElementById('issueSeverity').value,
         description: document.getElementById('issueDesc').value
     };
+    console.log('[DEBUG] saveIssue payload:', JSON.stringify(data));
     if (!data.description) { alert('请填写问题描述'); return; }
 
     isSavingIssue = true;
     try {
         await api.post(`/projects/${currentProjectId}/issues`, data);
         closeModal('issueModal');
+        // Reset form after successful save
+        document.getElementById('issueDesc').value = '';
         loadProjectDetail(currentProjectId, true);
     } finally {
         isSavingIssue = false;
@@ -6761,10 +6764,11 @@ async function loadStaleItems() {
     container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
 
     try {
-        const res = await api.get(`/projects/${currentProjectId}/stale-items`);
-        if (res.success && res.data && res.data.length > 0) {
-            currentStaleItems = res.data;
-            renderStaleItems(res.data);
+        const items = await api.get(`/projects/${currentProjectId}/stale-items`);
+        // api.get() already unwraps {success, data} → returns data directly (an array)
+        if (Array.isArray(items) && items.length > 0) {
+            currentStaleItems = items;
+            renderStaleItems(items);
         } else {
             container.innerHTML = '<div class="empty-state">暂无滞后项</div>';
             currentStaleItems = [];
@@ -6806,18 +6810,27 @@ async function generateChaser(index) {
         });
     }
 
-    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div> 正在生成多维话术 (GPT-4)...</div>';
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div> AI 正在生成催办话术（思考模型较慢，请耐心等待）...</div>';
 
     try {
-        const res = await api.post('/ai/chaser/generate', item);
-        if (res.professional) {
+        // 120秒超时保护（思考模型需要更长时间）
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('AI 生成超时(120s)，请检查AI模型配置或稍后重试')), 120000)
+        );
+        const res = await Promise.race([
+            api.post('/ai/chaser/generate', item),
+            timeout
+        ]);
+        console.log('[DEBUG] chaser/generate response:', res);
+        if (res && res.professional) {
             lastGeneratedChaser = res;
             renderChaserStyles('professional');
         } else {
-            container.innerHTML = `<div class="error-text">生成格式异常</div>`;
+            container.innerHTML = `<div class="error-text" style="color:#ef4444;padding:20px;text-align:center;">生成格式异常<br><small style="color:#9ca3af;">${JSON.stringify(res).substring(0, 200)}</small></div>`;
         }
     } catch (e) {
-        container.innerHTML = `<div class="error-text">请求异常: ${e.message}</div>`;
+        console.error('[DEBUG] chaser/generate error:', e);
+        container.innerHTML = `<div class="error-text" style="color:#ef4444;padding:20px;text-align:center;">请求异常: ${e.message}</div>`;
     }
 }
 

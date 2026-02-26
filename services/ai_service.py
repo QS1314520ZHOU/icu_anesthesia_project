@@ -1,9 +1,12 @@
 import requests
 import json
+import logging
 from datetime import datetime, timedelta
 from ai_config import ai_manager, TaskType
 from database import DatabasePool
 from rag_service import rag_service
+
+logger = logging.getLogger(__name__)
 
 class AIService:
     @staticmethod
@@ -17,7 +20,11 @@ class AIService:
                 break
                 
         sequence = ai_manager.get_call_sequence(task_enum)
-        errors = []
+        print(f"[AI] 获取到 {len(sequence)} 个端点序列, task_type={task_type}")
+        
+        if not sequence:
+            print("[AI] 无可用端点！所有端点可能已被熔断")
+            return None
         
         for item in sequence:
             endpoint = item["endpoint"]
@@ -31,6 +38,7 @@ class AIService:
             
             for model in models:
                 try:
+                    print(f"[AI] 尝试 {endpoint.name} / {model}...")
                     payload = {
                         "model": model,
                         "messages": [
@@ -41,21 +49,29 @@ class AIService:
                         "max_tokens": 4096
                     }
                     
+                    # 先尝试流式（notion端点要求stream=true）
                     response = requests.post(
                         endpoint.base_url, 
                         headers=headers, 
-                        json=payload, 
+                        json={**payload, "stream": True}, 
                         timeout=ai_manager.timeout,
                         stream=True
                     )
                     
+                    print(f"[AI] {model} -> HTTP {response.status_code}")
+                    
                     if response.status_code == 200:
                         full_content = ""
+                        line_count = 0
                         try:
                             for line in response.iter_lines():
                                 if not line:
                                     continue
+                                line_count += 1
                                 line_decode = line.decode('utf-8').strip()
+                                # 打印前5行原始内容，用于调试流式格式
+                                if line_count <= 5:
+                                    print(f"[AI] {model} 原始行{line_count}: {line_decode[:200]}")
                                 if line_decode.startswith('data: '):
                                     data_str = line_decode[6:].strip()
                                     if data_str == '[DONE]':
@@ -65,24 +81,47 @@ class AIService:
                                         content = data.get('choices', [{}])[0].get('delta', {}).get('content', '')
                                         if not content:
                                             content = data.get('choices', [{}])[0].get('text', '')
+                                        if not content:
+                                            content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
                                         full_content += content
                                     except:
                                         continue
                             
+                            print(f"[AI] {model} 流式完成: {line_count}行, {len(full_content)}字符")
                             if full_content:
                                 ai_manager.mark_endpoint_success(endpoint)
                                 return full_content
-                            else:
-                                # Fallback if streaming returned nothing
-                                ai_manager.mark_endpoint_error(endpoint)
                         except Exception as e:
-                            logger.error(f"解析流式响应异常: {str(e)}")
-                            ai_manager.mark_endpoint_error(endpoint)
+                            print(f"[AI] {model} 流式解析异常: {str(e)}")
+                    elif response.status_code == 500 and 'stream=true' not in response.text:
+                        # 端点不支持流式，尝试非流式
+                        try:
+                            resp2 = requests.post(
+                                endpoint.base_url, headers=headers,
+                                json={**payload, "stream": False},
+                                timeout=ai_manager.timeout
+                            )
+                            if resp2.status_code == 200:
+                                result = resp2.json()
+                                c = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                                if c:
+                                    print(f"[AI] {model} 非流式成功! 返回 {len(c)} 字符")
+                                    ai_manager.mark_endpoint_success(endpoint)
+                                    return c
+                        except:
+                            pass
+                        print(f"[AI] {model} 非流式也失败")
                     else:
-                        ai_manager.mark_endpoint_error(endpoint)
+                        err_body = response.text[:300] if response.text else "空"
+                        print(f"[AI] {model} 失败 HTTP {response.status_code}: {err_body}")
                 except Exception as e:
-                    logger.error(f"AI 调用异常 ({endpoint.name}): {str(e)}")
-                    ai_manager.mark_endpoint_error(endpoint)
+                    print(f"[AI] {model} 请求异常: {str(e)}")
+            
+            # 只有当该端点的所有模型都失败时，才标记一次端点错误
+            ai_manager.mark_endpoint_error(endpoint)
+            print(f"[AI] 端点 {endpoint.name} 所有模型失败，错误计数: {endpoint.error_count}")
+        
+        print("[AI] 所有端点和模型均失败，返回 None")
         return None
 
     @staticmethod

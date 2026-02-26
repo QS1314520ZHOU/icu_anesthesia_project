@@ -347,9 +347,30 @@ class ProjectService:
     @staticmethod
     def update_issue(issue_id, data):
         with DatabasePool.get_connection() as conn:
-            resolved_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S') if data.get('status') == '已解决' else None
-            conn.execute('UPDATE issues SET issue_type=?, description=?, severity=?, status=?, resolved_at=? WHERE id=?',
-                         (data.get('issue_type'), data.get('description'), data.get('severity'), data.get('status'), resolved_at, issue_id))
+            # Dynamically build SET clause to only update provided fields
+            set_parts = []
+            params = []
+            
+            updatable_fields = ['issue_type', 'description', 'severity', 'status']
+            for field in updatable_fields:
+                if field in data:
+                    set_parts.append(f'{field}=?')
+                    params.append(data[field])
+            
+            # Handle resolved_at timestamp
+            if data.get('status') == '已解决':
+                set_parts.append('resolved_at=?')
+                params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            elif 'status' in data and data['status'] != '已解决':
+                set_parts.append('resolved_at=?')
+                params.append(None)
+            
+            if not set_parts:
+                return True
+            
+            params.append(issue_id)
+            sql = f'UPDATE issues SET {", ".join(set_parts)} WHERE id=?'
+            conn.execute(sql, tuple(params))
             conn.commit()
             return True
 

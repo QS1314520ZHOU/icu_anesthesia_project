@@ -67,7 +67,15 @@ class AIInsightService:
 3. ⚡ **当日必办**：给出3条“如果不做就会导致延期”的极其具体的指令。
 注意：直接输出内容，不要任何前缀或后缀。"""
 
-                user_content = f"""项目名称: {project['project_name']}
+                user_content = f"""你是一名世界顶级 ICU 医疗信息化项目总监。请根据以下项目数据进行深度穿透分析。
+严禁使用"您好"、"有什么可以帮您"等客套话，严禁询问用户需求，直接输出分析结果。
+
+格式要求（严格执行）：
+1. 🎯 **现状定性**：一句话说明项目当前的核心基调。
+2. 🚩 **红线预警**：仅列出最致命的1个风险。
+3. ⚡ **当日必办**：给出3条"如果不做就会导致延期"的极其具体的指令。
+
+项目名称: {project['project_name']}
 当前状态: {project['status']} (进度: {project['progress']}%)
 
 【近期日报摘要】
@@ -75,7 +83,8 @@ class AIInsightService:
 
 【待办任务清单】
 {task_text}
-"""
+
+请直接输出分析结果，不要任何前缀或后缀："""
 
                 # 6. 调用 AI
                 advice = ai_service.call_ai_api(system_prompt, user_content, task_type="analysis")
@@ -365,35 +374,97 @@ class AIInsightService:
     @staticmethod
     def generate_chaser_message(item_details):
         """生成支持多风格的催单/提醒话术"""
-        system_prompt = """你是一位情商极高的项目交付专家。请根据提供的待办事项，生成三种不同风格的催单/提醒消息。
-    要求：
-    1. **Professional (专业型)**: 语气客观、专业，强调影响力和计划性，适合正式场合。
-    2. **Soft (委婉型)**: 语气亲和、关怀，先肯定对方再提出提醒，适合日常沟通。
-    3. **Direct (果敢型)**: 语气直接、高效，清晰指出延期后果，适合紧急或多次提醒未果。
+        system_prompt = """【重要】你必须且只能输出一个合法的 JSON 对象，不允许输出任何其他文字、解释、或 markdown。
 
-    输出必须是合法的 JSON 格式：
-    {
-      "professional": {"subject": "标题", "content": "正文"},
-      "soft": {"subject": "标题", "content": "正文"},
-      "direct": {"subject": "标题", "content": "正文"}
-    }
-    """
+根据待办事项生成三种催单消息，直接输出如下 JSON（不要加```json标记）：
+{"professional":{"subject":"专业标题","content":"专业正文"},"soft":{"subject":"委婉标题","content":"委婉正文"},"direct":{"subject":"果敢标题","content":"果敢正文"}}
+
+风格说明：professional=客观专业，soft=亲和关怀，direct=直接高效。每条content限100字以内。"""
+
         import json
+        title = item_details.get('title', '未知事项')
+        reason = item_details.get('reason', '需要跟进')
         try:
-            user_content = f"事项详情: {json.dumps(item_details, ensure_ascii=False)}"
-            ai_resp = ai_service.call_ai_api(system_prompt, user_content, task_type="code")
+            user_content = f"""请为以下滞后事项生成三种风格的催单消息，只返回JSON，不要返回其他内容。
+
+滞后事项：{title}
+滞后原因：{reason}
+事项类型：{item_details.get('type', 'issue')}
+
+请直接输出JSON：{{"professional":{{"subject":"标题","content":"正文"}},"soft":{{"subject":"标题","content":"正文"}},"direct":{{"subject":"标题","content":"正文"}}}}"""
+            print(f"[DEBUG] Chaser - calling AI with 90s timeout...")
             
-            # 清洗 Markdown 代码块
-            if '```' in ai_resp:
-                ai_resp = ai_resp.split('```')[1]
-                if ai_resp.startswith('json'):
-                    ai_resp = ai_resp[4:]
+            # 用线程超时包裹, 防止流式请求无限阻塞
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(ai_service.call_ai_api, system_prompt, user_content, "analysis")
+                try:
+                    ai_resp = future.result(timeout=90)
+                except FuturesTimeoutError:
+                    print("[DEBUG] Chaser - AI call timed out after 90s")
+                    raise ValueError("AI 调用超时(90s)")
             
-            return json.loads(ai_resp.strip())
+            print(f"[DEBUG] Chaser - AI response length: {len(ai_resp) if ai_resp else 'None'}")
+            print(f"[DEBUG] Chaser - AI response preview: {(ai_resp or '')[:200]}")
+            
+            if not ai_resp:
+                raise ValueError("AI 返回为空")
+            
+            # 清洗并提取 JSON
+            cleaned = ai_resp.strip()
+            # 去掉 markdown 代码块
+            if '```' in cleaned:
+                parts = cleaned.split('```')
+                for part in parts[1:]:
+                    p = part.strip()
+                    if p.startswith('json'):
+                        p = p[4:].strip()
+                    if p.startswith('{'):
+                        cleaned = p
+                        break
+            
+            # 提取 JSON 对象
+            start = cleaned.find('{')
+            end = cleaned.rfind('}')
+            if start != -1 and end != -1:
+                cleaned = cleaned[start:end+1]
+                result = json.loads(cleaned)
+                if 'professional' in result:
+                    print(f"[DEBUG] Chaser - parsed OK, keys: {list(result.keys())}")
+                    return result
+            
+            # JSON 解析失败，用 AI 的文本内容构造结构化结果
+            print(f"[DEBUG] Chaser - AI 未返回JSON，用原始文本构造结果")
+            return {
+                "professional": {
+                    "subject": f"关于「{title}」的进度同步",
+                    "content": ai_resp[:150] if ai_resp else f"请关注「{title}」，{reason}。"
+                },
+                "soft": {
+                    "subject": f"温馨提醒：{title}",
+                    "content": f"辛苦了！想跟您同步一下「{title}」的最新情况。目前{reason}，方便的话帮忙看看进展如何？有任何需要支持的地方随时说～"
+                },
+                "direct": {
+                    "subject": f"【紧急】{title} 需立即处理",
+                    "content": f"「{title}」{reason}，已影响项目整体进度。请今日内反馈处理方案，如需协调资源请立即告知。"
+                }
+            }
         except Exception as e:
             logger.error(f"Generate Chaser Error: {e}")
-            fallback = {"subject": f"关于 {item_details.get('title')} 的同步需求", "content": f"请关注：{item_details.get('title')}。原因：{item_details.get('reason')}。请尽快处理。"}
-            return {"professional": fallback, "soft": fallback, "direct": fallback}
+            return {
+                "professional": {
+                    "subject": f"关于「{title}」的进度同步",
+                    "content": f"您好，关于「{title}」事项，{reason}，请协调相关资源尽快推进。如有困难请及时反馈，我们共同制定解决方案。"
+                },
+                "soft": {
+                    "subject": f"温馨提醒：{title}",
+                    "content": f"辛苦了！想跟您同步一下「{title}」的最新情况。目前{reason}，方便的话帮忙看看进展如何？有任何需要支持的地方随时说～"
+                },
+                "direct": {
+                    "subject": f"【紧急】{title} 需立即处理",
+                    "content": f"「{title}」{reason}，已影响项目整体进度。请今日内反馈处理方案，如需协调资源请立即告知。"
+                }
+            }
 
     @staticmethod
     def auto_extract_knowledge(issue_id):
@@ -500,18 +571,45 @@ class AIInsightService:
 关注点：业务领域（如都是ICU）、医院背景（如同一家医院）、项目阶段或风险状况。
 返回 JSON 数组: [{"id": 候选项目ID, "reason": "相似原因简述 (15字以内)"}]"""
 
-                user_content = f"""
+                candidate_json = json.dumps(
+                    [{k: v for k, v in c.items() if k in ['id', 'project_name', 'hospital_name', 'status', 'risk_score']} for c in top_10],
+                    ensure_ascii=False
+                )
+                user_content = f"""你是一个项目组合管理专家。请根据目标项目和候选项目列表，找出最相似的 3 个项目。
+关注点：业务领域（如都是ICU）、医院背景（如同一家医院）、项目阶段或风险状况。
+严禁自我介绍或客套，直接返回JSON数组。
+
 目标项目: {target['project_name']} (医院: {target['hospital_name']}, 状态: {target['status']}, 风险分: {target['risk_score']})
 
 候选列表:
-{json.dumps([{k: v for k, v in c.items() if k in ['id', 'project_name', 'hospital_name', 'status', 'risk_score']} for c in top_10], ensure_ascii=False)}
-"""
+{candidate_json}
+
+请直接输出JSON数组（不要代码块标记）: [{{"id": 候选项目ID, "reason": "相似原因简述(15字以内)"}}]"""
+
                 ai_resp = ai_service.call_ai_api(system_prompt, user_content, task_type="json")
                 
-                if ai_resp.startswith('```json'):
-                    ai_resp = ai_resp.replace('```json', '').replace('```', '')
+                if not ai_resp:
+                    print("[DEBUG] find_similar_projects: AI returned None")
+                    return top_10[:3]  # AI 失败时直接返回粗筛前3
                 
-                ranked_results = json.loads(ai_resp)
+                # 清洗 JSON
+                cleaned = ai_resp.strip()
+                if '```' in cleaned:
+                    parts = cleaned.split('```')
+                    for part in parts[1:]:
+                        p = part.strip()
+                        if p.startswith('json'):
+                            p = p[4:].strip()
+                        if p.startswith('['):
+                            cleaned = p
+                            break
+                
+                start = cleaned.find('[')
+                end = cleaned.rfind(']')
+                if start != -1 and end != -1:
+                    cleaned = cleaned[start:end+1]
+                
+                ranked_results = json.loads(cleaned)
                 
                 # 回填详细信息
                 final_projects = []
