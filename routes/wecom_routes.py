@@ -328,7 +328,10 @@ def oauth_callback():
     if result.get('success'):
         # 重定向到前端，带上 token
         token = result['token']
-        return redirect(f"{home_url}?token={token}")
+        from flask import make_response
+        response = make_response(redirect(f"{home_url}?token={token}"))
+        response.set_cookie('auth_token', token, httponly=True, max_age=86400)
+        return response
     else:
         return api_response(False, message=result.get('message', '登录失败'), code=401)
 
