@@ -287,7 +287,11 @@ def oauth_callback():
             return render_template_string("""
                 <script>
                     alert('绑定失败：请先登录系统再进行绑定');
-                    window.close();
+                    if (window.opener) { window.close(); }
+                    else if (window.parent && window.parent !== window) { 
+                        // If in iframe, maybe redirect parent to login
+                        window.parent.location.reload(); 
+                    }
                 </script>
             """)
         
@@ -296,9 +300,14 @@ def oauth_callback():
             return render_template_string("""
                 <script>
                     alert('企业微信绑定成功！');
-                    if (window.opener) {
-                        window.opener.location.reload();
-                        window.close();
+                    const target = window.opener || (window.parent !== window ? window.parent : null);
+                    if (target) {
+                        try {
+                            target.location.reload();
+                        } catch(e) {
+                            window.location.href = "{{ home_url }}";
+                        }
+                        if (window.opener) window.close();
                     } else {
                         window.location.href = "{{ home_url }}";
                     }
@@ -308,7 +317,7 @@ def oauth_callback():
             return render_template_string("""
                 <script>
                     alert('绑定失败：{{ message }}');
-                    window.close();
+                    if (window.opener) window.close();
                 </script>
             """, message=bind_result.get('message', '未知错误'))
 
