@@ -8,7 +8,7 @@
 
 import logging
 import xml.etree.ElementTree as ET
-from flask import Blueprint, request, jsonify, redirect
+from flask import Blueprint, request, jsonify, redirect, render_template_string
 from api_utils import api_response
 from app_config import WECOM_CONFIG
 
