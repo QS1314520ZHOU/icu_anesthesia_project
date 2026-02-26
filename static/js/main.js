@@ -5228,19 +5228,29 @@ function showWecomLogin(containerId, hideId, state = 'login') {
             return;
         }
 
+        container.innerHTML = ""; // 清空容器，防止干扰
+
+        const params = {
+            "id": containerId,
+            "appid": appid,
+            "agentid": agentid,
+            "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
+            "state": state,
+            "lang": "zh",
+        };
+
         try {
-            new WwLoginConstructor({
-                "id": containerId,
-                "appid": appid,
-                "agentid": agentid,
-                "redirect_uri": encodeURIComponent(window.location.origin + '/api/wecom/oauth/callback'),
-                "state": state,
-                "href": "",
-                "lang": "zh",
-            });
+            console.log('[WECOM] Initializing QR login with params:', params);
+            // 某些版本的 SDK 必须使用 new，某些则不需要，这里统一使用 new
+            new WwLoginConstructor(params);
         } catch (e) {
-            console.error('WwLogin init failed', e);
-            container.innerHTML = '<div style="color:red;padding:20px;">二维码初始化失败: ' + e.message + '</div>';
+            console.warn('[WECOM] WwLogin constructor failed, trying as function...', e);
+            try {
+                WwLoginConstructor(params);
+            } catch (e2) {
+                console.error('[WECOM] WwLogin completely failed', e2);
+                container.innerHTML = '<div style="color:red;padding:20px;">二维码初始化失败: ' + e2.message + '</div>';
+            }
         }
     }).catch(err => {
         container.innerHTML = '<div style="color:red;padding:20px;">加载配置失败: ' + err.message + '</div>';

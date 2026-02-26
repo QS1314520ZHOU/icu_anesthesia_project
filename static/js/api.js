@@ -50,8 +50,8 @@ class ApiClient {
 
             return data;
         } catch (error) {
-            console.error('API Request Failed:', error);
             if (!options.silent) {
+                console.error('API Request Failed:', error);
                 alert(error.message || 'Request failed');
             }
             throw error;
