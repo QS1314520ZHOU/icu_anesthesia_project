@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from database import DatabasePool
 from services.monitor_service import monitor_service
 from services.ai_service import ai_service
+from utils.geo_service import geo_service
 
 class ProjectService:
     @staticmethod
@@ -792,7 +793,7 @@ class ProjectService:
             # 2. Member locations with workload assessment
             members = []
             m_rows = conn.execute('''
-                SELECT m.name, m.role, 
+                SELECT m.name, m.role, m.lng, m.lat,
                        CASE 
                            WHEN m.current_city IS NOT NULL AND m.current_city != '' THEN m.current_city 
                            WHEN p.city IS NOT NULL AND p.city != '' THEN p.city 
@@ -812,10 +813,27 @@ class ProjectService:
             for row in m_rows:
                 # Calculate load score: projects * 20 + incomplete tasks * 5
                 load_score = (row['project_count'] * 20) + (row['task_count'] * 5)
+                
+                lng, lat = row['lng'], row['lat']
+                city = row['current_city']
+                
+                # On-the-fly resolution if missing
+                if (lng is None or lat is None) and city:
+                    coords = geo_service.resolve_coords(city)
+                    if coords:
+                        lng, lat = coords[0], coords[1]
+                        # Optional: Lazy update back to DB for performance
+                        try:
+                            conn.execute('UPDATE project_members SET lng = ?, lat = ?, current_city = ? WHERE name = ?', 
+                                         (lng, lat, city, row['name']))
+                        except: pass
+
                 members.append({
                     'name': row['name'],
                     'role': row['role'],
-                    'current_city': row['current_city'],
+                    'lng': lng,
+                    'lat': lat,
+                    'current_city': city,
                     'project_name': row['project_name'],
                     'project_count': row['project_count'],
                     'task_count': row['task_count'],

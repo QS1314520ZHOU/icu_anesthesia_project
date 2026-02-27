@@ -35,6 +35,15 @@ NOTIFICATION_CONFIG = {
 }
 
 
+# ========== 地理位置配置 ==========
+GEO_CONFIG = {
+    "BAIDU_MAPS_AK": os.environ.get("BAIDU_MAPS_AK", ""),
+    "GOOGLE_MAPS_API_KEY": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
+    # 默认解析优先级: baidu 或 google
+    "DEFAULT_PROVIDER": os.environ.get("DEFAULT_GEO_PROVIDER", "baidu")
+}
+
+
 # ========== 项目状态定义 ==========
 PROJECT_STATUS = {
     "待启动": {"next": ["进行中"], "color": "#9ca3af"},

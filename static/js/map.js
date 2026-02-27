@@ -78,10 +78,18 @@ async function initDeliveryMap() {
 
         memberData.forEach(m => {
             let city = m.current_city || '';
-            let coords = CITY_COORDS[city];
+            let coords = null;
 
-            // 模糊匹配逻辑
-            if (!coords && city) {
+            // 1. Priority: Use coordinates from backend (resolved by GeoService)
+            if (m.lng && m.lat) {
+                coords = [m.lng, m.lat];
+            }
+            // 2. Fallback: Local CITY_COORDS mapping
+            else if (CITY_COORDS[city]) {
+                coords = CITY_COORDS[city];
+            }
+            // 3. Fallback: Fuzzy matching in local mapping
+            else if (city) {
                 const cleanCity = city.replace(/[省市区县]/g, '');
                 for (const cityKey in CITY_COORDS) {
                     if (cityKey.includes(cleanCity) || cleanCity.includes(cityKey) || (cleanCity.length >= 2 && cityKey.includes(cleanCity.substring(0, 2)))) {

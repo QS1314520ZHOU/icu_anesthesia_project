@@ -450,6 +450,9 @@ def init_db():
             leave_date DATE,
             is_onsite BOOLEAN DEFAULT 0,
             status TEXT DEFAULT '在岗',
+            current_city TEXT,
+            lng REAL,
+            lat REAL,
             remark TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects(id)
@@ -1028,6 +1031,18 @@ def init_db():
             cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")
         except Exception as e:
             pass  # 索引可能已存在或表不存在
+
+    # 升级 project_members 增加由 GeoService 使用的经纬度和城市
+    try:
+        cursor.execute("ALTER TABLE project_members ADD COLUMN current_city TEXT")
+    except: pass
+    try:
+        cursor.execute("ALTER TABLE project_members ADD COLUMN lng REAL")
+    except: pass
+    try:
+        cursor.execute("ALTER TABLE project_members ADD COLUMN lat REAL")
+    except: pass
+
     conn.commit()
     close_db()
 

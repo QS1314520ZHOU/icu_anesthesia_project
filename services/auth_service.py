@@ -10,6 +10,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from functools import wraps
+from utils.geo_service import geo_service
 from flask import request, jsonify
 from database import get_db
 
@@ -101,12 +102,46 @@ class AuthService:
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (username, password_hash, wecom_user.get('email', ''), 
                   display_name, 'team_member', wecom_userid))
+            
+            # Sync to project_members for map display if they are assigned to a project
+            # Note: For new SSO users, we might not have a project yet, 
+            # but usually they are added to a default project or existing projects.
+            
             conn.commit()
             
             # 注册后登录
             return self.login_via_wecom(wecom_user)
         except Exception as e:
             return {"success": False, "message": f"自动注册失败: {str(e)}"}
+
+    def sync_user_to_project_member(self, user_id: int, project_id: int):
+        """同步用户到项目成员表以便地图显示"""
+        conn = get_db()
+        user = conn.execute('SELECT display_name, email, role FROM users WHERE id = ?', (user_id,)).fetchone()
+        project = conn.execute('SELECT city, hospital_name FROM projects WHERE id = ?', (project_id,)).fetchone()
+        
+        if user and project:
+            loc = project['city'] if project['city'] else project['hospital_name']
+            role_label = '项目经理' if user['role'] in ['admin', 'project_manager'] else '实施工程师'
+            
+            # Resolve coordinates
+            coords = geo_service.resolve_coords(loc)
+            lng, lat = coords if coords else (None, None)
+            
+            conn.execute('''
+                INSERT OR REPLACE INTO project_members 
+                (project_id, name, role, email, status, current_city, lng, lat, is_onsite, join_date)
+                VALUES (?, ?, ?, ?, '在岗', ?, ?, ?, 1, ?)
+            ''', (
+                project_id, 
+                user['display_name'], 
+                role_label, 
+                user['email'], 
+                loc, 
+                lng, lat,
+                datetime.now().strftime('%Y-%m-%d')
+            ))
+            conn.commit()
 
     def bind_wecom(self, user_id: int, wecom_userid: str) -> dict:
         """为现有用户绑定企微ID"""
@@ -126,6 +161,12 @@ class AuthService:
         # 3. 执行绑定
         conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (wecom_userid, user_id))
         conn.commit()
+        
+        # 绑定后，如果该用户已有项目，同步到 project_members
+        projects = conn.execute('SELECT project_id FROM project_user_access WHERE user_id = ?', (user_id,)).fetchall()
+        for p in projects:
+            self.sync_user_to_project_member(user_id, p['project_id'])
+            
         return {"success": True, "message": "绑定成功"}
 
     def __init__(self):
@@ -357,6 +398,10 @@ class AuthService:
                 VALUES (?, ?, ?)
             ''', (project_id, user_id, role))
             conn.commit()
+            
+            # 同步到 project_members 表
+            self.sync_user_to_project_member(user_id, project_id)
+            
             return {"success": True}
         except Exception as e:
             return {"success": False, "message": str(e)}
