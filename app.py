@@ -4009,6 +4009,69 @@ def test_r2_connection():
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+# ========== 管理员：地图服务配置 API ==========
+@app.route('/api/admin/map-config', methods=['GET'])
+@require_auth('admin')
+def get_map_config():
+    """获取地图服务配置"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
+        configs = cursor.fetchall()
+        result = {row['config_key'].replace('map_', ''): row['value'] for row in configs}
+        
+        # 脱敏
+        for key in ['baidu_ak', 'amap_key', 'tianditu_key', 'google_ak']:
+            if result.get(key):
+                val = result[key]
+                result[key] = val[:4] + '****' + val[-4:] if len(val) > 8 else '****'
+            
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
+
+@app.route('/api/admin/map-config', methods=['POST'])
+@require_auth('admin')
+def save_map_config():
+    """保存地图服务配置"""
+    data = request.json or {}
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    try:
+        # 预加载现有配置以处理脱敏
+        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
+        existing = {row['config_key'].replace('map_', ''): row['value'] for row in cursor.fetchall()}
+        
+        for key, val in data.items():
+            db_key = f"map_{key}"
+            final_val = val
+            
+            # 脱敏逻辑：如果前台传回带 * 的值，说明没改，保留原值
+            if key in ['baidu_ak', 'amap_key', 'tianditu_key', 'google_ak'] and val and '****' in val:
+                final_val = existing.get(key)
+                
+            cursor.execute('''
+                INSERT INTO system_config (config_key, value) VALUES (?, ?)
+                ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+            ''', (db_key, str(final_val) if final_val is not None else ""))
+            
+        conn.commit()
+        
+        # 立即更新全局 GeoService 配置
+        from utils.geo_service import geo_service
+        geo_service.reload_config()
+        
+        return jsonify({'success': True, 'message': '地图服务配置已保存'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+    finally:
+        close_db()
+
+
 if __name__ == '__main__':
     with app.app_context():
         init_db()

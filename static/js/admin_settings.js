@@ -150,6 +150,7 @@ var adminSettings = {
                         <div class="admin-tab active" onclick="adminSettings.switchTab(event, 'tabAiConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">AI 模型配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">企业微信配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomBind')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">用户企微绑定</div>
+                        <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabMapConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">地图服务配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabStorageConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">云存储配置</div>
                     </div>
                     
@@ -242,6 +243,60 @@ var adminSettings = {
                             </div>
                             <div id="wecomBindList">
                                 <div class="text-center" style="padding: 40px; color: var(--gray-500);">⏳ 加载中...</div>
+                            </div>
+                        </div>
+
+                        <!-- Map Config Tab -->
+                        <div id="tabMapConfig" class="admin-tab-pane" style="display: none;">
+                            <div class="config-section">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                                    <div>
+                                        <div style="font-size: 15px; font-weight: 600; color: var(--gray-800);">地图服务 API 配置</div>
+                                        <div style="font-size: 13px; color: var(--gray-500); margin-top: 4px;">配置用于地理编码和坐标解析的地图服务商 (系统将优先使用 API 获取精确位置)</div>
+                                    </div>
+                                </div>
+
+                                <div class="grid-form" style="display: grid; grid-template-columns: 1fr; gap: 20px; background: white; padding: 24px; border-radius: 12px; border: 1px solid var(--gray-200);">
+                                    <div class="form-group">
+                                        <label>首选地图服务商</label>
+                                        <select id="mapProvider" class="form-control" style="width: 100%;">
+                                            <option value="baidu">百度地图 (国内推荐，功能全)</option>
+                                            <option value="amap">高德地图 (国内备用，有免费额度)</option>
+                                            <option value="tianditu">天地图 (推荐，国家地理信息平台，完全免费商用)</option>
+                                            <option value="osm">OpenStreetMap (国际开源，无需 Key)</option>
+                                            <option value="google">Google Maps (国际，需 API Key)</option>
+                                        </select>
+                                    </div>
+                                    
+                                    <div style="margin: 10px 0; padding-top: 10px; border-top: 1px dashed var(--gray-200);">
+                                        <h5 style="font-weight: 700; margin-bottom: 12px; font-size: 14px;">各平台 API Key 配置 (选填)</h5>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>百度地图 AK (Baidu Maps AK)</label>
+                                        <input type="password" id="mapBaiduAk" class="form-control" placeholder="填写百度地图开放平台获取的 AK">
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>高德地图 Key (Amap Web服务 Key)</label>
+                                        <input type="password" id="mapAmapKey" class="form-control" placeholder="填写高德开放平台获取的 Web 服务 Key">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>天地图 Token (Tianditu Browser/Server Token)</label>
+                                        <input type="password" id="mapTiandituKey" class="form-control" placeholder="填写天地图控制台获取的 Token">
+                                        <div style="font-size: 11px; color: var(--gray-400); margin-top: 4px;">注：天地图是国产权威地图，无收费限制，建议开发者首选。</div>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label>Google Maps API Key</label>
+                                        <input type="password" id="mapGoogleAk" class="form-control" placeholder="AIzaSy...">
+                                    </div>
+                                    
+                                    <div style="grid-column: span 1; margin-top: 10px;">
+                                        <button class="btn btn-primary" style="width: 100%; height: 45px;" onclick="adminSettings.saveMapConfig()">保存地图配置</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -398,6 +453,7 @@ var adminSettings = {
         this.loadWecomConfig();
         this.loadStorageConfig();
         this.loadWecomBindList();
+        this.loadMapConfig();
     },
 
     switchTab: function (event, tabId) {
@@ -923,6 +979,46 @@ var adminSettings = {
                 this.loadWecomBindList();
             } else {
                 alert('❌ ' + (res.message || '保存失败'));
+            }
+        } catch (e) {
+            alert('❌ 请求失败: ' + e.message);
+        }
+    },
+
+    // ========== Map Service Configuration Logic ==========
+
+    loadMapConfig: async function () {
+        try {
+            const res = await api.get('/admin/map-config');
+            const data = (res && res.data) ? res.data : (res || {});
+
+            if (data.provider) document.getElementById('mapProvider').value = data.provider;
+            if (data.baidu_ak) document.getElementById('mapBaiduAk').value = data.baidu_ak;
+            if (data.amap_key) document.getElementById('mapAmapKey').value = data.amap_key;
+            if (data.tianditu_key) document.getElementById('mapTiandituKey').value = data.tianditu_key;
+            if (data.google_ak) document.getElementById('mapGoogleAk').value = data.google_ak;
+
+        } catch (e) {
+            console.error('Failed to load map config:', e);
+        }
+    },
+
+    saveMapConfig: async function () {
+        const config = {
+            provider: document.getElementById('mapProvider').value,
+            baidu_ak: document.getElementById('mapBaiduAk').value.trim(),
+            amap_key: document.getElementById('mapAmapKey').value.trim(),
+            tianditu_key: document.getElementById('mapTiandituKey').value.trim(),
+            google_ak: document.getElementById('mapGoogleAk').value.trim()
+        };
+
+        try {
+            const res = await api.post('/admin/map-config', config);
+            if (res.success) {
+                alert('✅ 地图服务配置已保存');
+                this.loadMapConfig(); // Reload to see masked values
+            } else {
+                alert('❌ 保存失败: ' + res.message);
             }
         } catch (e) {
             alert('❌ 请求失败: ' + e.message);

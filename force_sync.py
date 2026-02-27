@@ -16,7 +16,10 @@ CITY_MAPPING = {
     '昆明': '昆明',
     '大理': '大理',
     '红河': '红河',
-    '文山': '文山'
+    '文山': '文山',
+    '莆田': '莆田',
+    '垫江': '垫江',
+    '重庆': '重庆'
 }
 
 def sync_all_projects_to_map():
@@ -32,8 +35,10 @@ def sync_all_projects_to_map():
         print("--- FORCED SYNC: Projects to Map ---")
 
         # Get all active projects
-        projects = cursor.execute('SELECT id, project_name, project_manager, hospital_name, city FROM projects').fetchall()
+        projects = cursor.execute('SELECT id, project_name, project_manager, hospital_name, city, province FROM projects').fetchall()
         print(f"Syncing {len(projects)} projects...")
+
+        from utils.geo_service import geo_service
 
         sync_count = 0
         for p in projects:
@@ -41,23 +46,22 @@ def sync_all_projects_to_map():
             if not manager_name or manager_name == '待定':
                 continue
             
-            # Determine best city for mapping
+            # Determine best city for mapping - use existing if present
             target_city = p['city']
-            search_str = (p['hospital_name'] or '') + (p['project_name'] or '') + (p['city'] or '')
             
-            # Try to map based on keywords
-            for key, city in CITY_MAPPING.items():
-                if key in search_str:
-                    target_city = city
-                    break
-            
+            # If city is missing, resolve it dynamically
             if not target_city:
-                target_city = '昆明' # Default for this project context if unknown
+                search_str = (p['hospital_name'] or '') + (p['project_name'] or '')
+                details = geo_service.resolve_address_details(search_str)
+                if details:
+                    target_city = details.get('city')
+                    # Update project record as well
+                    cursor.execute('UPDATE projects SET province = ?, city = ? WHERE id = ?', 
+                                 (details.get('province'), target_city, p['id']))
             
-            print(f"Project: {p['project_name']} -> Manager: {manager_name} @ {target_city}")
+            print(f"Project: {p['project_name']} -> Manager: {manager_name} @ {target_city or 'Unknown'}")
 
             # Insert into project_members
-            # We use INSERT OR REPLACE to update existing ones
             cursor.execute('''
                 INSERT OR REPLACE INTO project_members 
                 (project_id, name, role, status, current_city, is_onsite, join_date)

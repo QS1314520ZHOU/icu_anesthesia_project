@@ -745,31 +745,32 @@ class ProjectService:
 
     @staticmethod
     def get_geo_stats():
-        """获取地理分布统计数据"""
+        """获取地理分布统计数据 - 采用动态 API 推断"""
         with DatabasePool.get_connection() as conn:
             # 1. Project stats by province
-            # 增加对空省份的简单推断逻辑
-            all_projects = conn.execute('SELECT province, city, hospital_name, progress, project_name FROM projects WHERE status != "已终止"').fetchall()
+            all_projects = conn.execute('SELECT id, province, city, hospital_name, progress, project_name FROM projects WHERE status != "已终止"').fetchall()
             
             geo_map = {} # province -> {count, progress_sum, projects}
             
-            province_map = {
-                '云南': ['红河', '昆明', '玉溪', '大理', '丽江', '昭通', '文山', '西双版纳'],
-                '四川': ['眉山', '成都', '德阳', '绵阳', '宜宾', '乐山', '南充'],
-                '湖北': ['随州', '武汉', '宜昌', '襄阳', '孝感', '荆州', '黄冈'],
-                '广东': ['广州', '深圳', '东莞', '佛山', '中山', '珠海', '江门'],
-                '湖南': ['长沙', '株洲', '湘潭', '衡阳', '岳阳']
-            }
-
             for p in all_projects:
                 province = p['province']
-                # 尝试从 hospital_name 或 city 推断省份
-                if not province or province == '':
-                    name_full = (p['hospital_name'] or '') + (p['city'] or '')
-                    for prov_name, cities in province_map.items():
-                        if prov_name in name_full or any(c in name_full for c in cities):
-                            province = prov_name
-                            break
+                city = p['city']
+                
+                # 如果省份或城市缺失，尝试动态解析
+                if not province or not city:
+                    # 组合详细名称以供解析
+                    full_name = p['hospital_name'] or p['project_name']
+                    geo_details = geo_service.resolve_address_details(full_name)
+                    
+                    if geo_details:
+                        province = province or geo_details.get('province')
+                        city = city or geo_details.get('city')
+                        
+                        # 只有在解析成功且原先缺失时才写回数据库，提升后续性能
+                        try:
+                            conn.execute('UPDATE projects SET province = ?, city = ? WHERE id = ?', 
+                                         (province, city, p['id']))
+                        except: pass
                 
                 if not province: province = '未知'
                 
