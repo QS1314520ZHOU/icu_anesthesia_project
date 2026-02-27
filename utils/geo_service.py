@@ -98,10 +98,13 @@ class GeoService:
 
     def normalize_name(self, name):
         if not name: return ""
-        return re.sub(r'(省|市|自治区|特别行政区|区|县|镇|乡)$', '', name)
+        name = name.strip()
+        # Remove common suffixes that might confuse basic geocoders or fuzzy matches
+        return re.sub(r'(省|市|自治区|特别行政区|区|县|镇|乡|医院|分院)$', '', name)
 
     def resolve_coords(self, location_name):
         if not location_name: return None
+        location_name = location_name.strip()
         clean_name = self.normalize_name(location_name)
         
         if clean_name in BASE_CITY_COORDS:
@@ -124,6 +127,7 @@ class GeoService:
     def resolve_address_details(self, location_name):
         """Resolves address into structured detail: province, city, lng, lat."""
         if not location_name: return None
+        location_name = location_name.strip()
         
         cached = self._get_details_from_cache(location_name)
         if cached: return cached

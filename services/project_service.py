@@ -759,7 +759,7 @@ class ProjectService:
                 # 如果省份或城市缺失，尝试动态解析
                 if not province or not city:
                     # 组合详细名称以供解析
-                    full_name = p['hospital_name'] or p['project_name']
+                    full_name = (p['hospital_name'] or p['project_name'] or "").strip()
                     geo_details = geo_service.resolve_address_details(full_name)
                     
                     if geo_details:
@@ -820,6 +820,7 @@ class ProjectService:
                 
                 # On-the-fly resolution if missing
                 if (lng is None or lat is None) and city:
+                    city = city.strip()
                     coords = geo_service.resolve_coords(city)
                     if coords:
                         lng, lat = coords[0], coords[1]
