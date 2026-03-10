@@ -32,9 +32,13 @@ def get_geo_stats():
 
 @project_bp.route('/projects', methods=['GET'])
 def get_projects():
-    # Placeholder for auth logic integration
-    projects = project_service.get_all_projects(is_admin=True) 
-    return api_response(True, projects)
+    try:
+        projects = project_service.get_all_projects(is_admin=True) 
+        return api_response(True, projects)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return api_response(False, error=str(e) + "\n" + traceback.format_exc(), code=500)
 
 @project_bp.route('/projects', methods=['POST'])
 def create_project():

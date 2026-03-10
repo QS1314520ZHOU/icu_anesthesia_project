@@ -32,7 +32,7 @@ def get_death_countdown(project_id):
     from datetime import datetime
     try:
         if prediction['plan_end_date']:
-            plan_end = datetime.strptime(prediction['plan_end_date'], '%Y-%m-%d')
+            plan_end = datetime.strptime(str(prediction['plan_end_date'])[:10], '%Y-%m-%d')
             remaining_days = (plan_end - datetime.now()).days
             
             prediction['remaining_days_to_plan'] = remaining_days

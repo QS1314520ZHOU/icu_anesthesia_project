@@ -8,7 +8,7 @@
 
 import logging
 from datetime import datetime, timedelta
-from database import get_db, close_db
+from database import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -21,76 +21,76 @@ class StandupService:
         today = datetime.strptime(date_str, '%Y-%m-%d').date() if date_str else datetime.now().date()
         yesterday = today - timedelta(days=1)
 
-        conn = get_db()
+        with DatabasePool.get_connection() as conn:
+            sql_p = DatabasePool.format_sql('SELECT id, project_name, hospital_name, status, progress, project_manager FROM projects WHERE id = ?')
+            project = conn.execute(sql_p, (project_id,)).fetchone()
 
-        project = conn.execute(
-            'SELECT id, project_name, hospital_name, status, progress, project_manager FROM projects WHERE id = ?',
-            (project_id,)
-        ).fetchone()
+            if not project:
+                return None
 
-        if not project:
-            close_db()
-            return None
+            # 1. 昨日完成的任务
+            sql_comp = DatabasePool.format_sql('''
+                SELECT t.task_name, s.stage_name, t.completed_date
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date = ?
+                ORDER BY s.stage_order
+            ''')
+            yesterday_completed = conn.execute(sql_comp, (project_id, True, yesterday.isoformat())).fetchall()
 
-        # 1. 昨日完成的任务
-        yesterday_completed = conn.execute('''
-            SELECT t.task_name, s.stage_name, t.completed_date
-            FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date = ?
-            ORDER BY s.stage_order
-        ''', (project_id, yesterday.isoformat())).fetchall()
+            # 2. 昨日工作日志
+            sql_logs = DatabasePool.format_sql('''
+                SELECT member_name, work_content, issues_encountered, tomorrow_plan, work_hours
+                FROM work_logs
+                WHERE project_id = ? AND log_date = ?
+                ORDER BY member_name
+            ''')
+            yesterday_logs = conn.execute(sql_logs, (project_id, yesterday.isoformat())).fetchall()
 
-        # 2. 昨日工作日志
-        yesterday_logs = conn.execute('''
-            SELECT member_name, work_content, issues_encountered, tomorrow_plan, work_hours
-            FROM work_logs
-            WHERE project_id = ? AND log_date = ?
-            ORDER BY member_name
-        ''', (project_id, yesterday.isoformat())).fetchall()
+            # 3. 今日计划 (从昨日日志的tomorrow_plan + 当前未完成任务)
+            today_plans = []
+            for log in yesterday_logs:
+                if log['tomorrow_plan']:
+                    today_plans.append({
+                        'member': log['member_name'],
+                        'plan': log['tomorrow_plan']
+                    })
 
-        # 3. 今日计划 (从昨日日志的tomorrow_plan + 当前未完成任务)
-        today_plans = []
-        for log in yesterday_logs:
-            if log['tomorrow_plan']:
-                today_plans.append({
-                    'member': log['member_name'],
-                    'plan': log['tomorrow_plan']
-                })
+            # 4. 阻塞问题（未解决的高/中级别问题）
+            sql_issues = DatabasePool.format_sql('''
+                SELECT id, description, severity, status, created_at
+                FROM issues
+                WHERE project_id = ? AND status NOT IN ('已解决', '已关闭')
+                ORDER BY CASE severity WHEN '高' THEN 1 WHEN '中' THEN 2 ELSE 3 END
+            ''')
+            blocking_issues = conn.execute(sql_issues, (project_id,)).fetchall()
 
-        # 4. 阻塞问题（未解决的高/中级别问题）
-        blocking_issues = conn.execute('''
-            SELECT id, description, severity, status, created_at
-            FROM issues
-            WHERE project_id = ? AND status NOT IN ('已解决', '已关闭')
-            ORDER BY CASE severity WHEN '高' THEN 1 WHEN '中' THEN 2 ELSE 3 END
-        ''', (project_id,)).fetchall()
+            # 5. 即将到期的里程碑（7天内）
+            sql_mstones = DatabasePool.format_sql('''
+                SELECT name, target_date, is_completed
+                FROM milestones
+                WHERE project_id = ? AND is_completed = ?
+                AND target_date BETWEEN ? AND ?
+                ORDER BY target_date
+            ''')
+            upcoming_milestones = conn.execute(sql_mstones, (project_id, False, today.isoformat(), (today + timedelta(days=7)).isoformat())).fetchall()
 
-        # 5. 即将到期的里程碑（7天内）
-        upcoming_milestones = conn.execute('''
-            SELECT name, target_date, is_completed
-            FROM milestones
-            WHERE project_id = ? AND is_completed = 0
-            AND target_date BETWEEN ? AND ?
-            ORDER BY target_date
-        ''', (project_id, today.isoformat(), (today + timedelta(days=7)).isoformat())).fetchall()
+            # 6. 今日整体进度
+            sql_stages = DatabasePool.format_sql('''
+                SELECT stage_name, progress, status
+                FROM project_stages
+                WHERE project_id = ?
+                ORDER BY stage_order
+            ''')
+            stages = conn.execute(sql_stages, (project_id,)).fetchall()
 
-        # 6. 今日整体进度
-        stages = conn.execute('''
-            SELECT stage_name, progress, status
-            FROM project_stages
-            WHERE project_id = ?
-            ORDER BY stage_order
-        ''', (project_id,)).fetchall()
-
-        # 7. 当前在岗人员
-        members_onsite = conn.execute('''
-            SELECT name, role
-            FROM project_members
-            WHERE project_id = ? AND status = '在岗' AND is_onsite = 1
-        ''', (project_id,)).fetchall()
-
-        close_db()
+            # 7. 当前在岗人员
+            sql_mems = DatabasePool.format_sql('''
+                SELECT name, role
+                FROM project_members
+                WHERE project_id = ? AND status = '在岗' AND is_onsite = ?
+            ''')
+            members_onsite = conn.execute(sql_mems, (project_id, True)).fetchall()
 
         return {
             'project': dict(project),
@@ -199,14 +199,14 @@ class StandupService:
     @staticmethod
     def generate_daily_briefing():
         """生成全局每日简报（所有活跃项目）"""
-        conn = get_db()
-        projects = conn.execute('''
-            SELECT id, project_name, hospital_name, status, progress, project_manager
-            FROM projects
-            WHERE status NOT IN ('已完成', '已终止')
-            ORDER BY progress ASC
-        ''').fetchall()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT id, project_name, hospital_name, status, progress, project_manager
+                FROM projects
+                WHERE status NOT IN ('已完成', '已终止')
+                ORDER BY progress ASC
+            ''')
+            projects = conn.execute(sql).fetchall()
 
         if not projects:
             return {'briefing': '当前无活跃项目', 'projects': []}

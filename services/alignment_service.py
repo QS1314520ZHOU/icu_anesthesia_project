@@ -16,6 +16,24 @@ from services.ai_service import ai_service
 class AlignmentService:
     """接口文档对齐核心服务"""
 
+    @staticmethod
+    def _table_columns(conn, table_name):
+        """Return a set of column names for a table."""
+        if DatabasePool.is_postgres():
+            rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = %s
+                """,
+                (table_name,),
+            ).fetchall()
+            return {r['column_name'] for r in rows}
+
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        # sqlite PRAGMA table_info columns: cid, name, type, ...
+        return {r['name'] if isinstance(r, dict) else r[1] for r in rows}
+
     # ================================================================
     #  第一层：标准接口库管理
     # ================================================================
@@ -24,13 +42,30 @@ class AlignmentService:
     def get_spec_versions():
         """获取所有标准版本"""
         with DatabasePool.get_connection() as conn:
+            cols = AlignmentService._table_columns(conn, 'interface_specs')
+
+            if 'spec_version' in cols:
+                rows = conn.execute('''
+                    SELECT spec_version, category,
+                           COUNT(*) as interface_count,
+                           MAX(created_at) as last_updated
+                    FROM interface_specs
+                    GROUP BY spec_version, category
+                    ORDER BY category, spec_version DESC
+                ''').fetchall()
+                return [dict(r) for r in rows]
+
+            # Compatibility fallback for the newer interface_specs schema.
             rows = conn.execute('''
-                SELECT spec_version, category,
+                SELECT COALESCE(NULLIF(category, ''), '默认标准') as spec_version,
+                       COALESCE(NULLIF(category, ''), 'common') as category,
                        COUNT(*) as interface_count,
-                       MAX(created_at) as last_updated
+                       MAX(parsed_at) as last_updated
                 FROM interface_specs
-                GROUP BY spec_version, category
-                ORDER BY category, spec_version DESC
+                WHERE COALESCE(spec_source, 'our') IN ('our', 'standard')
+                GROUP BY COALESCE(NULLIF(category, ''), '默认标准'),
+                         COALESCE(NULLIF(category, ''), 'common')
+                ORDER BY spec_version DESC
             ''').fetchall()
             return [dict(r) for r in rows]
 
@@ -38,10 +73,36 @@ class AlignmentService:
     def get_spec_interfaces(spec_version):
         """获取某版本的全部标准接口及其字段"""
         with DatabasePool.get_connection() as conn:
+            spec_cols = AlignmentService._table_columns(conn, 'interface_specs')
+            field_cols = AlignmentService._table_columns(conn, 'interface_spec_fields')
+
+            legacy_mode = 'spec_version' in spec_cols and 'spec_interface_id' in field_cols
+
+            if legacy_mode:
+                interfaces = conn.execute('''
+                    SELECT * FROM interface_specs
+                    WHERE spec_version = ?
+                    ORDER BY sort_order, id
+                ''', (spec_version,)).fetchall()
+
+                result = []
+                for iface in interfaces:
+                    iface_dict = dict(iface)
+                    fields = conn.execute('''
+                        SELECT * FROM interface_spec_fields
+                        WHERE spec_interface_id = ?
+                        ORDER BY sort_order, id
+                    ''', (iface_dict['id'],)).fetchall()
+                    iface_dict['fields'] = [dict(f) for f in fields]
+                    result.append(iface_dict)
+                return result
+
+            # Compatibility mode for current schema.
             interfaces = conn.execute('''
                 SELECT * FROM interface_specs
-                WHERE spec_version = ?
-                ORDER BY sort_order, id
+                WHERE COALESCE(NULLIF(category, ''), '默认标准') = ?
+                  AND COALESCE(spec_source, 'our') IN ('our', 'standard')
+                ORDER BY interface_name, id
             ''', (spec_version,)).fetchall()
 
             result = []
@@ -49,11 +110,31 @@ class AlignmentService:
                 iface_dict = dict(iface)
                 fields = conn.execute('''
                     SELECT * FROM interface_spec_fields
-                    WHERE spec_interface_id = ?
-                    ORDER BY sort_order, id
+                    WHERE spec_id = ?
+                    ORDER BY field_order, id
                 ''', (iface_dict['id'],)).fetchall()
-                iface_dict['fields'] = [dict(f) for f in fields]
-                result.append(iface_dict)
+
+                normalized_fields = []
+                for f in fields:
+                    fd = dict(f)
+                    normalized_fields.append({
+                        **fd,
+                        'field_label': fd.get('field_name_cn') or fd.get('description') or '',
+                        'max_length': fd.get('field_length'),
+                        'sort_order': fd.get('field_order', 0),
+                    })
+
+                normalized_iface = {
+                    **iface_dict,
+                    'spec_version': spec_version,
+                    'system_name': iface_dict.get('system_type') or iface_dict.get('vendor_name') or '',
+                    'interface_code': iface_dict.get('transcode') or '',
+                    'is_required': 0,
+                    'sort_order': iface_dict.get('id', 0),
+                    'fields': normalized_fields,
+                }
+                result.append(normalized_iface)
+
             return result
 
     @staticmethod
@@ -61,58 +142,130 @@ class AlignmentService:
         """保存/更新一个标准接口定义（含字段）"""
         with DatabasePool.get_connection() as conn:
             cursor = conn.cursor()
+            spec_cols = AlignmentService._table_columns(conn, 'interface_specs')
+            field_cols = AlignmentService._table_columns(conn, 'interface_spec_fields')
+            legacy_mode = 'spec_version' in spec_cols and 'spec_interface_id' in field_cols
 
             interface_id = data.get('id')
-            if interface_id:
-                # 更新
-                cursor.execute('''
-                    UPDATE interface_specs SET
-                        spec_version=?, category=?, system_name=?,
-                        interface_name=?, interface_code=?, description=?,
-                        protocol=?, view_name=?, is_required=?, sort_order=?
-                    WHERE id=?
-                ''', (
-                    data['spec_version'], data['category'], data['system_name'],
-                    data['interface_name'], data.get('interface_code', ''),
-                    data.get('description', ''), data.get('protocol', '视图'),
-                    data.get('view_name', ''), data.get('is_required', 0),
-                    data.get('sort_order', 0), interface_id
-                ))
+            if legacy_mode:
+                if interface_id:
+                    # 更新
+                    cursor.execute('''
+                        UPDATE interface_specs SET
+                            spec_version=?, category=?, system_name=?,
+                            interface_name=?, interface_code=?, description=?,
+                            protocol=?, view_name=?, is_required=?, sort_order=?
+                        WHERE id=?
+                    ''', (
+                        data['spec_version'], data['category'], data['system_name'],
+                        data['interface_name'], data.get('interface_code', ''),
+                        data.get('description', ''), data.get('protocol', '视图'),
+                        data.get('view_name', ''), data.get('is_required', 0),
+                        data.get('sort_order', 0), interface_id
+                    ))
+                else:
+                    # 新建
+                    cursor.execute('''
+                        INSERT INTO interface_specs
+                        (spec_version, category, system_name, interface_name,
+                         interface_code, description, protocol, view_name,
+                         is_required, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        data['spec_version'], data['category'], data['system_name'],
+                        data['interface_name'], data.get('interface_code', ''),
+                        data.get('description', ''), data.get('protocol', '视图'),
+                        data.get('view_name', ''), data.get('is_required', 0),
+                        data.get('sort_order', 0)
+                    ))
+                    interface_id = cursor.lastrowid
             else:
-                # 新建
-                cursor.execute('''
-                    INSERT INTO interface_specs
-                    (spec_version, category, system_name, interface_name,
-                     interface_code, description, protocol, view_name,
-                     is_required, sort_order)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    data['spec_version'], data['category'], data['system_name'],
-                    data['interface_name'], data.get('interface_code', ''),
-                    data.get('description', ''), data.get('protocol', '视图'),
-                    data.get('view_name', ''), data.get('is_required', 0),
-                    data.get('sort_order', 0)
-                ))
-                interface_id = cursor.lastrowid
+                # New schema mapping.
+                category = data.get('spec_version') or data.get('category') or '默认标准'
+                if interface_id:
+                    cursor.execute('''
+                        UPDATE interface_specs SET
+                            spec_source = 'our',
+                            category = ?,
+                            vendor_name = ?,
+                            system_type = ?,
+                            interface_name = ?,
+                            transcode = ?,
+                            protocol = ?,
+                            description = ?,
+                            view_name = ?,
+                            parsed_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', (
+                        category,
+                        data.get('vendor_name', '自定义标准'),
+                        data.get('system_name', ''),
+                        data['interface_name'],
+                        data.get('interface_code', ''),
+                        data.get('protocol', '视图'),
+                        data.get('description', ''),
+                        data.get('view_name', ''),
+                        interface_id
+                    ))
+                else:
+                    cursor.execute('''
+                        INSERT INTO interface_specs
+                        (spec_source, category, vendor_name, system_type, interface_name,
+                         transcode, protocol, description, view_name, parsed_at)
+                        VALUES ('our', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (
+                        category,
+                        data.get('vendor_name', '自定义标准'),
+                        data.get('system_name', ''),
+                        data['interface_name'],
+                        data.get('interface_code', ''),
+                        data.get('protocol', '视图'),
+                        data.get('description', ''),
+                        data.get('view_name', ''),
+                    ))
+                    interface_id = cursor.lastrowid
 
             # 保存字段 —— 先删后插
-            cursor.execute(
-                'DELETE FROM interface_spec_fields WHERE spec_interface_id=?',
-                (interface_id,)
-            )
-            for idx, field in enumerate(data.get('fields', [])):
-                cursor.execute('''
-                    INSERT INTO interface_spec_fields
-                    (spec_interface_id, field_name, field_label, field_type,
-                     is_required, max_length, sample_value, remark, sort_order)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    interface_id,
-                    field['field_name'], field.get('field_label', ''),
-                    field.get('field_type', 'VARCHAR'),
-                    field.get('is_required', 0), field.get('max_length'),
-                    field.get('sample_value', ''), field.get('remark', ''), idx
-                ))
+            if legacy_mode:
+                cursor.execute(
+                    'DELETE FROM interface_spec_fields WHERE spec_interface_id=?',
+                    (interface_id,)
+                )
+                for idx, field in enumerate(data.get('fields', [])):
+                    cursor.execute('''
+                        INSERT INTO interface_spec_fields
+                        (spec_interface_id, field_name, field_label, field_type,
+                         is_required, max_length, sample_value, remark, sort_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        interface_id,
+                        field['field_name'], field.get('field_label', ''),
+                        field.get('field_type', 'VARCHAR'),
+                        field.get('is_required', 0), field.get('max_length'),
+                        field.get('sample_value', ''), field.get('remark', ''), idx
+                    ))
+            else:
+                cursor.execute(
+                    'DELETE FROM interface_spec_fields WHERE spec_id=?',
+                    (interface_id,)
+                )
+                for idx, field in enumerate(data.get('fields', [])):
+                    cursor.execute('''
+                        INSERT INTO interface_spec_fields
+                        (spec_id, field_name, field_name_cn, field_type,
+                         is_required, field_length, sample_value, remark, field_order)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        interface_id,
+                        field.get('field_name', ''),
+                        field.get('field_label', ''),
+                        field.get('field_type', 'VARCHAR'),
+                        1 if field.get('is_required') else 0,
+                        field.get('max_length'),
+                        field.get('sample_value', ''),
+                        field.get('remark', ''),
+                        idx
+                    ))
 
             conn.commit()
             return interface_id
@@ -120,7 +273,11 @@ class AlignmentService:
     @staticmethod
     def delete_spec_interface(spec_id):
         with DatabasePool.get_connection() as conn:
-            conn.execute('DELETE FROM interface_spec_fields WHERE spec_interface_id=?', (spec_id,))
+            field_cols = AlignmentService._table_columns(conn, 'interface_spec_fields')
+            if 'spec_interface_id' in field_cols:
+                conn.execute('DELETE FROM interface_spec_fields WHERE spec_interface_id=?', (spec_id,))
+            else:
+                conn.execute('DELETE FROM interface_spec_fields WHERE spec_id=?', (spec_id,))
             conn.execute('DELETE FROM interface_specs WHERE id=?', (spec_id,))
             conn.commit()
 

@@ -45,40 +45,42 @@ class WeComService:
         try:
             from database import DatabasePool
             with DatabasePool.get_connection() as conn:
-                # 检查表是否存在
                 cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'")
-                if not cursor.fetchone():
-                    return
-
-                configs = conn.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'").fetchall()
-                for row in configs:
-                    key = row['config_key'].upper()
-                    val = row['value']
-                    
-                    if key == 'WECOM_ENABLED':
-                        WECOM_CONFIG['ENABLED'] = val.lower() == 'true' or val == '1'
-                    elif key == 'WECOM_CORP_ID':
-                        WECOM_CONFIG['CORP_ID'] = val
-                    elif key == 'WECOM_AGENT_ID':
-                        try:
-                            WECOM_CONFIG['AGENT_ID'] = int(val)
-                        except:
-                            pass
-                    elif key == 'WECOM_SECRET':
-                        WECOM_CONFIG['SECRET'] = val
-                    elif key == 'WECOM_CALLBACK_TOKEN':
-                        WECOM_CONFIG['CALLBACK_TOKEN'] = val
-                    elif key == 'WECOM_CALLBACK_AES_KEY':
-                        WECOM_CONFIG['CALLBACK_AES_KEY'] = val
-                    elif key == 'WECOM_APP_HOME_URL':
-                        # 兼容用户错误填写：如果在主页URL贴了完整的callback路径，自动去除
-                        if val.endswith('/api/wecom/callback'):
-                            val = val.replace('/api/wecom/callback', '')
-                        WECOM_CONFIG['APP_HOME_URL'] = val.rstrip('/')
-                    elif key == 'WECOM_WEBHOOK':
-                        # 同时更新 Webhook 兜底配置
-                        NOTIFICATION_CONFIG['WECOM_WEBHOOK'] = val
+                # 检查表是否存在
+                if DatabasePool.is_postgres():
+                    cursor.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'system_config'")
+                else:
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'")
+                
+                if cursor.fetchone():
+                    configs = conn.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'").fetchall()
+                    for row in configs:
+                        key = row['config_key'].upper()
+                        val = row['value']
+                        
+                        if key == 'WECOM_ENABLED':
+                            WECOM_CONFIG['ENABLED'] = val.lower() == 'true' or val == '1'
+                        elif key == 'WECOM_CORP_ID':
+                            WECOM_CONFIG['CORP_ID'] = val
+                        elif key == 'WECOM_AGENT_ID':
+                            try:
+                                WECOM_CONFIG['AGENT_ID'] = int(val)
+                            except:
+                                pass
+                        elif key == 'WECOM_SECRET':
+                            WECOM_CONFIG['SECRET'] = val
+                        elif key == 'WECOM_CALLBACK_TOKEN':
+                            WECOM_CONFIG['CALLBACK_TOKEN'] = val
+                        elif key == 'WECOM_CALLBACK_AES_KEY':
+                            WECOM_CONFIG['CALLBACK_AES_KEY'] = val
+                        elif key == 'WECOM_APP_HOME_URL':
+                            # 兼容用户错误填写：如果在主页URL贴了完整的callback路径，自动去除
+                            if val.endswith('/api/wecom/callback'):
+                                val = val.replace('/api/wecom/callback', '')
+                            WECOM_CONFIG['APP_HOME_URL'] = val.rstrip('/')
+                        elif key == 'WECOM_WEBHOOK':
+                            # 同时更新 Webhook 兜底配置
+                            NOTIFICATION_CONFIG['WECOM_WEBHOOK'] = val
 
             if WECOM_CONFIG.get("ENABLED"):
                 self._init_crypto()

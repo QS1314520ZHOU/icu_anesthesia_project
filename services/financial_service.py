@@ -23,7 +23,7 @@ class FinancialService:
                 ''', (project_id,)).fetchone()['total'] or 0
                 
                 # 3. 直接支出 (Expenses)
-                expenses_total = conn.execute('SELECT SUM(amount) as total FROM project_expenses WHERE project_id = ? AND status = "已批准"', (project_id,)).fetchone()['total'] or 0
+                expenses_total = conn.execute("SELECT SUM(amount) as total FROM project_expenses WHERE project_id = ? AND status = '已批准'", (project_id,)).fetchone()['total'] or 0
                 
                 # 4. 计算毛利
                 gross_profit = revenue_total - labor_cost - expenses_total

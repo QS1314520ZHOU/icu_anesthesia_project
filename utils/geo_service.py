@@ -1,9 +1,8 @@
-
-import sqlite3
 import requests
 import os
 import re
 import logging
+from database import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +28,7 @@ BASE_CITY_COORDS = {
 }
 
 class GeoService:
-    def __init__(self, db_path='database.db'):
-        self.db_path = db_path
-        self._init_cache_table()
-        
+    def __init__(self):
         # Keys and Provider settings
         self.provider = 'heuristic'
         self.baidu_ak = ''
@@ -46,19 +42,20 @@ class GeoService:
     def reload_config(self):
         """Reload configuration from system_config table."""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
             
-            # Check table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'")
-            if not cursor.fetchone():
-                conn.close()
-                return
-
-            rows = cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'").fetchall()
-            configs = {row['config_key']: row['value'] for row in rows}
-            conn.close()
+            with DatabasePool.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check table exists using a unified query
+                sql_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'"
+                cursor.execute(sql_check)
+                
+                configs = {}
+                if cursor.fetchone():
+                    rows = cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'").fetchall()
+                    configs = {row['config_key']: row['value'] for row in rows}
 
             self.provider = configs.get('map_provider', 'baidu')
             self.baidu_ak = configs.get('map_baidu_ak', '')
@@ -71,30 +68,8 @@ class GeoService:
             logger.error(f"Failed to reload GeoService config: {e}")
 
     def _init_cache_table(self):
-        try:
-            conn = sqlite3.connect(self.db_path)
-            # Ensure columns exist
-            try:
-                conn.execute('ALTER TABLE geo_cache ADD COLUMN province TEXT')
-                conn.execute('ALTER TABLE geo_cache ADD COLUMN city TEXT')
-            except sqlite3.OperationalError:
-                pass
-
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS geo_cache (
-                    location_name TEXT PRIMARY KEY,
-                    province TEXT,
-                    city TEXT,
-                    lng REAL,
-                    lat REAL,
-                    provider TEXT,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logger.error(f"Failed to init geo_cache: {e}")
+        # Already handled by app.init_db()
+        pass
 
     def normalize_name(self, name):
         if not name: return ""
@@ -187,24 +162,43 @@ class GeoService:
 
     def _get_details_from_cache(self, name):
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
-            res = conn.execute('SELECT province, city, lng, lat FROM geo_cache WHERE location_name = ?', (name,)).fetchone()
-            conn.close()
-            if res and res['lng'] is not None: 
-                return dict(res)
+            with DatabasePool.get_connection() as conn:
+                cursor = conn.cursor()
+                from app_config import DB_CONFIG
+                db_type = DB_CONFIG.get('TYPE', 'sqlite')
+                
+                sql = 'SELECT province, city, lng, lat FROM geo_cache WHERE location_name = ?'
+                res = cursor.execute(sql, (name,)).fetchone()
+                if res and res['lng'] is not None: 
+                    return dict(res)
         except: pass
         return None
 
     def _save_details_to_cache(self, name, details):
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute('''
-                INSERT OR REPLACE INTO geo_cache (location_name, province, city, lng, lat, provider)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (name, details.get('province'), details.get('city'), details.get('lng'), details.get('lat'), details.get('provider', 'api')))
-            conn.commit()
-            conn.close()
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            
+            with DatabasePool.get_connection() as conn:
+                if db_type == 'postgres':
+                    sql = '''
+                        INSERT INTO geo_cache (location_name, province, city, lng, lat, provider, updated_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (location_name) DO UPDATE SET
+                            province = EXCLUDED.province,
+                            city = EXCLUDED.city,
+                            lng = EXCLUDED.lng,
+                            lat = EXCLUDED.lat,
+                            provider = EXCLUDED.provider,
+                            updated_at = EXCLUDED.updated_at
+                    '''
+                    conn.execute(sql, (name, details.get('province'), details.get('city'), details.get('lng'), details.get('lat'), details.get('provider', 'api')))
+                else:
+                    conn.execute('''
+                        INSERT OR REPLACE INTO geo_cache (location_name, province, city, lng, lat, provider)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (name, details.get('province'), details.get('city'), details.get('lng'), details.get('lat'), details.get('provider', 'api')))
+                conn.commit()
         except: pass
 
     def _fetch_details_from_baidu(self, name):
@@ -312,21 +306,35 @@ class GeoService:
 
     def _get_from_cache(self, name):
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            res = cursor.execute('SELECT lng, lat FROM geo_cache WHERE location_name = ?', (name,)).fetchone()
-            conn.close()
-            if res: return [res[0], res[1]]
+            with DatabasePool.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT lng, lat FROM geo_cache WHERE location_name = ?', (name,))
+                res = cursor.fetchone()
+                if res: return [res['lng'], res['lat']]
         except: pass
         return None
 
     def _save_to_cache(self, name, coords, provider=None):
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.execute('INSERT OR REPLACE INTO geo_cache (location_name, lng, lat, provider) VALUES (?, ?, ?, ?)', 
-                         (name, coords[0], coords[1], provider))
-            conn.commit()
-            conn.close()
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            
+            with DatabasePool.get_connection() as conn:
+                if db_type == 'postgres':
+                    sql = '''
+                        INSERT INTO geo_cache (location_name, lng, lat, provider, updated_at) 
+                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (location_name) DO UPDATE SET 
+                            lng = EXCLUDED.lng, 
+                            lat = EXCLUDED.lat, 
+                            provider = EXCLUDED.provider,
+                            updated_at = EXCLUDED.updated_at
+                    '''
+                    conn.execute(sql, (name, coords[0], coords[1], provider))
+                else:
+                    conn.execute('INSERT OR REPLACE INTO geo_cache (location_name, lng, lat, provider) VALUES (?, ?, ?, ?)', 
+                                 (name, coords[0], coords[1], provider))
+                conn.commit()
         except: pass
 
 geo_service = GeoService()

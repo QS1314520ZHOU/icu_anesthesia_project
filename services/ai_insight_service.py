@@ -50,9 +50,9 @@ class AIInsightService:
                     SELECT t.task_name, s.stage_name 
                     FROM tasks t
                     JOIN project_stages s ON t.stage_id = s.id
-                    WHERE s.project_id = ? AND t.is_completed = 0
+                    WHERE s.project_id = ? AND t.is_completed = ?
                     LIMIT 10
-                ''', (project_id,)).fetchall()
+                ''', (project_id, False)).fetchall()
                 
                 task_text = "\n".join([f"- {t['stage_name']}: {t['task_name']}" for t in tasks]) if tasks else "当前无待办任务"
 
@@ -139,9 +139,9 @@ class AIInsightService:
                         SELECT COUNT(*) as completed_count
                         FROM tasks t
                         JOIN project_stages s ON t.stage_id = s.id
-                        WHERE s.project_id = ? AND t.is_completed = 1 
+                        WHERE s.project_id = ? AND t.is_completed = ? 
                         AND t.completed_date >= ? AND t.completed_date < ?
-                    ''', (project_id, start_date, end_date)).fetchone()['completed_count']
+                    ''', (project_id, True, start_date, end_date)).fetchone()['completed_count']
                     velocity_data.append({'week_start': start_date, 'count': count})
                 velocity_data.reverse() # 按时间正序
 
@@ -319,7 +319,7 @@ class AIInsightService:
                 for i in issues:
                     try:
                         # Handle potential space in TIMESTAMP or just DATE
-                        created_at_str = i['created_at'].split(' ')[0] if i['created_at'] else ""
+                        created_at_str = str(i['created_at']).split(' ')[0] if i['created_at'] else ""
                         if not created_at_str: continue
                         created_at = datetime.strptime(created_at_str, '%Y-%m-%d')
                         if created_at < seven_days_ago:
@@ -348,12 +348,12 @@ class AIInsightService:
                 milestones = conn.execute('''
                     SELECT id, name, target_date, is_completed, 'milestone' as type
                     FROM milestones 
-                    WHERE project_id = ? AND is_completed = 0
-                ''', (project_id,)).fetchall()
+                    WHERE project_id = ? AND is_completed = ?
+                ''', (project_id, False)).fetchall()
                 
                 for m in milestones:
                     try:
-                        target_date = datetime.strptime(m['target_date'], '%Y-%m-%d')
+                        target_date = datetime.strptime(str(m['target_date'])[:10], '%Y-%m-%d')
                         if target_date < three_days_later:
                             item = dict(m)
                             item['title'] = m['name']
@@ -663,7 +663,7 @@ class AIInsightService:
                     # 从未写过日志?
                     pass
                 else:
-                    last_date = datetime.strptime(last_log['last_date'], '%Y-%m-%d')
+                    last_date = datetime.strptime(str(last_log['last_date'])[:10], '%Y-%m-%d')
                     if datetime.now() - last_date > timedelta(days=4):
                         anomalies.append({
                             "type": "anomaly",
@@ -686,7 +686,7 @@ class AIInsightService:
                     ''', (project_id,)).fetchone()
                     
                     if last_history:
-                        last_date = datetime.strptime(last_history['record_date'], '%Y-%m-%d')
+                        last_date = datetime.strptime(str(last_history['record_date'])[:10], '%Y-%m-%d')
                         days_diff = (datetime.now() - last_date).days
                         
                         # 如果最近一次记录超过14天，且进度与当前一致 (说明这14天没变过)
@@ -768,7 +768,7 @@ class AIInsightService:
                     start_p = history[0]['progress'] or 0
                     end_p = history[-1]['progress'] or 0
                     try:
-                        days = (datetime.strptime(history[-1]['record_date'], '%Y-%m-%d') - datetime.strptime(history[0]['record_date'], '%Y-%m-%d')).days
+                        days = (datetime.strptime(str(history[-1]['record_date'])[:10], '%Y-%m-%d') - datetime.strptime(str(history[0]['record_date'])[:10], '%Y-%m-%d')).days
                         if days > 0:
                             velocity = (end_p - start_p) / float(days)
                     except Exception as ex:
@@ -808,7 +808,7 @@ class AIInsightService:
                 delay_days = 0
                 if project['plan_end_date'] and velocity > 0:
                     try:
-                        plan_end = datetime.strptime(project['plan_end_date'], '%Y-%m-%d')
+                        plan_end = datetime.strptime(str(project['plan_end_date'])[:10], '%Y-%m-%d')
                         actual_pred = datetime.now() + timedelta(days=int(days_needed))
                         if actual_pred > plan_end:
                             is_delay_predicted = True
@@ -990,10 +990,10 @@ class AIInsightService:
                 tasks = conn.execute('''
                     SELECT t.* FROM tasks t
                     JOIN project_stages s ON t.stage_id = s.id
-                    WHERE s.project_id = ? AND t.is_completed = 0
-                ''', (project_id,)).fetchall()
+                    WHERE s.project_id = ? AND t.is_completed = ?
+                ''', (project_id, False)).fetchall()
 
-                milestones = conn.execute('SELECT * FROM milestones WHERE project_id = ? AND is_completed = 0', (project_id,)).fetchall()
+                milestones = conn.execute('SELECT * FROM milestones WHERE project_id = ? AND is_completed = ?', (project_id, False)).fetchall()
 
             # 2. 调用 AI 进行多维评估
             prompt = f"""

@@ -1,6 +1,11 @@
 # app_config.py
 
 import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ========== 企业微信自建应用配置 ==========
 WECOM_CONFIG = {
@@ -41,6 +46,20 @@ GEO_CONFIG = {
     "GOOGLE_MAPS_API_KEY": os.environ.get("GOOGLE_MAPS_API_KEY", ""),
     # 默认解析优先级: baidu 或 google
     "DEFAULT_PROVIDER": os.environ.get("DEFAULT_GEO_PROVIDER", "baidu")
+}
+
+# ========== 数据库配置 (PostgreSQL) ==========
+DB_CONFIG = {
+    "TYPE": os.environ.get("DB_TYPE", "sqlite"),  # 'sqlite' or 'postgres'
+    "POSTGRES": {
+        "HOST": os.environ.get("DB_HOST", "localhost"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+        "NAME": os.environ.get("DB_NAME", "icu_pm"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "MIN_CONN": 1,
+        "MAX_CONN": 10
+    }
 }
 
 

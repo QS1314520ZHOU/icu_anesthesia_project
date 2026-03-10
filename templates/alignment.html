@@ -900,7 +900,7 @@
             const results = detail.results || [];
             const tbody = document.querySelector('#align-table tbody');
             tbody.innerHTML = results.map(r => {
-                const badge = `<span class="badge badge-${r.match_status}">${{ matched: '✅ 匹配', partial: '⚠️ 部分', missing: '❌ 缺失', extra: '➕ 多出' }[r.match_status] || r.match_status
+                const badge = `<span class="badge badge-${r.match_status}">${({ matched: '✅ 匹配', partial: '⚠️ 部分', missing: '❌ 缺失', extra: '➕ 多出' })[r.match_status] || r.match_status
                     }</span>`;
                 const conf = r.confidence ? `${Math.round(r.confidence * 100)}%` : '-';
                 const specName = r.spec_interface_name || (r.match_status === 'extra' ? '-' : '?');

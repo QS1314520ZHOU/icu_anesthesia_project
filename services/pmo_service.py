@@ -15,7 +15,7 @@ class PMOService:
                 regional_stats = conn.execute('''
                     SELECT hospital_name as region, COUNT(*) as count, AVG(progress) as avg_progress
                     FROM projects
-                    WHERE status != "已结项"
+                    WHERE status != '已结项'
                     GROUP BY hospital_name
                 ''').fetchall()
 
@@ -23,7 +23,7 @@ class PMOService:
                 pm_workload = conn.execute('''
                     SELECT project_manager, COUNT(*) as count, SUM(progress)/COUNT(*) as avg_progress
                     FROM projects
-                    WHERE status != "已结项"
+                    WHERE status != '已结项'
                     GROUP BY project_manager
                     ORDER BY count DESC
                 ''').fetchall()
@@ -32,7 +32,7 @@ class PMOService:
                 risk_distribution = conn.execute('''
                     SELECT severity as risk_level, COUNT(*) as count
                     FROM issues
-                    WHERE status != "已解决" AND status != "已关闭"
+                    WHERE status != '已解决' AND status != '已关闭'
                     GROUP BY severity
                 ''').fetchall()
 

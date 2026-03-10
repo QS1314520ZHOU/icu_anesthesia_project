@@ -22,18 +22,15 @@ class WeComPushService:
     def _get_wecom_userid(self, member_name: str) -> str:
         """通过成员姓名查找企业微信 userid"""
         with DatabasePool.get_connection() as conn:
-            row = conn.execute(
-                'SELECT wecom_userid FROM users WHERE display_name = ? AND wecom_userid IS NOT NULL',
-                (member_name,)
-            ).fetchone()
+            sql = DatabasePool.format_sql('SELECT wecom_userid FROM users WHERE display_name = ? AND wecom_userid IS NOT NULL')
+            row = conn.execute(sql, (member_name,)).fetchone()
             return row['wecom_userid'] if row else None
     
     def _get_project_manager_userid(self, project_id: int) -> str:
         """获取项目经理的企业微信 userid"""
         with DatabasePool.get_connection() as conn:
-            project = conn.execute(
-                'SELECT project_manager FROM projects WHERE id = ?', (project_id,)
-            ).fetchone()
+            sql = DatabasePool.format_sql('SELECT project_manager FROM projects WHERE id = ?')
+            project = conn.execute(sql, (project_id,)).fetchone()
             if project and project['project_manager']:
                 return self._get_wecom_userid(project['project_manager'])
         return None
@@ -49,10 +46,8 @@ class WeComPushService:
             
         # 2. 获取其他所有在岗成员
         with DatabasePool.get_connection() as conn:
-            members = conn.execute(
-                "SELECT name FROM project_members WHERE project_id = ? AND status = '在岗'",
-                (project_id,)
-            ).fetchall()
+            sql = DatabasePool.format_sql("SELECT name FROM project_members WHERE project_id = ? AND status = '在岗'")
+            members = conn.execute(sql, (project_id,)).fetchall()
             
             for m in members:
                 uid = self._get_wecom_userid(m['name'])
@@ -101,8 +96,8 @@ class WeComPushService:
             return
         
         with DatabasePool.get_connection() as conn:
-            project = conn.execute('SELECT project_name, progress FROM projects WHERE id = ?', 
-                                  (project_id,)).fetchone()
+            sql = DatabasePool.format_sql('SELECT project_name, progress FROM projects WHERE id = ?')
+            project = conn.execute(sql, (project_id,)).fetchone()
         
         if not project:
             return
@@ -144,8 +139,8 @@ class WeComPushService:
             return
         
         with DatabasePool.get_connection() as conn:
-            project = conn.execute('SELECT project_name, hospital_name, progress FROM projects WHERE id = ?', 
-                                  (project_id,)).fetchone()
+            sql = DatabasePool.format_sql('SELECT project_name, hospital_name, progress FROM projects WHERE id = ?')
+            project = conn.execute(sql, (project_id,)).fetchone()
         
         if not project:
             return
@@ -182,8 +177,8 @@ class WeComPushService:
             return
         
         with DatabasePool.get_connection() as conn:
-            project = conn.execute('SELECT project_name, hospital_name FROM projects WHERE id = ?',
-                                  (project_id,)).fetchone()
+            sql = DatabasePool.format_sql('SELECT project_name, hospital_name FROM projects WHERE id = ?')
+            project = conn.execute(sql, (project_id,)).fetchone()
         
         if not project:
             return
@@ -249,9 +244,8 @@ class WeComPushService:
         # 超过21天，升级通知 admin/PMO
         if idle_days > 21:
             with DatabasePool.get_connection() as conn:
-                admins = conn.execute(
-                    "SELECT wecom_userid FROM users WHERE role = 'admin' AND wecom_userid IS NOT NULL"
-                ).fetchall()
+                sql = DatabasePool.format_sql("SELECT wecom_userid FROM users WHERE role = 'admin' AND wecom_userid IS NOT NULL")
+                admins = conn.execute(sql).fetchall()
             
             for admin in admins:
                 wecom_service.send_markdown(admin['wecom_userid'],
@@ -270,10 +264,8 @@ class WeComPushService:
             return
         
         with DatabasePool.get_connection() as conn:
-            contacts = conn.execute(
-                'SELECT name, email FROM customer_contacts WHERE project_id = ? AND is_primary = 1',
-                (project_id,)
-            ).fetchall()
+            sql = DatabasePool.format_sql('SELECT name, email FROM customer_contacts WHERE project_id = ? AND is_primary = TRUE')
+            contacts = conn.execute(sql, (project_id,)).fetchall()
         
         # 外部联系人推送需要额外的 external_userid 映射
         # 这里先记录日志，后续根据实际对接情况完善

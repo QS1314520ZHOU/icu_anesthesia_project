@@ -60,12 +60,13 @@ def kb_search():
     
     with DatabasePool.get_connection() as conn:
         # 第一阶段：关键词粗筛（不加载 embedding，减小内存压力）
-        keyword_candidates = conn.execute('''
+        sql_kb = DatabasePool.format_sql('''
             SELECT id, title, content, category, tags 
             FROM knowledge_base 
             WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
             LIMIT 100
-        ''', (f'%{query}%', f'%{query}%', f'%{query}%')).fetchall()
+        ''')
+        keyword_candidates = conn.execute(sql_kb, (f'%{query}%', f'%{query}%', f'%{query}%')).fetchall()
         
         kb_items = []
         if len(keyword_candidates) < 10:
@@ -78,11 +79,8 @@ def kb_search():
         else:
             # 第二阶段：只对候选集加载 embedding 做精排
             ids = [r['id'] for r in keyword_candidates]
-            placeholders = ','.join('?' * len(ids))
-            rows = conn.execute(
-                f'SELECT id, title, content, category, tags, embedding '
-                f'FROM knowledge_base WHERE id IN ({placeholders})', ids
-            ).fetchall()
+            sql_rows = DatabasePool.format_sql(f'SELECT id, title, content, category, tags, embedding FROM knowledge_base WHERE id IN ({",".join("?" * len(ids))})')
+            rows = conn.execute(sql_rows, ids).fetchall()
             kb_items = [dict(r) for r in rows]
     
     # 向量 + 关键词混合检索
@@ -131,12 +129,13 @@ def ai_chat():
     if use_rag:
         with DatabasePool.get_connection() as conn:
             # AI 对话同样采用两阶段 RAG 优化
-            keyword_candidates = conn.execute('''
+            sql_kb = DatabasePool.format_sql('''
                 SELECT id, title, content, category, tags 
                 FROM knowledge_base 
                 WHERE title LIKE ? OR content LIKE ? OR tags LIKE ?
                 LIMIT 100
-            ''', (f'%{message}%', f'%{message}%', f'%{message}%')).fetchall()
+            ''')
+            keyword_candidates = conn.execute(sql_kb, (f'%{message}%', f'%{message}%', f'%{message}%')).fetchall()
             
             kb_items = []
             if len(keyword_candidates) < 5:
@@ -148,11 +147,8 @@ def ai_chat():
                 kb_items = [dict(r) for r in all_rows]
             else:
                 ids = [r['id'] for r in keyword_candidates]
-                placeholders = ','.join('?' * len(ids))
-                rows = conn.execute(
-                    f'SELECT id, title, content, category, tags, embedding '
-                    f'FROM knowledge_base WHERE id IN ({placeholders})', ids
-                ).fetchall()
+                sql_rows = DatabasePool.format_sql(f'SELECT id, title, content, category, tags, embedding FROM knowledge_base WHERE id IN ({",".join("?" * len(ids))})')
+                rows = conn.execute(sql_rows, ids).fetchall()
                 kb_items = [dict(r) for r in rows]
         
         query_vector = ai_service.get_embeddings(message)
@@ -196,46 +192,53 @@ def ai_chat():
 def project_briefing(project_id):
     """AI 生成项目速查简报 —— 一页掌握全局"""
     with DatabasePool.get_connection() as conn:
-        project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+        sql_p = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = conn.execute(sql_p, (project_id,)).fetchone()
         if not project:
             return api_response(False, message='项目不存在')
         p = dict(project)
         
         # 阶段进展
-        stages = conn.execute('''
+        sql_st = DatabasePool.format_sql('''
             SELECT stage_name, status, progress, responsible_person 
             FROM project_stages WHERE project_id = ? ORDER BY stage_order
-        ''', (project_id,)).fetchall()
+        ''')
+        stages = conn.execute(sql_st, (project_id,)).fetchall()
         
         # 活跃问题
-        issues = conn.execute('''
+        sql_iss = DatabasePool.format_sql('''
             SELECT description, severity, status FROM issues 
             WHERE project_id = ? AND status != '已解决' ORDER BY severity
-        ''', (project_id,)).fetchall()
+        ''')
+        issues = conn.execute(sql_iss, (project_id,)).fetchall()
         
         # 甲方关键人
-        contacts = conn.execute('''
+        sql_con = DatabasePool.format_sql('''
             SELECT name, department, position, phone, remark 
             FROM customer_contacts WHERE project_id = ?
-        ''', (project_id,)).fetchall()
+        ''')
+        contacts = conn.execute(sql_con, (project_id,)).fetchall()
         
         # 最近5条工作日志（了解前人做了什么）
-        recent_logs = conn.execute('''
+        sql_log = DatabasePool.format_sql('''
             SELECT member_name, log_date, work_content, issues_encountered 
             FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5
-        ''', (project_id,)).fetchall()
+        ''')
+        recent_logs = conn.execute(sql_log, (project_id,)).fetchall()
         
         # 接口完成情况
-        interfaces = conn.execute('''
+        sql_if = DatabasePool.format_sql('''
             SELECT system_name, interface_name, status 
             FROM interfaces WHERE project_id = ?
-        ''', (project_id,)).fetchall()
+        ''')
+        interfaces = conn.execute(sql_if, (project_id,)).fetchall()
         
         # 里程碑
-        milestones = conn.execute('''
+        sql_mil = DatabasePool.format_sql('''
             SELECT name, target_date, is_completed 
             FROM milestones WHERE project_id = ? ORDER BY target_date
-        ''', (project_id,)).fetchall()
+        ''')
+        milestones = conn.execute(sql_mil, (project_id,)).fetchall()
 
     # 拼 AI prompt
     system_prompt = """你是 ICU 项目交付总监。请根据项目数据，生成一份**现场工程师速查卡**。
@@ -317,11 +320,12 @@ def quick_log():
     # 写入数据库
     from datetime import datetime
     with DatabasePool.get_connection() as conn:
-        conn.execute('''
+        sql = DatabasePool.format_sql('''
             INSERT INTO work_logs (project_id, member_name, log_date, work_content, 
                                   issues_encountered, tomorrow_plan, work_type, work_hours)
             VALUES (?, ?, ?, ?, ?, ?, '现场', ?)
-        ''', (
+        ''')
+        conn.execute(sql, (
             project_id,
             request.json.get('engineer_name', ''),
             datetime.now().strftime('%Y-%m-%d'),
@@ -370,11 +374,12 @@ def quick_meeting_note():
     
     # 存入沟通记录表
     with DatabasePool.get_connection() as conn:
-        conn.execute('''
+        sql_com = DatabasePool.format_sql('''
             INSERT INTO customer_communications 
             (project_id, contact_date, contact_person, contact_method, summary, created_by)
             VALUES (?, ?, ?, '现场沟通', ?, ?)
-        ''', (
+        ''')
+        conn.execute(sql_com, (
             project_id,
             datetime.now().strftime('%Y-%m-%d'),
             parsed.get('contact_person', ''),
@@ -385,10 +390,11 @@ def quick_meeting_note():
         # 自动创建提醒（如果有截止日期）
         for dl in parsed.get('deadlines', []):
             if dl.get('date') and len(dl['date']) == 10:  # YYYY-MM-DD
-                conn.execute('''
+                sql_notif = DatabasePool.format_sql('''
                     INSERT INTO notifications (project_id, title, content, type, due_date)
                     VALUES (?, ?, ?, 'warning', ?)
-                ''', (project_id, f"甲方截止日: {dl['item']}", 
+                ''')
+                conn.execute(sql_notif, (project_id, f"甲方截止日: {dl['item']}", 
                       f"来源: {parsed.get('contact_person','')}沟通记录", dl['date']))
         
         conn.commit()
@@ -410,7 +416,8 @@ def contribute_knowledge():
     if issue_id:
         # 从问题记录自动生成
         with DatabasePool.get_connection() as conn:
-            issue = conn.execute('SELECT * FROM issues WHERE id = ?', (issue_id,)).fetchone()
+            sql_is = DatabasePool.format_sql('SELECT * FROM issues WHERE id = ?')
+            issue = conn.execute(sql_is, (issue_id,)).fetchone()
             if not issue:
                 return api_response(False, message='问题不存在')
             issue = dict(issue)
@@ -452,10 +459,11 @@ def contribute_knowledge():
     
     # 写入知识库
     with DatabasePool.get_connection() as conn:
-        conn.execute('''
+        sql_kb = DatabasePool.format_sql('''
             INSERT INTO knowledge_base (category, title, content, tags, project_id, author)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
+        ''')
+        conn.execute(sql_kb, (
             kb_data.get('category', '现场经验'),
             kb_data.get('title', ''),
             kb_data.get('content', ''),
@@ -482,31 +490,35 @@ def generate_daily_report(project_id):
     today = date.today().strftime('%Y-%m-%d')
     
     with DatabasePool.get_connection() as conn:
-        project = conn.execute('SELECT project_name, hospital_name FROM projects WHERE id = ?', 
-                              (project_id,)).fetchone()
+        sql_p = DatabasePool.format_sql('SELECT project_name, hospital_name FROM projects WHERE id = ?')
+        project = conn.execute(sql_p, (project_id,)).fetchone()
         
         # 今日所有日志
-        logs = conn.execute('''
+        sql_logs = DatabasePool.format_sql('''
             SELECT member_name, work_content, issues_encountered, tomorrow_plan 
             FROM work_logs WHERE project_id = ? AND log_date = ?
-        ''', (project_id, today)).fetchall()
+        ''')
+        logs = conn.execute(sql_logs, (project_id, today)).fetchall()
         
         # 今日新增/解决的问题
-        new_issues = conn.execute('''
+        sql_new = DatabasePool.format_sql('''
             SELECT description, severity FROM issues 
             WHERE project_id = ? AND date(created_at) = ?
-        ''', (project_id, today)).fetchall()
+        ''')
+        new_issues = conn.execute(sql_new, (project_id, today)).fetchall()
         
-        resolved_issues = conn.execute('''
+        sql_res = DatabasePool.format_sql('''
             SELECT description FROM issues 
             WHERE project_id = ? AND date(resolved_at) = ?
-        ''', (project_id, today)).fetchall()
+        ''')
+        resolved_issues = conn.execute(sql_res, (project_id, today)).fetchall()
         
         # 今日沟通记录
-        comms = conn.execute('''
+        sql_coms = DatabasePool.format_sql('''
             SELECT contact_person, summary FROM customer_communications 
             WHERE project_id = ? AND contact_date = ?
-        ''', (project_id, today)).fetchall()
+        ''')
+        comms = conn.execute(sql_coms, (project_id, today)).fetchall()
     
     if not logs:
         return api_response(True, data={'report': '今日暂无工作日志记录，请先提交日志。'})
@@ -542,33 +554,30 @@ def acceptance_readiness(project_id):
     """验收准备度自动检查"""
     with DatabasePool.get_connection() as conn:
         # 任务完成率
-        total_tasks = conn.execute(
-            'SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=?', 
-            (project_id,)).fetchone()[0]
-        done_tasks = conn.execute(
-            'SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=? AND t.is_completed=1', 
-            (project_id,)).fetchone()[0]
+        sql_total = DatabasePool.format_sql('SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=?')
+        total_tasks = conn.execute(sql_total, (project_id,)).fetchone()[0]
+        
+        sql_done = DatabasePool.format_sql('SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=? AND t.is_completed=?')
+        done_tasks = conn.execute(sql_done, (project_id, True)).fetchone()[0]
         
         # 接口完成情况
-        interfaces = conn.execute(
-            'SELECT system_name, interface_name, status FROM interfaces WHERE project_id=?', 
-            (project_id,)).fetchall()
+        sql_if = DatabasePool.format_sql('SELECT system_name, interface_name, status FROM interfaces WHERE project_id=?')
+        interfaces = conn.execute(sql_if, (project_id,)).fetchall()
         
         # 未解决问题
-        open_issues = conn.execute(
-            'SELECT description, severity FROM issues WHERE project_id=? AND status!="已解决"', 
-            (project_id,)).fetchall()
+        sql_iss = DatabasePool.format_sql("SELECT description, severity FROM issues WHERE project_id=? AND status!='已解决'")
+        open_issues = conn.execute(sql_iss, (project_id,)).fetchall()
         
         # 培训记录（检查是否有培训日志）
-        training_logs = conn.execute('''
+        sql_tr = DatabasePool.format_sql('''
             SELECT COUNT(*) FROM work_logs 
             WHERE project_id=? AND (work_content LIKE '%培训%' OR work_content LIKE '%training%')
-        ''', (project_id,)).fetchone()[0]
+        ''')
+        training_logs = conn.execute(sql_tr, (project_id,)).fetchone()[0]
         
         # 文档
-        docs = conn.execute(
-            'SELECT doc_name, doc_category FROM project_documents WHERE project_id=?', 
-            (project_id,)).fetchall()
+        sql_doc = DatabasePool.format_sql('SELECT doc_name, doc_category FROM project_documents WHERE project_id=?')
+        docs = conn.execute(sql_doc, (project_id,)).fetchall()
     
     checklist = []
     score = 0

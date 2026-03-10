@@ -99,28 +99,27 @@ def get_standup_history():
     limit = request.args.get('limit', 20, type=int)
     
     try:
-        from database import get_db, close_db
-        conn = get_db()
-        
-        # 从 report_archive 查找站会纪要类型的归档
-        query = '''
-            SELECT id, project_id, report_type, report_date, content, generated_by, created_at
-            FROM report_archive
-            WHERE report_type = 'standup'
-        '''
-        params = []
-        
-        if project_id:
-            query += ' AND project_id = ?'
-            params.append(project_id)
-        
-        query += ' ORDER BY report_date DESC LIMIT ?'
-        params.append(limit)
-        
-        rows = conn.execute(query, params).fetchall()
-        close_db()
-        
-        return jsonify([dict(r) for r in rows])
+        from database import DatabasePool
+        with DatabasePool.get_connection() as conn:
+            # 从 report_archive 查找站会纪要类型的归档
+            query = '''
+                SELECT id, project_id, report_type, report_date, content, generated_by, created_at
+                FROM report_archive
+                WHERE report_type = 'standup'
+            '''
+            params = []
+            
+            if project_id:
+                query += ' AND project_id = ?'
+                params.append(project_id)
+            
+            query += ' ORDER BY report_date DESC LIMIT ?'
+            params.append(limit)
+            
+            sql = DatabasePool.format_sql(query)
+            rows = conn.execute(sql, params).fetchall()
+            
+            return jsonify([dict(r) for r in rows])
     except Exception as e:
         print(f"Standup History Error: {e}")
         return jsonify([])
@@ -137,28 +136,17 @@ def save_standup_archive(project_id):
         return jsonify({'success': False, 'message': '纪要内容不能为空'}), 400
     
     try:
-        from database import get_db, close_db
-        conn = get_db()
-        
-        # 检查是否已有当天的归档
-        existing = conn.execute(
-            'SELECT id FROM report_archive WHERE project_id = ? AND report_type = ? AND report_date = ?',
-            (project_id, 'standup', date_str)
-        ).fetchone()
-        
-        if existing:
-            conn.execute(
-                'UPDATE report_archive SET content = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?',
-                (content, existing['id'])
-            )
-        else:
-            conn.execute('''
-                INSERT INTO report_archive (project_id, report_type, report_date, content, generated_by)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (project_id, 'standup', date_str, content, 'ai'))
-        
-        conn.commit()
-        close_db()
+        from database import DatabasePool
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                INSERT INTO report_archive (project_id, report_type, report_date, content, generated_by, created_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (project_id, report_type, report_date) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    created_at = EXCLUDED.created_at
+            ''')
+            conn.execute(sql, (project_id, 'standup', date_str, content, 'ai'))
+            conn.commit()
         
         return jsonify({'success': True, 'message': '纪要已保存'})
     except Exception as e:
@@ -205,18 +193,35 @@ def update_wecom_config():
     enabled = data.get('enabled', False)
     
     from database import DatabasePool
-    from app_config import NOTIFICATION_CONFIG
+    from app_config import DB_CONFIG
+    db_type = DB_CONFIG.get('TYPE', 'sqlite')
     
     with DatabasePool.get_connection() as conn:
         # 如果提交的是带有省略号的预览值，则不更新数据库中的真实 Webhook
         if '...' in webhook:
-            row = conn.execute("SELECT value FROM system_config WHERE config_key = 'wecom_webhook'").fetchone()
+            sql_get = DatabasePool.format_sql("SELECT value FROM system_config WHERE config_key = ?")
+            row = conn.execute(sql_get, ('wecom_webhook',)).fetchone()
             if row:
                 webhook = row['value'] # 恢复为数据库中的全量值
         
         # 写入数据库 system_config
-        conn.execute("INSERT OR REPLACE INTO system_config (config_key, value) VALUES ('wecom_webhook', ?)", (webhook,))
-        conn.execute("INSERT OR REPLACE INTO system_config (config_key, value) VALUES ('wecom_enabled', ?)", ('true' if enabled else 'false',))
+        sql_webhook = DatabasePool.format_sql('''
+            INSERT INTO system_config (config_key, value, updated_at) 
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (config_key) DO UPDATE SET 
+                value = EXCLUDED.value, 
+                updated_at = EXCLUDED.updated_at
+        ''')
+        conn.execute(sql_webhook, ('wecom_webhook', webhook))
+        
+        sql_enabled = DatabasePool.format_sql('''
+            INSERT INTO system_config (config_key, value, updated_at) 
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (config_key) DO UPDATE SET 
+                value = EXCLUDED.value, 
+                updated_at = EXCLUDED.updated_at
+        ''')
+        conn.execute(sql_enabled, ('wecom_enabled', 'true' if enabled else 'false'))
         conn.commit()
     
     # 同步更新内存配置

@@ -1,6 +1,4 @@
-
 import json
-import sqlite3
 from services.ai_service import ai_service
 from database import DatabasePool
 
@@ -27,7 +25,11 @@ Columns: id, project_id, risk_score, sentiment_score, record_date
 
     def convert_to_sql(self, project_id, question):
         """将自然语言转换为 SQL"""
-        system_prompt = f"""You are a SQLite expert. Your task is to convert the user's question into a READ-ONLY SQL query based on the following schema:
+        from app_config import DB_CONFIG
+        db_type = DB_CONFIG.get('TYPE', 'sqlite')
+        db_flavor = "PostgreSQL" if db_type == 'postgres' else "SQLite"
+        
+        system_prompt = f"""You are a {db_flavor} expert. Your task is to convert the user's question into a READ-ONLY SQL query based on the following schema:
 {self.schema_summary}
 
 Rules:
@@ -39,6 +41,7 @@ Rules:
 6. If the question is about "open" or "unresolved", check `status` != '已解决' or `is_completed` = 0.
 7. Do not use JOINs unless querying the `tasks` table.
 8. Limit results to 20 rows if not specified.
+9. Important: generate valid {db_flavor} syntax.
 """
         try:
             sql = ai_service.call_ai_api(system_prompt, question, task_type="code")
@@ -61,11 +64,12 @@ Rules:
         
         try:
             with DatabasePool.get_connection() as conn:
-                cursor = conn.execute(sql)
+                cursor = conn.cursor()
+                cursor.execute(sql)
                 columns = [description[0] for description in cursor.description]
                 rows = cursor.fetchall()
-                # Convert rows (sqlite3.Row or tuple) to dicts
-                results = [dict(zip(columns, row)) for row in rows]
+                # Convert rows to dicts
+                results = [dict(r) for r in rows]
                 return {
                     "columns": columns,
                     "rows": results,

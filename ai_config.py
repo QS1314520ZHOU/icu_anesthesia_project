@@ -163,20 +163,31 @@ class AIConfigManager:
     def _load_from_database(self):
         """从数据库加载AI配置"""
         try:
-            import sqlite3
-            conn = sqlite3.connect('database.db', check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            # 导入 DatabasePool，假设它在某个地方被定义
+            from database import DatabasePool
             
-            # 检查表是否存在
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ai_configs'")
-            if not cursor.fetchone():
-                conn.close()
-                return []
-            
-            configs = cursor.execute('SELECT * FROM ai_configs WHERE is_active = 1 ORDER BY priority').fetchall()
-            conn.close()
-            return [dict(c) for c in configs]
+            configs = []
+            with DatabasePool.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # 检查表是否存在
+                if DatabasePool.is_postgres():
+                    cursor.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'ai_configs'")
+                else: # Assume SQLite if not Postgres
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ai_configs'")
+                    
+                if cursor.fetchone():
+                    # 如果表存在，则加载配置
+                    # 使用 fetchall() 获取所有行，并转换为字典列表
+                    configs = cursor.execute(DatabasePool.format_sql('SELECT * FROM ai_configs WHERE is_active = ? ORDER BY priority'), (True,)).fetchall()
+                    # Ensure rows are dict-like if not already (e.g., for psycopg2.extras.RealDictRow)
+                    if not configs or not isinstance(configs[0], dict):
+                        # For sqlite3.Row or similar, convert to dict
+                        configs = [dict(row) for row in configs]
+            return configs
+        except ImportError:
+            logger.warning("未找到 DatabasePool 模块，跳过数据库加载。请确保数据库模块已正确配置。")
+            return []
         except Exception as e:
             logger.warning(f"从数据库加载配置失败: {e}")
             return []

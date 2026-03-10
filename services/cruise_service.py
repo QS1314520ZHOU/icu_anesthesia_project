@@ -9,7 +9,7 @@ class CruiseService:
         """执行全量项目巡航"""
         try:
             with DatabasePool.get_connection() as conn:
-                projects = conn.execute('SELECT id, project_name, hospital_name, status FROM projects WHERE status != "已完成"').fetchall()
+                projects = conn.execute("SELECT id, project_name, hospital_name, status FROM projects WHERE status != '已完成'").fetchall()
                 
                 scan_results = {
                     "scan_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),

@@ -8,8 +8,7 @@
 
 import logging
 import json
-from datetime import datetime, timedelta
-from database import get_db, close_db
+from database import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -19,110 +18,107 @@ class SnapshotService:
     @staticmethod
     def capture_snapshot(project_id, snapshot_type='manual'):
         """为项目拍摄进度快照"""
-        conn = get_db()
-
-        project = conn.execute(
-            'SELECT id, project_name, status, progress FROM projects WHERE id = ?',
-            (project_id,)
-        ).fetchone()
-
-        if not project:
-            close_db()
-            return None
-
-        # 获取每个阶段的进度
-        stages = conn.execute('''
-            SELECT id, stage_name, stage_order, progress, status
-            FROM project_stages
-            WHERE project_id = ?
-            ORDER BY stage_order
-        ''', (project_id,)).fetchall()
-
-        # 获取任务统计
-        task_stats = conn.execute('''
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN t.is_completed = 1 THEN 1 ELSE 0 END) as completed
-            FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ?
-        ''', (project_id,)).fetchall()[0]
-
-        # 获取问题统计
-        issue_stats = conn.execute('''
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN status NOT IN ('已解决', '已关闭') THEN 1 ELSE 0 END) as open_count
-            FROM issues
-            WHERE project_id = ?
-        ''', (project_id,)).fetchall()[0]
-
-        # 获取接口统计
-        interface_stats = conn.execute('''
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN status = '已完成' THEN 1 ELSE 0 END) as completed
-            FROM interfaces
-            WHERE project_id = ?
-        ''', (project_id,)).fetchall()[0]
-
-        # 构建快照数据
-        snapshot_data = {
-            'overall_progress': project['progress'],
-            'status': project['status'],
-            'stages': [{
-                'stage_name': s['stage_name'],
-                'stage_order': s['stage_order'],
-                'progress': s['progress'],
-                'status': s['status']
-            } for s in stages],
-            'tasks': {
-                'total': task_stats['total'] or 0,
-                'completed': task_stats['completed'] or 0
-            },
-            'issues': {
-                'total': issue_stats['total'] or 0,
-                'open': issue_stats['open_count'] or 0
-            },
-            'interfaces': {
-                'total': interface_stats['total'] or 0,
-                'completed': interface_stats['completed'] or 0
+        with DatabasePool.get_connection() as conn:
+            sql_p = DatabasePool.format_sql('SELECT id, project_name, status, progress FROM projects WHERE id = ?')
+            project = conn.execute(sql_p, (project_id,)).fetchone()
+    
+            if not project:
+                return None
+    
+            # 获取每个阶段的进度
+            sql_st = DatabasePool.format_sql('''
+                SELECT id, stage_name, stage_order, progress, status
+                FROM project_stages
+                WHERE project_id = ?
+                ORDER BY stage_order
+            ''')
+            stages = conn.execute(sql_st, (project_id,)).fetchall()
+    
+            # 获取任务统计
+            sql_ts = DatabasePool.format_sql('''
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN t.is_completed = ? THEN 1 ELSE 0 END) as completed
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+            ''')
+            task_stats = conn.execute(sql_ts, (True, project_id)).fetchone()
+    
+            # 获取问题统计
+            sql_is = DatabasePool.format_sql('''
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status NOT IN ('已解决', '已关闭') THEN 1 ELSE 0 END) as open_count
+                FROM issues
+                WHERE project_id = ?
+            ''')
+            issue_stats = conn.execute(sql_is, (project_id,)).fetchone()
+    
+            # 获取接口统计
+            sql_if = DatabasePool.format_sql('''
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = '已完成' THEN 1 ELSE 0 END) as completed
+                FROM interfaces
+                WHERE project_id = ?
+            ''')
+            interface_stats = conn.execute(sql_if, (project_id,)).fetchone()
+    
+            # 构建快照数据
+            snapshot_data = {
+                'overall_progress': project['progress'],
+                'status': project['status'],
+                'stages': [{
+                    'stage_name': s['stage_name'],
+                    'stage_order': s['stage_order'],
+                    'progress': s['progress'],
+                    'status': s['status']
+                } for s in stages],
+                'tasks': {
+                    'total': task_stats['total'] or 0,
+                    'completed': task_stats['completed'] or 0
+                },
+                'issues': {
+                    'total': issue_stats['total'] or 0,
+                    'open': issue_stats['open_count'] or 0
+                },
+                'interfaces': {
+                    'total': interface_stats['total'] or 0,
+                    'completed': interface_stats['completed'] or 0
+                }
             }
-        }
-
-        today = datetime.now().strftime('%Y-%m-%d')
-
-        # 检查今天是否已有快照，有则更新
-        existing = conn.execute(
-            'SELECT id FROM progress_snapshots WHERE project_id = ? AND snapshot_date = ?',
-            (project_id, today)
-        ).fetchone()
-
-        if existing:
-            conn.execute('''
-                UPDATE progress_snapshots
-                SET snapshot_data = ?, overall_progress = ?, snapshot_type = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            ''', (json.dumps(snapshot_data, ensure_ascii=False), project['progress'], snapshot_type, existing['id']))
-        else:
-            conn.execute('''
-                INSERT INTO progress_snapshots (project_id, snapshot_date, overall_progress, snapshot_data, snapshot_type)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (project_id, today, project['progress'], json.dumps(snapshot_data, ensure_ascii=False), snapshot_type))
-
-        conn.commit()
-        close_db()
-        return snapshot_data
+    
+            today = datetime.now().strftime('%Y-%m-%d')
+    
+            # 检查今天是否已有快照，有则更新
+            sql_check = DatabasePool.format_sql('SELECT id FROM progress_snapshots WHERE project_id = ? AND snapshot_date = ?')
+            existing = conn.execute(sql_check, (project_id, today)).fetchone()
+    
+            if existing:
+                sql_up = DatabasePool.format_sql('''
+                    UPDATE progress_snapshots
+                    SET snapshot_data = ?, overall_progress = ?, snapshot_type = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''')
+                conn.execute(sql_up, (json.dumps(snapshot_data, ensure_ascii=False), project['progress'], snapshot_type, existing['id']))
+            else:
+                sql_ins = DatabasePool.format_sql('''
+                    INSERT INTO progress_snapshots (project_id, snapshot_date, overall_progress, snapshot_data, snapshot_type)
+                    VALUES (?, ?, ?, ?, ?)
+                ''')
+                conn.execute(sql_ins, (project_id, today, project['progress'], json.dumps(snapshot_data, ensure_ascii=False), snapshot_type))
+    
+            conn.commit()
+            return snapshot_data
 
     @staticmethod
     def capture_all_snapshots():
         """为所有活跃项目拍摄快照"""
-        conn = get_db()
-        projects = conn.execute('''
-            SELECT id FROM projects WHERE status NOT IN ('已完成', '已终止')
-        ''').fetchall()
-        close_db()
-
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('SELECT id FROM projects WHERE status NOT IN (\'已完成\', \'已终止\')')
+            projects = conn.execute(sql).fetchall()
+    
         results = []
         for p in projects:
             try:
@@ -130,24 +126,22 @@ class SnapshotService:
                 results.append({'project_id': p['id'], 'success': True})
             except Exception as e:
                 results.append({'project_id': p['id'], 'success': False, 'error': str(e)})
-
+    
         return results
 
     @staticmethod
     def get_snapshots(project_id, weeks=8):
         """获取项目最近N周的快照数据"""
-        conn = get_db()
-
-        snapshots = conn.execute('''
-            SELECT id, snapshot_date, overall_progress, snapshot_data, snapshot_type, created_at
-            FROM progress_snapshots
-            WHERE project_id = ?
-            ORDER BY snapshot_date DESC
-            LIMIT ?
-        ''', (project_id, weeks * 7)).fetchall()
-
-        close_db()
-
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT id, snapshot_date, overall_progress, snapshot_data, snapshot_type, created_at
+                FROM progress_snapshots
+                WHERE project_id = ?
+                ORDER BY snapshot_date DESC
+                LIMIT ?
+            ''')
+            snapshots = conn.execute(sql, (project_id, weeks * 7)).fetchall()
+    
         result = []
         for s in snapshots:
             data = json.loads(s['snapshot_data']) if s['snapshot_data'] else {}
@@ -158,7 +152,7 @@ class SnapshotService:
                 'data': data,
                 'type': s['snapshot_type']
             })
-
+    
         return result
 
     @staticmethod
@@ -264,12 +258,12 @@ class SnapshotService:
         if not analysis['has_data']:
             return analysis
 
-        conn = get_db()
-        project = conn.execute(
-            'SELECT project_name, hospital_name, status, progress, plan_start_date, plan_end_date FROM projects WHERE id = ?',
-            (project_id,)
-        ).fetchone()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT project_name, hospital_name, status, progress, plan_start_date, plan_end_date 
+                FROM projects WHERE id = ?
+            ''')
+            project = conn.execute(sql, (project_id,)).fetchone()
 
         if not project:
             return {'error': '项目不存在'}

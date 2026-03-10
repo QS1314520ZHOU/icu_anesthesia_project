@@ -1,9 +1,9 @@
 from flask import Flask, render_template, request, jsonify, send_file, make_response, send_from_directory
 import logging
+import traceback
 import re
 # Force reload
 # reload_trigger_1
-import sqlite3
 import requests
 import json
 import time
@@ -16,14 +16,15 @@ from datetime import datetime, timedelta
 from threading import Thread
 from werkzeug.utils import secure_filename
 from ai_config import AI_CONFIG, get_model_config, switch_to_backup_api
-from database import get_db, close_db, DatabasePool
+from database import DatabasePool, get_db, close_db
+from db_init import init_db, reload_notification_config, migrate_to_dynamic_milestones, allowed_file
 from api_utils import api_response, validate_json, cached
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 from storage_service import storage_service
 
 app = Flask(__name__)
-app.teardown_appcontext(close_db)
+# app.teardown_appcontext(close_db) # PostgreSQL handled by pool
 
 # 注册蓝图
 @app.route('/debug/routes')
@@ -144,985 +145,24 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def reload_notification_config():
-    """从数据库加载并同步系统通知配置"""
-    try:
-        from app_config import NOTIFICATION_CONFIG
-        with DatabasePool.get_connection() as conn:
-            # 检查表是否存在
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'")
-            if not cursor.fetchone():
-                return
-                
-            configs = conn.execute("SELECT config_key, value FROM system_config").fetchall()
-            for row in configs:
-                key = row['config_key']
-                val = row['value']
-                if key == 'wecom_webhook':
-                    NOTIFICATION_CONFIG['WECOM_WEBHOOK'] = val
-                elif key == 'wecom_enabled':
-                    NOTIFICATION_CONFIG['ENABLE_WECOM'] = val.lower() == 'true'
-            # logger.info("通知配置加载成功")
-    except Exception as e:
-        print(f"Error loading notification config: {e}")
+# reload_notification_config is now imported from db_init.py
 
-def init_db():
-    """初始化数据库并进行必要的升级"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 0. 系统配置表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS system_config (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            config_key TEXT UNIQUE,
-            value TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 升级脚本：增加 WeCom 关联
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
-    except:
-        pass
-    
-    # 1. 项目主表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS projects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_no TEXT UNIQUE,
-            project_name TEXT NOT NULL,
-            hospital_name TEXT NOT NULL,
-            contract_amount REAL,
-            project_manager TEXT,
-            contact_person TEXT,
-            contact_phone TEXT,
-            plan_start_date DATE,
-            plan_end_date DATE,
-            actual_start_date DATE,
-            actual_end_date DATE,
-            status TEXT DEFAULT '待启动',
-            progress INTEGER DEFAULT 0,
-            priority TEXT DEFAULT '普通',
-            icu_beds INTEGER DEFAULT 0,
-            operating_rooms INTEGER DEFAULT 0,
-            pacu_beds INTEGER DEFAULT 0,
-            province TEXT,
-            city TEXT,
-            address TEXT,
-            contract_no TEXT,
-            data_hash TEXT,
-            risk_score REAL DEFAULT 0,
-            risk_analysis TEXT,
-            share_token TEXT UNIQUE,
-            share_enabled INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 升级脚本：添加分享字段
-    try:
-        cursor.execute("ALTER TABLE projects ADD COLUMN share_token TEXT UNIQUE")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE projects ADD COLUMN share_enabled INTEGER DEFAULT 0")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE projects ADD COLUMN risk_analysis TEXT")
-    except: pass
-    
-    # 2. 项目阶段表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_stages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            stage_name TEXT NOT NULL,
-            stage_order INTEGER,
-            plan_start_date DATE,
-            plan_end_date DATE,
-            actual_start_date DATE,
-            actual_end_date DATE,
-            progress INTEGER DEFAULT 0,
-            status TEXT DEFAULT '待开始',
-            responsible_person TEXT,
-            bonus_amount REAL DEFAULT 0,
-            scale_quantity INTEGER DEFAULT 0,
-            scale_unit TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-    
-    # 升级脚本：添加阶段缩放字段
-    try:
-        cursor.execute("ALTER TABLE project_stages ADD COLUMN scale_quantity INTEGER DEFAULT 0")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE project_stages ADD COLUMN scale_unit TEXT")
-    except: pass
-    
-    # 3. 任务表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            stage_id INTEGER,
-            task_name TEXT NOT NULL,
-            is_completed BOOLEAN DEFAULT 0,
-            completed_date DATE,
-            remark TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (stage_id) REFERENCES project_stages(id)
-        )
-    ''')
-
-    # 3.5. 里程碑表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS milestones (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            name TEXT NOT NULL,
-            target_date DATE,
-            is_completed BOOLEAN DEFAULT 0,
-            completed_date DATE,
-            is_celebrated BOOLEAN DEFAULT 0,
-            remark TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            UNIQUE(project_id, name)
-        )
-    ''')
-    
-    # 4. 接口对接表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS interfaces (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            system_name TEXT,
-            interface_name TEXT,
-            status TEXT DEFAULT '待开发',
-            plan_date DATE,
-            remark TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-    
-    # 5. 问题跟踪表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS issues (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            issue_type TEXT,
-            description TEXT,
-            severity TEXT,
-            status TEXT DEFAULT '待处理',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            resolved_at TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-    
-    # 6. 消息提醒表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            title TEXT NOT NULL,
-            content TEXT,
-            type TEXT DEFAULT 'info',
-            is_read BOOLEAN DEFAULT 0,
-            is_sent BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            due_date DATE,
-            remind_type TEXT DEFAULT 'once',
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 7. 医疗设备对接表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS medical_devices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            device_type TEXT,
-            brand_model TEXT,
-            protocol_type TEXT,
-            ip_address TEXT,
-            status TEXT DEFAULT '未连接',
-            remark TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 8. 周报记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS weekly_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            report_type TEXT DEFAULT 'single',
-            week_start DATE,
-            week_end DATE,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 10. 进度历史记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS progress_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            record_date DATE,
-            progress INTEGER,
-            tasks_total INTEGER,
-            tasks_completed INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 11. 报告缓存表 (Report Cache)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS report_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            report_type TEXT,
-            data_hash TEXT,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 11a. AI 风险历史记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_risk_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            record_date DATE,
-            risk_score REAL,
-            sentiment_score REAL,
-            trend_direction TEXT,
-            key_risk_factors TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-    
-    # 11c. AI 建议与分析缓存
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ai_report_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            report_type TEXT,
-            content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 11b. 报告归档表 (Report Archive - 永久按日期保存)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS report_archive (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            report_type TEXT,
-            report_date DATE,
-            content TEXT,
-            generated_by TEXT DEFAULT 'auto',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # ========== V2.0 新增表 ==========
-
-    # 12. 项目成员表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            name TEXT NOT NULL,
-            role TEXT,
-            phone TEXT,
-            email TEXT,
-            join_date DATE,
-            leave_date DATE,
-            is_onsite BOOLEAN DEFAULT 0,
-            status TEXT DEFAULT '在岗',
-            current_city TEXT,
-            lng REAL,
-            lat REAL,
-            remark TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 13. 甲方联系人表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customer_contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            name TEXT NOT NULL,
-            department TEXT,
-            position TEXT,
-            phone TEXT,
-            email TEXT,
-            is_primary BOOLEAN DEFAULT 0,
-            remark TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 20. 企业微信调试日志表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS wecom_debug_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            msg_type TEXT,
-            raw_xml TEXT,
-            parsed_json TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_departures (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            departure_type TEXT,
-            departure_date DATE,
-            expected_return_date DATE,
-            actual_return_date DATE,
-            reason TEXT,
-            handover_person TEXT,
-            our_persons TEXT,
-            doc_handover BOOLEAN DEFAULT 0,
-            account_handover BOOLEAN DEFAULT 0,
-            training_handover BOOLEAN DEFAULT 0,
-            issue_handover BOOLEAN DEFAULT 0,
-            contact_handover BOOLEAN DEFAULT 0,
-            handover_doc_path TEXT,
-            pending_issues TEXT,
-            remote_support_info TEXT,
-            status TEXT DEFAULT '待审批',
-            approved_by TEXT,
-            approved_at TIMESTAMP,
-            remark TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 14b. 里程碑复盘表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS milestone_retrospectives (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            milestone_id INTEGER,
-            project_id INTEGER,
-            content TEXT,
-            author TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (milestone_id) REFERENCES milestones(id),
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-    
-    # 升级 milestones 增加庆祝状态和完成日期
-    try:
-        cursor.execute("ALTER TABLE milestones ADD COLUMN is_celebrated BOOLEAN DEFAULT 0")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE milestones ADD COLUMN completed_date TEXT")
-    except: pass
-    
-    # 后置补全遗漏的完成日期
-    try:
-        cursor.execute("UPDATE milestones SET completed_date = target_date WHERE is_completed = 1 AND completed_date IS NULL")
-    except: pass
-
-    # 15. 工作日志表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS work_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            member_id INTEGER,
-            member_name TEXT,
-            log_date DATE,
-            work_hours REAL DEFAULT 8,
-            work_type TEXT DEFAULT '现场',
-            work_content TEXT,
-            issues_encountered TEXT,
-            tomorrow_plan TEXT,
-            stage_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            FOREIGN KEY (member_id) REFERENCES project_members(id),
-            FOREIGN KEY (stage_id) REFERENCES project_stages(id)
-        )
-    ''')
-
-    # 16. 项目文档表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_documents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            doc_name TEXT NOT NULL,
-            doc_type TEXT,
-            doc_category TEXT,
-            file_path TEXT,
-            file_size INTEGER,
-            version TEXT DEFAULT 'v1.0',
-            upload_by TEXT,
-            upload_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            remark TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 17. 项目费用表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            expense_date DATE,
-            expense_type TEXT,
-            amount REAL,
-            description TEXT,
-            applicant TEXT,
-            receipt_path TEXT,
-            status TEXT DEFAULT '待报销',
-            approved_by TEXT,
-            approved_at TIMESTAMP,
-            stage_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            FOREIGN KEY (stage_id) REFERENCES project_stages(id)
-        )
-    ''')
-    
-    # 17.5 项目收入表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_revenue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            amount REAL NOT NULL,
-            revenue_date DATE,
-            revenue_type TEXT, -- 合同款, 阶段款, 验收款, 维保费 等
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 18. 项目变更记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_changes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            change_type TEXT,
-            change_title TEXT,
-            change_desc TEXT,
-            impact_analysis TEXT,
-            requested_by TEXT,
-            requested_date DATE,
-            approved_by TEXT,
-            approved_date DATE,
-            status TEXT DEFAULT '待审批',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 19. 验收记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_acceptances (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            acceptance_type TEXT,
-            stage_name TEXT,
-            acceptance_date DATE,
-            acceptance_items TEXT,
-            pass_rate REAL,
-            issues_found TEXT,
-            customer_sign TEXT,
-            our_sign TEXT,
-            status TEXT DEFAULT '待验收',
-            remark TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 20. 客户满意度表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customer_satisfaction (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            survey_date DATE,
-            survey_type TEXT,
-            score_quality INTEGER,
-            score_service INTEGER,
-            score_response INTEGER,
-            score_professional INTEGER,
-            score_overall INTEGER,
-            feedback TEXT,
-            surveyor TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 21. 操作日志表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS operation_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            operator TEXT,
-            operation_type TEXT,
-            entity_type TEXT,
-            entity_id INTEGER,
-            entity_name TEXT,
-            old_value TEXT,
-            new_value TEXT,
-            ip_address TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # 22. 回访记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS follow_up_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            follow_up_date DATE,
-            follow_up_type TEXT,
-            contact_person TEXT,
-            content TEXT,
-            issues_found TEXT,
-            follow_up_by TEXT,
-            next_follow_up_date DATE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 23. 知识库表 (KB)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS knowledge_base (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            category TEXT,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT,
-            assoc_stage TEXT,
-            project_id INTEGER,
-            author TEXT,
-            embedding BLOB,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # 升级 knowledge_base 增加 embedding
-    try:
-        cursor.execute("ALTER TABLE knowledge_base ADD COLUMN embedding BLOB")
-    except: pass
-
-    # 24. 硬件资产报表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hardware_assets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            asset_name TEXT NOT NULL,
-            sn TEXT UNIQUE,
-            model TEXT,
-            status TEXT DEFAULT '在库',
-            location TEXT,
-            responsible_person TEXT,
-            purchase_date DATE,
-            expire_date DATE,
-            remark TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # 25. AI 配置表 (System Config)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ai_configs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            api_key TEXT,
-            base_url TEXT,
-            models TEXT, -- JSON array
-            priority INTEGER DEFAULT 10,
-            is_active BOOLEAN DEFAULT 1,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
+# init_db is now imported from db_init.py
 
 
-
-    # 26. 项目模板表 - 存储自定义项目模板
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_templates_custom (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            description TEXT,
-            source_project_id INTEGER,
-            template_data TEXT,
-            created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    # 27. 客户沟通记录表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customer_communications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            contact_date DATE,
-            contact_person TEXT,
-            contact_method TEXT,
-            summary TEXT,
-            related_issue_id INTEGER,
-            attachments TEXT,
-            created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 28. 任务依赖关系表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS task_dependencies (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER NOT NULL,
-            depends_on_task_id INTEGER NOT NULL,
-            dependency_type TEXT DEFAULT 'finish_to_start',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-            FOREIGN KEY (depends_on_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-            UNIQUE(task_id, depends_on_task_id)
-        )
-    ''')
-
-    # 29. 进度快照表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS progress_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            snapshot_date DATE NOT NULL,
-            overall_progress INTEGER DEFAULT 0,
-            snapshot_data TEXT,
-            snapshot_type TEXT DEFAULT 'manual',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # 30. 站会纪要表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS standup_minutes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            meeting_date DATE NOT NULL,
-            content TEXT,
-            ai_generated BOOLEAN DEFAULT 0,
-            created_by TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id)
-        )
-    ''')
-
-    # ========== V3.0 接口文档智能对照模块 ==========
-    
-    # 31. 接口规范库（解析后的结构化接口定义）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS interface_specs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER,
-            doc_id INTEGER,
-            spec_source TEXT NOT NULL DEFAULT 'vendor',
-            category TEXT, -- 新增：分类（如：手麻标准、重症标准）
-            vendor_name TEXT,
-            system_type TEXT NOT NULL DEFAULT '',
-            interface_name TEXT NOT NULL DEFAULT '',
-            transcode TEXT,
-            protocol TEXT,
-            description TEXT,
-            request_sample TEXT,
-            response_sample TEXT,
-            endpoint_url TEXT,
-            action_name TEXT,
-            view_name TEXT,
-            data_direction TEXT DEFAULT 'pull',
-            raw_text TEXT,
-            parsed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            FOREIGN KEY (doc_id) REFERENCES project_documents(id)
-        )
-    ''')
-    try:
-        cursor.execute("ALTER TABLE interface_specs ADD COLUMN category TEXT")
-    except:
-        pass
-    try:
-        cursor.execute("ALTER TABLE interface_specs ADD COLUMN raw_text TEXT")
-    except:
-        pass
-
-    # 32. 接口字段明细
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS interface_spec_fields (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            spec_id INTEGER NOT NULL,
-            field_name TEXT NOT NULL DEFAULT '',
-            field_name_cn TEXT,
-            field_type TEXT,
-            field_length TEXT,
-            is_required INTEGER DEFAULT 0,
-            is_primary_key INTEGER DEFAULT 0,
-            description TEXT,
-            remark TEXT,
-            default_value TEXT,
-            enum_values TEXT,
-            sample_value TEXT,
-            field_order INTEGER DEFAULT 0,
-            FOREIGN KEY (spec_id) REFERENCES interface_specs(id) ON DELETE CASCADE
-        )
-    ''')
-
-    # 33. 接口对照结果
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS interface_comparisons (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            our_spec_id INTEGER NOT NULL,
-            vendor_spec_id INTEGER,
-            match_type TEXT DEFAULT 'auto',
-            match_confidence REAL DEFAULT 0,
-            comparison_result TEXT,
-            summary TEXT,
-            gap_count INTEGER DEFAULT 0,
-            transform_count INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            category TEXT, -- 新增：分类（如：手麻标准、重症标准）
-            reviewed_by TEXT,
-            reviewed_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            FOREIGN KEY (our_spec_id) REFERENCES interface_specs(id),
-            FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
-        )
-    ''')
-    try:
-        cursor.execute("ALTER TABLE interface_comparisons ADD COLUMN category TEXT")
-    except: pass
-
-    # 34. 字段级映射关系
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS field_mappings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            comparison_id INTEGER NOT NULL,
-            our_field_id INTEGER,
-            vendor_field_id INTEGER,
-            our_field_name TEXT,
-            vendor_field_name TEXT,
-            mapping_status TEXT NOT NULL DEFAULT 'pending',
-            transform_rule TEXT,
-            ai_suggestion TEXT,
-            is_confirmed INTEGER DEFAULT 0,
-            remark TEXT,
-            FOREIGN KEY (comparison_id) REFERENCES interface_comparisons(id) ON DELETE CASCADE,
-            FOREIGN KEY (our_field_id) REFERENCES interface_spec_fields(id),
-            FOREIGN KEY (vendor_field_id) REFERENCES interface_spec_fields(id)
-        )
-    ''')
-
-    # ========== 数据库升级：添加缺失的列 ==========
-    columns_to_add = [
-        ('priority', "TEXT DEFAULT '普通'"),
-        ('icu_beds', 'INTEGER DEFAULT 0'),
-        ('operating_rooms', 'INTEGER DEFAULT 0'),
-        ('pacu_beds', 'INTEGER DEFAULT 0'),
-        ('data_hash', 'TEXT'),
-        ('province', 'TEXT'),
-        ('city', 'TEXT'),
-        ('address', 'TEXT'),
-        ('contract_no', 'TEXT'),
-        ('actual_end_date', 'DATE'),
-        ('risk_score', 'REAL DEFAULT 0')
-    ]
-    
-    # 升级：项目阶段表添加责任人和奖金
-    stage_columns = [row[1] for row in cursor.execute("PRAGMA table_info(project_stages)").fetchall()]
-    if 'responsible_person' not in stage_columns:
-        cursor.execute("ALTER TABLE project_stages ADD COLUMN responsible_person TEXT")
-    if 'bonus_amount' not in stage_columns:
-        cursor.execute("ALTER TABLE project_stages ADD COLUMN bonus_amount REAL DEFAULT 0")
-
-    # 升级：日志和费用添加阶段关联
-    log_columns = [row[1] for row in cursor.execute("PRAGMA table_info(work_logs)").fetchall()]
-    if 'stage_id' not in log_columns:
-        cursor.execute("ALTER TABLE work_logs ADD COLUMN stage_id INTEGER")
-
-    expense_columns = [row[1] for row in cursor.execute("PRAGMA table_info(project_expenses)").fetchall()]
-    if 'stage_id' not in expense_columns:
-        cursor.execute("ALTER TABLE project_expenses ADD COLUMN stage_id INTEGER")
-    
-    # 升级：人员表增加当前城市
-    member_columns = [row[1] for row in cursor.execute("PRAGMA table_info(project_members)").fetchall()]
-    if 'current_city' not in member_columns:
-        cursor.execute("ALTER TABLE project_members ADD COLUMN current_city TEXT")
-    
-    asset_columns = [row[1] for row in cursor.execute("PRAGMA table_info(hardware_assets)").fetchall()]
-    if 'current_project_id' not in asset_columns:
-        cursor.execute("ALTER TABLE hardware_assets ADD COLUMN current_project_id INTEGER")
-    
-    # 升级：知识库增加附件和外链
-    kb_columns = [row[1] for row in cursor.execute("PRAGMA table_info(knowledge_base)").fetchall()]
-    if 'attachment_path' not in kb_columns:
-        cursor.execute("ALTER TABLE knowledge_base ADD COLUMN attachment_path TEXT")
-    if 'external_link' not in kb_columns:
-        cursor.execute("ALTER TABLE knowledge_base ADD COLUMN external_link TEXT")
-    if 'assoc_stage' not in kb_columns:
-        cursor.execute("ALTER TABLE knowledge_base ADD COLUMN assoc_stage TEXT")
-    
-    existing_columns = [row[1] for row in cursor.execute("PRAGMA table_info(projects)").fetchall()]
-    
-    for col_name, col_def in columns_to_add:
-        if col_name not in existing_columns:
-            try:
-                cursor.execute(f'ALTER TABLE projects ADD COLUMN {col_name} {col_def}')
-                print(f"Added column {col_name} to projects table")
-            except Exception as e:
-                print(f"Column {col_name} might already exist: {e}")
-    
-    # 升级：为现有项目添加‘表单制作’阶段
-    migrate_add_form_making_stage(cursor)
-    
-    conn.commit()
-    
-    # ========== 性能优化：添加常用外键索引 ==========
-    indexes = [
-        ("idx_tasks_stage_id", "tasks", "stage_id"),
-        ("idx_project_stages_project_id", "project_stages", "project_id"),
-        ("idx_milestones_project_id", "milestones", "project_id"),
-        ("idx_interfaces_project_id", "interfaces", "project_id"),
-        ("idx_issues_project_id", "issues", "project_id"),
-        ("idx_medical_devices_project_id", "medical_devices", "project_id"),
-        ("idx_notifications_project_id", "notifications", "project_id"),
-        ("idx_documents_project_id", "documents", "project_id"),
-        ("idx_project_members_project_id", "project_members", "project_id"),
-        ("idx_worklogs_project_id", "worklogs", "project_id"),
-        ("idx_task_deps_task_id", "task_dependencies", "task_id"),
-        ("idx_task_deps_depends_on", "task_dependencies", "depends_on_task_id"),
-        ("idx_snapshots_project_id", "progress_snapshots", "project_id"),
-        ("idx_standup_project_id", "standup_minutes", "project_id"),
-        ("idx_interface_specs_project", "interface_specs", "project_id"),
-        ("idx_interface_specs_source", "interface_specs", "spec_source"),
-        ("idx_spec_fields_spec", "interface_spec_fields", "spec_id"),
-        ("idx_comparisons_project", "interface_comparisons", "project_id"),
-        ("idx_field_mappings_comp", "field_mappings", "comparison_id"),
-    ]
-    for idx_name, table_name, column_name in indexes:
-        try:
-            cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")
-        except Exception as e:
-            pass  # 索引可能已存在或表不存在
-
-    # 升级 project_members 增加由 GeoService 使用的经纬度和城市
-    try:
-        cursor.execute("ALTER TABLE project_members ADD COLUMN current_city TEXT")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE project_members ADD COLUMN lng REAL")
-    except: pass
-    try:
-        cursor.execute("ALTER TABLE project_members ADD COLUMN lat REAL")
-    except: pass
-
-    conn.commit()
-    close_db()
-
-
-
-# ========== 辅助函数 ==========
-def migrate_add_form_making_stage(cursor):
-    """为现有项目添加‘表单制作’阶段"""
-    # 查找没有‘表单制作’阶段的项目
-    projects = cursor.execute('''
-        SELECT id FROM projects 
-        WHERE id NOT IN (SELECT project_id FROM project_stages WHERE stage_name = '表单制作')
-    ''').fetchall()
-    
-    for p in projects:
-        pid = p[0] if isinstance(p, (list, tuple)) else p['id']
-        # 查找‘系统部署’阶段，确定插入位置
-        deployment_stage = cursor.execute('''
-            SELECT stage_order, plan_end_date 
-            FROM project_stages 
-            WHERE project_id = ? AND stage_name = '系统部署'
-        ''', (pid,)).fetchone()
-        
-        if deployment_stage:
-            dep_order = deployment_stage[0] if isinstance(deployment_stage, (list, tuple)) else deployment_stage['stage_order']
-            dep_end_date = deployment_stage[1] if isinstance(deployment_stage, (list, tuple)) else deployment_stage['plan_end_date']
-            
-            order = dep_order + 1
-            # 后续阶段顺序+1
-            cursor.execute('''
-                UPDATE project_stages SET stage_order = stage_order + 1 
-                WHERE project_id = ? AND stage_order >= ?
-            ''', (pid, order))
-            
-            # 插入‘表单制作’
-            cursor.execute('''
-                INSERT INTO project_stages (project_id, stage_name, stage_order, plan_start_date, plan_end_date, status)
-                VALUES (?, '表单制作', ?, ?, ?, '待开始')
-            ''', (pid, order, dep_end_date, dep_end_date))
-            
-            stage_id = cursor.lastrowid
-            # 添加任务
-            tasks = ['表单设计说明书', '表单配置', '表单测试']
-            for t in tasks:
-                cursor.execute('INSERT INTO tasks (stage_id, task_name) VALUES (?, ?)', (stage_id, t))
-
-
-
-def migrate_to_dynamic_milestones():
-    """将现有项目的静态里程碑迁移为基于阶段的动态里程碑"""
-    conn = get_db()
-    cursor = conn.cursor()
-    projects = cursor.execute('SELECT id FROM projects').fetchall()
-    for p in projects:
-        pid = p['id']
-        # 删除旧里程碑
-        cursor.execute('DELETE FROM milestones WHERE project_id = ?', (pid,))
-        # 重新创建基于阶段的里程碑
-        stages = cursor.execute('SELECT stage_name, plan_end_date FROM project_stages WHERE project_id = ? ORDER BY stage_order', (pid,)).fetchall()
-        for s in stages:
-            m_name = f"{s['stage_name']}完成"
-            cursor.execute('INSERT INTO milestones (project_id, name, target_date) VALUES (?, ?, ?)',
-                         (pid, m_name, s['plan_end_date']))
-            # 同步一次状态
-            project_service.sync_project_milestones(pid, cursor)
-    conn.commit()
-
-init_db()
-migrate_to_dynamic_milestones()
+# Helper functions migrated to db_init.py or services
 
 def log_operation(operator, op_type, entity_type, entity_id, entity_name, old_val=None, new_val=None):
     """记录操作日志"""
-    conn = get_db()
-    conn.execute('''
-        INSERT INTO operation_logs (operator, operation_type, entity_type, entity_id, entity_name, old_value, new_value)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (operator or '系统', op_type, entity_type, entity_id, entity_name, 
-          json.dumps(old_val, ensure_ascii=False) if old_val else None,
-          json.dumps(new_val, ensure_ascii=False) if new_val else None))
-    conn.commit()
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('''
+            INSERT INTO operation_logs (operator, operation_type, entity_type, entity_id, entity_name, old_value, new_value)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''')
+        conn.execute(sql, (operator or '系统', op_type, entity_type, entity_id, entity_name, 
+              json.dumps(old_val, ensure_ascii=False) if old_val else None,
+              json.dumps(new_val, ensure_ascii=False) if new_val else None))
+        conn.commit()
 
 
 # ========== Analytics and Statistics - Migrated to analytics_service
@@ -1136,106 +176,128 @@ def alignment_page():
     return render_template('alignment.html')
 
 # ========== 项目健康度仪表盘 API ==========
+
+@app.errorhandler(500)
+def handle_500_error(e):
+    """全局 500 错误处理，记录详细堆栈"""
+    tb = traceback.format_exc()
+    logging.error(f"500 Internal Server Error: {str(e)}\n{tb}")
+    # 写入文件以便排查
+    with open('error_traceback.log', 'a', encoding='utf-8') as f:
+        f.write(f"[{datetime.now().isoformat()}] 500 Error: {str(e)}\n{tb}\n{'-'*50}\n")
+    
+    return jsonify({
+        "success": False,
+        "code": 500,
+        "message": f"Internal Server Error: {str(e)}",
+        "traceback": tb if app.debug or app.testing else None
+    }), 500
+
 @app.route('/api/dashboard/health', methods=['GET'])
 def get_project_health_dashboard():
     """获取所有项目的健康度指标"""
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 获取所有活跃项目（排除已完成和已终止）
-    cursor.execute('''
-        SELECT id, project_name, hospital_name, status, progress, 
-               plan_end_date, risk_score, project_manager
-        FROM projects 
-        WHERE status NOT IN ('已完成', '已终止')
-        ORDER BY risk_score DESC, progress ASC
-    ''')
-    projects = [dict(zip([c[0] for c in cursor.description], r)) for r in cursor.fetchall()]
-    
-    health_data = []
-    today = datetime.now().date()
-    
-    for p in projects:
-        project_id = p['id']
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
         
-        # 1. 进度偏差计算
-        try:
-            plan_end = datetime.strptime(p['plan_end_date'].strip(), '%Y-%m-%d').date() if p.get('plan_end_date') and p['plan_end_date'].strip() else None
-        except (ValueError, AttributeError):
-            plan_end = None
-        if plan_end:
-            total_days = (plan_end - today).days
-            expected_progress = max(0, min(100, 100 - (total_days / 90 * 100))) if total_days > 0 else 100
-            progress_deviation = (p.get('progress') or 0) - expected_progress
-        else:
-            progress_deviation = 0
+        # 获取所有活跃项目（排除已完成和已终止）
+        sql = DatabasePool.format_sql('''
+            SELECT id, project_name, hospital_name, status, progress, 
+                   plan_end_date, risk_score, project_manager
+            FROM projects 
+            WHERE status NOT IN ('已完成', '已终止')
+            ORDER BY risk_score DESC, progress ASC
+        ''')
+        cursor.execute(sql)
+        projects = [dict(row) for row in cursor.fetchall()]
         
-        # 2. 问题数量
-        cursor.execute("SELECT COUNT(*) FROM issues WHERE project_id = ? AND status != '已解决'", (project_id,))
-        open_issues = cursor.fetchone()[0]
+        health_data = []
+        today = datetime.now().date()
         
-        # 3. 接口完成率
-        cursor.execute("SELECT COUNT(*) FROM interfaces WHERE project_id = ?", (project_id,))
-        total_interfaces = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM interfaces WHERE project_id = ? AND status = '已完成'", (project_id,))
-        completed_interfaces = cursor.fetchone()[0]
-        interface_rate = (completed_interfaces / total_interfaces * 100) if total_interfaces > 0 else 100
+        for p in projects:
+            project_id = p['id']
+            
+            # 1. 进度偏差计算
+            try:
+                plan_end_str = str(p['plan_end_date']).strip()[:10] if p.get('plan_end_date') else ""
+                plan_end = datetime.strptime(plan_end_str, '%Y-%m-%d').date() if plan_end_str else None
+            except (ValueError, AttributeError):
+                plan_end = None
+            if plan_end:
+                total_days = (plan_end - today).days
+                expected_progress = max(0, min(100, 100 - (total_days / 90 * 100))) if total_days > 0 else 100
+                progress_deviation = (p.get('progress') or 0) - expected_progress
+            else:
+                progress_deviation = 0
+            
+            # 2. 问题数量
+            sql = DatabasePool.format_sql("SELECT COUNT(*) FROM issues WHERE project_id = ? AND status != '已解决'")
+            cursor.execute(sql, (project_id,))
+            open_issues = cursor.fetchone()[0]
+            
+            # 3. 接口完成率
+            sql_total = DatabasePool.format_sql("SELECT COUNT(*) FROM interfaces WHERE project_id = ?")
+            cursor.execute(sql_total, (project_id,))
+            total_interfaces = cursor.fetchone()[0]
+            sql_comp = DatabasePool.format_sql("SELECT COUNT(*) FROM interfaces WHERE project_id = ? AND status = '已完成'")
+            cursor.execute(sql_comp, (project_id,))
+            completed_interfaces = cursor.fetchone()[0]
+            interface_rate = (completed_interfaces / total_interfaces * 100) if total_interfaces > 0 else 100
+            
+            # 4. 里程碑状态
+            sql_ms = DatabasePool.format_sql("""
+                SELECT COUNT(*) FROM milestones 
+                WHERE project_id = ? AND is_completed = ? AND target_date < ?
+            """)
+            cursor.execute(sql_ms, (project_id, False, today.strftime('%Y-%m-%d')))
+            overdue_milestones = cursor.fetchone()[0]
+            
+            # 5. 计算健康度评分 (0-100)
+            health_score = 100
+            health_score -= min(30, open_issues * 5)  # 每个未解决问题扣5分，最多扣30分
+            health_score -= min(20, overdue_milestones * 10)  # 每个逾期里程碑扣10分，最多扣20分
+            health_score -= min(20, max(0, -progress_deviation) * 0.5)  # 进度落后扣分
+            health_score -= min(15, (100 - interface_rate) * 0.3)  # 接口未完成扣分
+            health_score -= min(15, (p['risk_score'] or 0) * 0.3)  # 风险评分扣分
+            health_score = max(0, health_score)
+            
+            # 6. 确定健康状态
+            if health_score >= 70:
+                health_status = 'green'
+                health_label = '健康'
+            elif health_score >= 40:
+                health_status = 'yellow'
+                health_label = '需关注'
+            else:
+                health_status = 'red'
+                health_label = '风险'
+            
+            health_data.append({
+                'id': project_id,
+                'project_name': p['project_name'],
+                'hospital_name': p['hospital_name'],
+                'status': p['status'],
+                'progress': p['progress'] or 0,
+                'project_manager': p['project_manager'],
+                'health_score': round(health_score),
+                'health_status': health_status,
+                'health_label': health_label,
+                'metrics': {
+                    'open_issues': open_issues,
+                    'overdue_milestones': overdue_milestones,
+                    'interface_rate': round(interface_rate),
+                    'risk_score': p['risk_score'] or 0,
+                    'progress_deviation': round(progress_deviation)
+                }
+            })
         
-        # 4. 里程碑状态
-        cursor.execute("""
-            SELECT COUNT(*) FROM milestones 
-            WHERE project_id = ? AND is_completed = 0 AND target_date < ?
-        """, (project_id, today.strftime('%Y-%m-%d')))
-        overdue_milestones = cursor.fetchone()[0]
+        # 汇总统计
+        summary = {
+            'total': len(health_data),
+            'green': sum(1 for h in health_data if h['health_status'] == 'green'),
+            'yellow': sum(1 for h in health_data if h['health_status'] == 'yellow'),
+            'red': sum(1 for h in health_data if h['health_status'] == 'red')
+        }
         
-        # 5. 计算健康度评分 (0-100)
-        health_score = 100
-        health_score -= min(30, open_issues * 5)  # 每个未解决问题扣5分，最多扣30分
-        health_score -= min(20, overdue_milestones * 10)  # 每个逾期里程碑扣10分，最多扣20分
-        health_score -= min(20, max(0, -progress_deviation) * 0.5)  # 进度落后扣分
-        health_score -= min(15, (100 - interface_rate) * 0.3)  # 接口未完成扣分
-        health_score -= min(15, (p['risk_score'] or 0) * 0.3)  # 风险评分扣分
-        health_score = max(0, health_score)
-        
-        # 6. 确定健康状态
-        if health_score >= 70:
-            health_status = 'green'
-            health_label = '健康'
-        elif health_score >= 40:
-            health_status = 'yellow'
-            health_label = '需关注'
-        else:
-            health_status = 'red'
-            health_label = '风险'
-        
-        health_data.append({
-            'id': project_id,
-            'project_name': p['project_name'],
-            'hospital_name': p['hospital_name'],
-            'status': p['status'],
-            'progress': p['progress'] or 0,
-            'project_manager': p['project_manager'],
-            'health_score': round(health_score),
-            'health_status': health_status,
-            'health_label': health_label,
-            'metrics': {
-                'open_issues': open_issues,
-                'overdue_milestones': overdue_milestones,
-                'interface_rate': round(interface_rate),
-                'risk_score': p['risk_score'] or 0,
-                'progress_deviation': round(progress_deviation)
-            }
-        })
-    
-    # 汇总统计
-    summary = {
-        'total': len(health_data),
-        'green': sum(1 for h in health_data if h['health_status'] == 'green'),
-        'yellow': sum(1 for h in health_data if h['health_status'] == 'yellow'),
-        'red': sum(1 for h in health_data if h['health_status'] == 'red')
-    }
-    
-    close_db()
     return api_response(True, {'projects': health_data, 'summary': summary})
 
 # ========== 智能预警 API ==========
@@ -1264,152 +326,154 @@ def get_warning_count():
 @app.route('/api/templates', methods=['GET'])
 def get_project_templates():
     """获取所有自定义项目模板"""
-    conn = get_db()
-    templates = conn.execute('SELECT * FROM project_templates_custom ORDER BY created_at DESC').fetchall()
-    close_db()
-    return api_response(True, [dict(t) for t in templates])
+    with DatabasePool.get_connection() as conn:
+        templates = conn.execute('SELECT * FROM project_templates_custom ORDER BY created_at DESC').fetchall()
+        return api_response(True, [dict(t) for t in templates])
 
 @app.route('/api/projects/<int:project_id>/save-as-template', methods=['POST'])
 def save_project_as_template(project_id):
     """将项目保存为模板"""
     import json
     data = request.json
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 获取项目基本信息
-    project = cursor.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-    if not project:
-        close_db()
-        return api_response(False, message='项目不存在', code=404)
-    
-    # 获取阶段和任务
-    stages = cursor.execute('SELECT * FROM project_stages WHERE project_id = ?', (project_id,)).fetchall()
-    stages_data = []
-    for stage in stages:
-        tasks = cursor.execute('SELECT task_name, is_completed FROM tasks WHERE stage_id = ?', (stage['id'],)).fetchall()
-        stages_data.append({
-            'name': stage['stage_name'],
-            'order_num': stage['stage_order'],
-            'tasks': [{'name': t['task_name']} for t in tasks]
-        })
-    
-    # 获取里程碑模板
-    milestones = cursor.execute('SELECT name FROM milestones WHERE project_id = ?', (project_id,)).fetchall()
-    
-    # 组装模板数据
-    template_data = {
-        'stages': stages_data,
-        'milestones': [{'name': m['name']} for m in milestones],
-        'icu_beds': project['icu_beds'],
-        'operating_rooms': project['operating_rooms'],
-        'pacu_beds': project['pacu_beds']
-    }
-    
-    # 保存模板
-    cursor.execute('''
-        INSERT INTO project_templates_custom (name, description, source_project_id, template_data, created_by)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (
-        data.get('name', f"{project['project_name']}_模板"),
-        data.get('description', f"从项目「{project['project_name']}」创建"),
-        project_id,
-        json.dumps(template_data, ensure_ascii=False),
-        session.get('username', 'system')
-    ))
-    conn.commit()
-    template_id = cursor.lastrowid
-    close_db()
-    
-    return api_response(True, {'id': template_id, 'message': '模板保存成功'})
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 获取项目基本信息
+        sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        if not project:
+            return api_response(False, message='项目不存在', code=404)
+        
+        # 获取阶段和任务
+        sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
+        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        stages_data = []
+        for stage in stages:
+            sql_task = DatabasePool.format_sql('SELECT task_name, is_completed FROM tasks WHERE stage_id = ?')
+            tasks = cursor.execute(sql_task, (stage['id'],)).fetchall()
+            stages_data.append({
+                'name': stage['stage_name'],
+                'order_num': stage['stage_order'],
+                'tasks': [{'name': t['task_name']} for t in tasks]
+            })
+        
+        # 获取里程碑模板
+        sql_ms = DatabasePool.format_sql('SELECT name FROM milestones WHERE project_id = ?')
+        milestones = cursor.execute(sql_ms, (project_id,)).fetchall()
+        
+        # 组装模板数据
+        template_data = {
+            'stages': stages_data,
+            'milestones': [{'name': m['name']} for m in milestones],
+            'icu_beds': project['icu_beds'],
+            'operating_rooms': project['operating_rooms'],
+            'pacu_beds': project['pacu_beds']
+        }
+        
+        # 保存模板
+        sql_ins = DatabasePool.format_sql('''
+            INSERT INTO project_templates_custom (name, description, source_project_id, template_data, created_by)
+            VALUES (?, ?, ?, ?, ?)
+        ''')
+        cursor.execute(sql_ins, (
+            data.get('name', f"{project['project_name']}_模板"),
+            data.get('description', f"从项目「{project['project_name']}」创建"),
+            project_id,
+            json.dumps(template_data, ensure_ascii=False),
+            session.get('username', 'system')
+        ))
+        conn.commit()
+        template_id = cursor.lastrowid
+        
+        return api_response(True, {'id': template_id, 'message': '模板保存成功'})
 
 @app.route('/api/templates/<int:template_id>', methods=['DELETE'])
 def delete_template(template_id):
     """删除项目模板"""
-    conn = get_db()
-    conn.execute('DELETE FROM project_templates_custom WHERE id = ?', (template_id,))
-    conn.commit()
-    close_db()
-    return api_response(True, message='模板已删除')
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('DELETE FROM project_templates_custom WHERE id = ?')
+        conn.execute(sql, (template_id,))
+        conn.commit()
+        return api_response(True, message='模板已删除')
 
 # ========== 客户沟通记录 API ==========
 @app.route('/api/projects/<int:project_id>/communications', methods=['GET'])
 def get_project_communications(project_id):
     """获取项目的沟通记录"""
-    conn = get_db()
-    records = conn.execute('''
-        SELECT * FROM customer_communications 
-        WHERE project_id = ? ORDER BY contact_date DESC
-    ''', (project_id,)).fetchall()
-    close_db()
-    return api_response(True, [dict(r) for r in records])
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('''
+            SELECT * FROM customer_communications 
+            WHERE project_id = ? ORDER BY contact_date DESC
+        ''')
+        records = conn.execute(sql, (project_id,)).fetchall()
+        return api_response(True, [dict(r) for r in records])
 
 @app.route('/api/projects/<int:project_id>/communications', methods=['POST'])
 def add_project_communication(project_id):
     """添加沟通记录"""
     data = request.json
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO customer_communications 
-        (project_id, contact_date, contact_person, contact_method, summary, related_issue_id, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        project_id,
-        data.get('contact_date'),
-        data.get('contact_person'),
-        data.get('contact_method'),
-        data.get('summary'),
-        data.get('related_issue_id'),
-        data.get('created_by', 'system')
-    ))
-    conn.commit()
-    record_id = cursor.lastrowid
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        sql = DatabasePool.format_sql('''
+            INSERT INTO customer_communications 
+            (project_id, contact_date, contact_person, contact_method, summary, related_issue_id, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''')
+        cursor.execute(sql, (
+            project_id,
+            data.get('contact_date'),
+            data.get('contact_person'),
+            data.get('contact_method'),
+            data.get('summary'),
+            data.get('related_issue_id'),
+            data.get('created_by', 'system')
+        ))
+        conn.commit()
+        record_id = cursor.lastrowid
+        return api_response(True, {'id': record_id, 'message': '沟通记录添加成功'})
     return api_response(True, {'id': record_id})
 
 @app.route('/api/communications/<int:record_id>', methods=['DELETE'])
 def delete_communication(record_id):
     """删除沟通记录"""
-    conn = get_db()
-    conn.execute('DELETE FROM customer_communications WHERE id = ?', (record_id,))
-    conn.commit()
-    close_db()
-    return api_response(True, message='记录已删除')
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('DELETE FROM customer_communications WHERE id = ?')
+        conn.execute(sql, (record_id,))
+        conn.commit()
+        return api_response(True, message='记录已删除')
 
 @app.route('/api/projects/<int:project_id>/communications/analyze', methods=['POST'])
 def analyze_communications(project_id):
     """AI分析客户沟通记录 - 从项目管理/需求分析师视角"""
-    conn = get_db()
-    
-    project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-    if not project:
-        close_db()
-        return jsonify({'error': '项目不存在'}), 404
-    
-    # 获取所有沟通记录
-    records = conn.execute('''
-        SELECT * FROM customer_communications 
-        WHERE project_id = ? ORDER BY contact_date DESC
-    ''', (project_id,)).fetchall()
-    
-    if not records:
-        close_db()
-        return jsonify({'error': '暂无沟通记录，请先添加沟通记录再进行分析'}), 400
-    
-    # 获取项目阶段和进度
-    stages = conn.execute(
-        'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order',
-        (project_id,)
-    ).fetchall()
-    
-    # 获取活跃问题
-    issues = conn.execute(
-        "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'",
-        (project_id,)
-    ).fetchall()
-    
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        
+        sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        if not project:
+            return jsonify({'error': '项目不存在'}), 404
+        
+        # 获取所有沟通记录
+        sql_comm = DatabasePool.format_sql('''
+            SELECT * FROM customer_communications 
+            WHERE project_id = ? ORDER BY contact_date DESC
+        ''')
+        records = cursor.execute(sql_comm, (project_id,)).fetchall()
+        
+        if not records:
+            return jsonify({'error': '暂无沟通记录，请先添加沟通记录再进行分析'}), 400
+        
+        # 获取项目阶段和进度
+        sql_stage = DatabasePool.format_sql(
+            'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order'
+        )
+        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        
+        # 获取活跃问题
+        sql_issue = DatabasePool.format_sql(
+            "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"
+        )
+        issues = cursor.execute(sql_issue, (project_id,)).fetchall()
     
     # 构建沟通记录汇总
     comm_summary = "\n".join([
@@ -1547,21 +611,21 @@ def analyze_communication_file(project_id):
         file_text = file_text[:8000] + f"\n\n... [文件内容过长，已截取前 8000 字符，原文共 {len(file_text)} 字符]"
 
     # 获取项目上下文
-    conn = get_db()
-    project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-    if not project:
-        close_db()
-        return jsonify({'error': '项目不存在'}), 404
-
-    stages = conn.execute(
-        'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order',
-        (project_id,)
-    ).fetchall()
-    issues = conn.execute(
-        "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'",
-        (project_id,)
-    ).fetchall()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        if not project:
+            return jsonify({'error': '项目不存在'}), 404
+    
+        sql_stage = DatabasePool.format_sql(
+            'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order'
+        )
+        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        sql_issue = DatabasePool.format_sql(
+            "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"
+        )
+        issues = cursor.execute(sql_issue, (project_id,)).fetchall()
 
     stage_info = "\n".join([f"- {s['stage_name']}: {s['progress']}%" for s in stages]) if stages else "无阶段数据"
     issue_info = "\n".join([f"- [{i['severity']}] {i['description']} ({i['status']})" for i in issues]) if issues else "无待解决问题"
@@ -1624,23 +688,27 @@ def ai_project_retrospective(project_id):
     try:
         from ai_utils import call_ai
         
-        conn = get_db()
-        # 获取项目信息
-        project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-        if not project:
-            close_db()
-            return api_response(False, message='项目不存在', code=404)
-        
-        # 获取项目统计
-        stages = conn.execute('SELECT * FROM project_stages WHERE project_id = ?', (project_id,)).fetchall()
-        tasks = conn.execute('''
-            SELECT t.* FROM tasks t 
-            JOIN project_stages s ON t.stage_id = s.id 
-            WHERE s.project_id = ?
-        ''', (project_id,)).fetchall()
-        issues = conn.execute('SELECT * FROM issues WHERE project_id = ?', (project_id,)).fetchall()
-        logs = conn.execute('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 50', (project_id,)).fetchall()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            # 获取项目信息
+            sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+            project = cursor.execute(sql_pj, (project_id,)).fetchone()
+            if not project:
+                return api_response(False, message='项目不存在', code=404)
+            
+            # 获取项目统计
+            sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
+            stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+            sql_task = DatabasePool.format_sql('''
+                SELECT t.* FROM tasks t 
+                JOIN project_stages s ON t.stage_id = s.id 
+                WHERE s.project_id = ?
+            ''')
+            tasks = cursor.execute(sql_task, (project_id,)).fetchall()
+            sql_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?')
+            issues = cursor.execute(sql_issue, (project_id,)).fetchall()
+            sql_log = DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 50')
+            logs = cursor.execute(sql_log, (project_id,)).fetchall()
         
         # 构建prompt
         completed_tasks = sum(1 for t in tasks if t['status'] == '已完成')
@@ -1692,27 +760,29 @@ def ai_task_suggestions(project_id):
     try:
         from ai_utils import call_ai
         
-        conn = get_db()
-        # 获取项目信息
-        project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-        if not project:
-            close_db()
-            return api_response(False, message='项目不存在', code=404)
-        
-        # 获取未分配任务 (由于schema中没有assigned_to，目前认为未完成的任务即为待分配任务)
-        tasks = conn.execute('''
-            SELECT t.id, t.task_name, t.is_completed, s.stage_name
-            FROM tasks t 
-            JOIN project_stages s ON t.stage_id = s.id 
-            WHERE s.project_id = ? AND t.is_completed = 0
-        ''', (project_id,)).fetchall()
-        
-        # 获取团队成员
-        members = conn.execute('''
-            SELECT * FROM project_members 
-            WHERE project_id = ? AND status = '在岗'
-        ''', (project_id,)).fetchall()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            # 获取项目信息
+            sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+            project = cursor.execute(sql_pj, (project_id,)).fetchone()
+            if not project:
+                return api_response(False, message='项目不存在', code=404)
+            
+            # 获取未分配任务 (由于schema中没有assigned_to，目前认为未完成的任务即为待分配任务)
+            sql_task = DatabasePool.format_sql('''
+                SELECT t.id, t.task_name, t.is_completed, s.stage_name
+                FROM tasks t 
+                JOIN project_stages s ON t.stage_id = s.id 
+                WHERE s.project_id = ? AND t.is_completed = ?
+            ''')
+            tasks = cursor.execute(sql_task, (project_id, False)).fetchall()
+            
+            # 获取团队成员
+            sql_member = DatabasePool.format_sql('''
+                SELECT * FROM project_members 
+                WHERE project_id = ? AND status = '在岗'
+            ''')
+            members = cursor.execute(sql_member, (project_id,)).fetchall()
         
         if not tasks:
             return api_response(True, {'suggestions': [], 'message': '暂无未分配任务'})
@@ -1831,15 +901,26 @@ def generate_standup(project_id):
 
     # 保存到数据库
     if result.get('standup'):
-        conn = get_db()
-        today = date_str or datetime.now().strftime('%Y-%m-%d')
-        conn.execute('''
-            INSERT OR REPLACE INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by)
-            VALUES (?, ?, ?, 1, 'AI')
-        ''', (project_id, today, result['standup']))
-        conn.commit()
-        close_db()
-
+        with DatabasePool.get_connection() as conn:
+            today = date_str or datetime.now().strftime('%Y-%m-%d')
+            
+            if DatabasePool.is_postgres():
+                sql = DatabasePool.format_sql('''
+                    INSERT INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by, created_at)
+                    VALUES (?, ?, ?, TRUE, 'AI', CURRENT_TIMESTAMP)
+                    ON CONFLICT (project_id, meeting_date) DO UPDATE SET
+                        content = EXCLUDED.content,
+                        created_at = EXCLUDED.created_at
+                ''')
+                conn.execute(sql, (project_id, today, result['standup']))
+            else:
+                sql = DatabasePool.format_sql('''
+                    INSERT OR REPLACE INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by)
+                    VALUES (?, ?, ?, 1, 'AI')
+                ''')
+                conn.execute(sql, (project_id, today, result['standup']))
+            conn.commit()
+    
     return api_response(True, result)
 
 @app.route('/api/standup/briefing', methods=['GET'])
@@ -1859,15 +940,15 @@ def push_briefing_wecom():
 @app.route('/api/projects/<int:project_id>/standup/history', methods=['GET'])
 def get_standup_history(project_id):
     """获取站会纪要历史"""
-    conn = get_db()
-    records = conn.execute('''
-        SELECT * FROM standup_minutes
-        WHERE project_id = ?
-        ORDER BY meeting_date DESC
-        LIMIT 30
-    ''', (project_id,)).fetchall()
-    close_db()
-    return api_response(True, [dict(r) for r in records])
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('''
+            SELECT * FROM standup_minutes
+            WHERE project_id = ?
+            ORDER BY meeting_date DESC
+            LIMIT 30
+        ''')
+        records = conn.execute(sql, (project_id,)).fetchall()
+        return api_response(True, [dict(r) for r in records])
 
 # ========== 进度快照与偏差分析 API ==========
 @app.route('/api/projects/<int:project_id>/snapshots', methods=['GET'])
@@ -1911,10 +992,10 @@ def generate_deviation_report(project_id):
 # ========== 医院名称列表 API ==========
 @app.route('/api/hospitals', methods=['GET'])
 def get_hospitals():
-    conn = get_db()
-    hospitals = conn.execute('SELECT DISTINCT hospital_name FROM projects ORDER BY hospital_name').fetchall()
-    # Connection closed by teardown
-    return api_response(True, [h['hospital_name'] for h in hospitals])
+    with DatabasePool.get_connection() as conn:
+        sql = DatabasePool.format_sql('SELECT DISTINCT hospital_name FROM projects ORDER BY hospital_name')
+        hospitals = conn.execute(sql).fetchall()
+        return api_response(True, [h['hospital_name'] for h in hospitals])
 
 # ========== 智能提醒 API ==========
 @app.route('/api/reminders', methods=['GET'])
@@ -1982,7 +1063,9 @@ def user_login():
             return response
         return api_response(False, message=result.get('message', '登录失败'))
     except Exception as e:
-        return api_response(False, message=str(e), code=500)
+        import traceback
+        traceback.print_exc()
+        return api_response(False, message=str(e) + "\n" + traceback.format_exc(), code=500)
 
 @app.route('/api/auth/register', methods=['POST'])
 def user_register():
@@ -2014,7 +1097,9 @@ def get_current_user():
             return api_response(True, user)
         return api_response(False, message="未登录", code=401)
     except Exception as e:
-        return api_response(False, message=str(e), code=500)
+        import traceback
+        traceback.print_exc()
+        return api_response(False, message=str(e) + "\n" + traceback.format_exc(), code=500)
 
 @app.route('/api/auth/logout', methods=['POST'])
 def user_logout():
@@ -2194,15 +1279,16 @@ def ai_natural_query():
             return api_response(False, message="查询内容不能为空", code=400)
         
         # 构建查询上下文
-        conn = get_db()
-        projects = conn.execute('''
-            SELECT id, project_name, hospital_name, status, progress, project_manager 
-            FROM projects WHERE status NOT IN ('已完成', '已终止')
-        ''').fetchall()
-        
-        context = "当前活跃项目列表:\n"
-        for p in projects:
-            context += f"- {p['project_name']} ({p['hospital_name']}): 状态={p['status']}, 进度={p['progress']}%, 负责人={p['project_manager'] or '未指定'}\n"
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT id, project_name, hospital_name, status, progress, project_manager 
+                FROM projects WHERE status NOT IN ('已完成', '已终止')
+            ''')
+            projects = conn.execute(sql).fetchall()
+            
+            context = "当前活跃项目列表:\n"
+            for p in projects:
+                context += f"- {p['project_name']} ({p['hospital_name']}): 状态={p['status']}, 进度={p['progress']}%, 负责人={p['project_manager'] or '未指定'}\n"
         
         system_prompt = """你是一个项目管理助手。用户会用自然语言询问项目相关问题。
 请根据提供的项目数据，用简洁中文回答用户问题。
@@ -2273,21 +1359,29 @@ def call_deepseek_api(system_prompt, user_content, task_type="analysis"):
 def _run_analysis_task(task_id, project_id):
     """后台运行AI分析任务"""
     try:
-        # 在线程中需要手动管理上下文如果用到 current_app，但这里主要是DB操作
-        # DatabasePool是线程安全的，get_db()会为新线程创建连接
-        
-        conn = get_db()
-        project = dict(conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone())
-        stages = [dict(s) for s in conn.execute('SELECT * FROM project_stages WHERE project_id = ?', (project_id,)).fetchall()]
-        issues = [dict(i) for i in conn.execute('SELECT * FROM issues WHERE project_id = ? AND status != "已解决"', (project_id,)).fetchall()]
-        interfaces = [dict(i) for i in conn.execute('SELECT * FROM interfaces WHERE project_id = ? AND status != "已完成"', (project_id,)).fetchall()]
-        devices = [dict(d) for d in conn.execute('SELECT * FROM medical_devices WHERE project_id = ?', (project_id,)).fetchall()]
-        members = [dict(m) for m in conn.execute('SELECT * FROM project_members WHERE project_id = ? AND status = "在岗"', (project_id,)).fetchall()]
-        departures = [dict(d) for d in conn.execute('SELECT * FROM project_departures WHERE project_id = ? ORDER BY created_at DESC LIMIT 3', (project_id,)).fetchall()]
-        # Connection closed automatically by thread exit? No, need to close manually in thread or use context manager
-        # Since we are not in request context, teardown won't run automatically? 
-        # Actually executor threads are long lived? DatabasePool uses thread local.
-        # We should close the connection at the end of the task.
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+            project = dict(cursor.execute(sql_pj, (project_id,)).fetchone())
+            
+            sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
+            stages = [dict(s) for s in cursor.execute(sql_stage, (project_id,)).fetchall()]
+            
+            sql_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND status != ?')
+            issues = [dict(i) for i in cursor.execute(sql_issue, (project_id, '已解决')).fetchall()]
+            
+            sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ? AND status != ?')
+            interfaces = [dict(i) for i in cursor.execute(sql_iface, (project_id, '已完成')).fetchall()]
+            
+            sql_dev = DatabasePool.format_sql('SELECT * FROM medical_devices WHERE project_id = ?')
+            devices = [dict(d) for d in cursor.execute(sql_dev, (project_id,)).fetchall()]
+            
+            sql_mem = DatabasePool.format_sql('SELECT * FROM project_members WHERE project_id = ? AND status = ?')
+            members = [dict(m) for m in cursor.execute(sql_mem, (project_id, '在岗')).fetchall()]
+            
+            sql_dep = DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ? ORDER BY created_at DESC LIMIT 3')
+            departures = [dict(d) for d in cursor.execute(sql_dep, (project_id,)).fetchall()]
         
         # 扫描潜在风险点
         detected_risks, risk_score = ai_service.analyze_project_risks(project_id)
@@ -2322,7 +1416,7 @@ def _run_analysis_task(task_id, project_id):
         }, ensure_ascii=False)
         
         # Close DB reading connection before long API call
-        close_db()
+        # (Context manager handled it above)
         
         analysis_result = call_deepseek_api(system_prompt, f"请分析以下项目数据：\n{project_data_str}", task_type="analysis")
         
@@ -2334,8 +1428,6 @@ def _run_analysis_task(task_id, project_id):
         
     except Exception as e:
         task_results[task_id] = {"status": "failed", "error": str(e)}
-        # Ensure db is closed in case of error
-        close_db(e)
 
 @app.route('/api/tasks/<task_id>', methods=['GET'])
 def get_task_result(task_id):
@@ -2366,21 +1458,34 @@ def safe_submit(fn, *args, **kwargs):
 def _run_weekly_report_task(task_id, project_id):
     """后台运行周报生成任务"""
     try:
-        conn = get_db()
-        project = dict(conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone())
-        stages = [dict(s) for s in conn.execute('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order', (project_id,)).fetchall()]
-        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        completed_tasks = conn.execute('''
-            SELECT t.task_name, s.stage_name, t.completed_date 
-            FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
-            WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date >= ?
-        ''', (project_id, week_ago)).fetchall()
-        new_issues = conn.execute('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?', (project_id, week_ago)).fetchall()
-        pending_issues = conn.execute("SELECT * FROM issues WHERE project_id = ? AND status != '已解决'", (project_id,)).fetchall()
-        interfaces = conn.execute('SELECT * FROM interfaces WHERE project_id = ?', (project_id,)).fetchall()
-        work_logs = conn.execute('SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date', (project_id, week_ago)).fetchall()
-        # Close reading connection
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+            project = dict(cursor.execute(sql_pj, (project_id,)).fetchone())
+            
+            sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order')
+            stages = [dict(s) for s in cursor.execute(sql_stage, (project_id,)).fetchall()]
+            
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            sql_comp = DatabasePool.format_sql('''
+                SELECT t.task_name, s.stage_name, t.completed_date 
+                FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
+                WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ?
+            ''')
+            completed_tasks = cursor.execute(sql_comp, (project_id, True, week_ago)).fetchall()
+            
+            sql_new_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?')
+            new_issues = cursor.execute(sql_new_issue, (project_id, week_ago)).fetchall()
+            
+            sql_pen_issue = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != ?")
+            pending_issues = cursor.execute(sql_pen_issue, (project_id, '已解决')).fetchall()
+            
+            sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?')
+            interfaces = cursor.execute(sql_iface, (project_id,)).fetchall()
+            
+            sql_log = DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date')
+            work_logs = cursor.execute(sql_log, (project_id, week_ago)).fetchall()
         
         system_prompt = """你是一位专业的医疗信息化项目经理，请生成一份正式周报。Markdown格式：
         # 📋 [项目名称] 周报
@@ -2438,7 +1543,6 @@ def _run_weekly_report_task(task_id, project_id):
         
     except Exception as e:
         task_results[task_id] = {"status": "failed", "error": str(e)}
-        close_db(e)
 
 @app.route('/api/projects/<int:project_id>/weekly-report', methods=['POST'])
 def generate_weekly_report(project_id):
@@ -2469,46 +1573,53 @@ def generate_weekly_report(project_id):
 def _run_all_report_task(task_id):
     """后台运行全局周报生成任务"""
     try:
-        conn = get_db()
-        projects = conn.execute("""
-            SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止')
-            ORDER BY priority DESC, progress DESC
-        """).fetchall()
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            sql_pj = DatabasePool.format_sql("""
+                SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止')
+                ORDER BY priority DESC, progress DESC
+            """)
+            projects = cursor.execute(sql_pj).fetchall()
         
-        if not projects:
-            close_db()
-            task_results[task_id] = {"status": "failed", "error": "没有进行中的项目"}
-            return
-
-        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-        all_data = []
-        for p in projects:
-            pid = p['id']
-            stages = [dict(s) for s in conn.execute('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order', (pid,)).fetchall()]
-            issues = [dict(i) for i in conn.execute("SELECT * FROM issues WHERE project_id = ? AND status != '已解决'", (pid,)).fetchall()]
-            completed_tasks = [dict(t) for t in conn.execute('''
-                SELECT t.task_name, s.stage_name, t.completed_date 
-                FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
-                WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date >= ?
-            ''', (pid, week_ago)).fetchall()]
-            new_issues = [dict(i) for i in conn.execute('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?', (pid, week_ago)).fetchall()]
-            interfaces = [dict(i) for i in conn.execute('SELECT * FROM interfaces WHERE project_id = ?', (pid,)).fetchall()]
-            interface_completed = len([i for i in interfaces if i['status'] == '已完成'])
-            work_hours = conn.execute('SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = ? AND log_date >= ?', (pid, week_ago)).fetchone()['total'] or 0
-            
-            # 数据清洗与摘要 (Summarize to save tokens)
-            current_stage = next((s['stage_name'] for s in stages if s.get('status') == '进行中'), "未定")
-            
-            all_data.append({
-                "项目名称": p['hospital_name'],
-                "项目经理": p['project_manager'] or "未分配",
-                "当前阶段": current_stage,
-                "总体进度": f"{p['progress']}%",
-                "异常风险项": len(issues),
-                "本周完工任务数": len(completed_tasks),
-                "接口状态": f"{interface_completed}/{len(interfaces)}",
-                "本周投入工时": work_hours
-            })
+            if not projects:
+                task_results[task_id] = {"status": "failed", "error": "没有进行中的项目"}
+                return
+    
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+            all_data = []
+            for p in projects:
+                pid = p['id']
+                sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order')
+                stages = [dict(s) for s in cursor.execute(sql_stage, (pid,)).fetchall()]
+                sql_issue = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != ?")
+                issues = [dict(i) for i in cursor.execute(sql_issue, (pid, '已解决')).fetchall()]
+                sql_comp = DatabasePool.format_sql('''
+                    SELECT t.task_name, s.stage_name, t.completed_date 
+                    FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
+                    WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ?
+                ''')
+                completed_tasks = [dict(t) for t in cursor.execute(sql_comp, (pid, True, week_ago)).fetchall()]
+                sql_new_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?')
+                new_issues = [dict(i) for i in cursor.execute(sql_new_issue, (pid, week_ago)).fetchall()]
+                sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?')
+                interfaces = [dict(i) for i in cursor.execute(sql_iface, (pid,)).fetchall()]
+                interface_completed = len([i for i in interfaces if i['status'] == '已完成'])
+                sql_log = DatabasePool.format_sql('SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = ? AND log_date >= ?')
+                work_hours = cursor.execute(sql_log, (pid, week_ago)).fetchone()['total'] or 0
+                
+                # 数据清洗与摘要 (Summarize to save tokens)
+                current_stage = next((s['stage_name'] for s in stages if s.get('status') == '进行中'), "未定")
+                
+                all_data.append({
+                    "项目名称": p['hospital_name'],
+                    "项目经理": p['project_manager'] or "未分配",
+                    "当前阶段": current_stage,
+                    "总体进度": f"{p['progress']}%",
+                    "异常风险项": len(issues),
+                    "本周完工任务数": len(completed_tasks),
+                    "接口状态": f"{interface_completed}/{len(interfaces)}",
+                    "本周投入工时": work_hours
+                })
         
         close_db()
         system_prompt = """你是一位资深的高级项目总监，负责监督多个医疗信息化实施项目。请生成一份全局项目群分析周报。
@@ -2574,131 +1685,143 @@ def generate_all_projects_report():
 # ========== 燃尽图数据 API ==========
 @app.route('/api/projects/<int:project_id>/burndown', methods=['GET'])
 def get_burndown_data(project_id):
-    conn = get_db()
-    project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-    if not project:
-        close_db()
-        return jsonify({'error': '项目不存在'}), 404
-    
-    # 获取历史记录
-    history = conn.execute('''
-        SELECT record_date, progress, tasks_total, tasks_completed 
-        FROM progress_history WHERE project_id = ? ORDER BY record_date
-    ''', (project_id,)).fetchall()
-    
-    # 获取当前状态
-    tasks_stats = conn.execute('''
-        SELECT COUNT(*) as total, SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END) as completed
-        FROM tasks t JOIN project_stages s ON t.stage_id = s.id WHERE s.project_id = ?
-    ''', (project_id,)).fetchone()
-    total_tasks = tasks_stats['total'] or 0
-    completed_tasks = tasks_stats['completed'] or 0
-    
-    start_date_str = project['plan_start_date'] or project['created_at'][:10]
-    end_date_str = project['plan_end_date'] or (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
-    
-    try:
-        start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-    except:
-        start_date = datetime.now() - timedelta(days=30)
-        end_date = datetime.now() + timedelta(days=30)
-    
-    total_days = (end_date - start_date).days or 1
-    today = datetime.now()
-    
-    ideal_line = []
-    for i in range(total_days + 1):
-        curr = start_date + timedelta(days=i)
-        ideal_rem = total_tasks - (total_tasks * i / total_days)
-        ideal_line.append({'date': curr.strftime('%Y-%m-%d'), 'value': round(max(0, ideal_rem), 1)})
-    
-    actual_line = []
-    if history:
-        for row in history:
-            actual_line.append({'date': row['record_date'], 'value': row['tasks_total'] - row['tasks_completed']})
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        if not project:
+            return jsonify({'error': '项目不存在'}), 404
         
-        # 如果最后一条记录不是今天，添加今天的实时数据
-        if history[-1]['record_date'] != today.strftime('%Y-%m-%d'):
-            actual_line.append({'date': today.strftime('%Y-%m-%d'), 'value': total_tasks - completed_tasks})
-    else:
-        # 兜底：如果没有历史记录，生成简单的两点线（开始日和今日）
-        actual_line.append({'date': start_date.strftime('%Y-%m-%d'), 'value': total_tasks})
-        if today > start_date:
-            actual_line.append({'date': today.strftime('%Y-%m-%d'), 'value': total_tasks - completed_tasks})
+        # 获取历史记录
+        sql_history = DatabasePool.format_sql('''
+            SELECT record_date, progress, tasks_total, tasks_completed 
+            FROM progress_history WHERE project_id = ? ORDER BY record_date
+        ''')
+        history = cursor.execute(sql_history, (project_id,)).fetchall()
+        
+        # 获取当前状态
+        sql_tasks = DatabasePool.format_sql('''
+            SELECT COUNT(*) as total, SUM(CASE WHEN is_completed = ? THEN 1 ELSE 0 END) as completed
+            FROM tasks t JOIN project_stages s ON t.stage_id = s.id WHERE s.project_id = ?
+        ''')
+        tasks_stats = cursor.execute(sql_tasks, (True, project_id,)).fetchone()
+        total_tasks = tasks_stats['total'] or 0
+        completed_tasks = tasks_stats['completed'] or 0
+        
+        start_date_str = project['plan_start_date'] or str(project['created_at'])[:10]
+        end_date_str = project['plan_end_date'] or (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        except:
+            start_date = datetime.now() - timedelta(days=30)
+            end_date = datetime.now() + timedelta(days=30)
+        
+        total_days = (end_date - start_date).days or 1
+        today = datetime.now()
+        
+        ideal_line = []
+        for i in range(total_days + 1):
+            curr = start_date + timedelta(days=i)
+            ideal_rem = total_tasks - (total_tasks * i / total_days)
+            ideal_line.append({'date': curr.strftime('%Y-%m-%d'), 'value': round(max(0, ideal_rem), 1)})
+        
+        actual_line = []
+        if history:
+            for row in history:
+                actual_line.append({'date': row['record_date'], 'value': row['tasks_total'] - row['tasks_completed']})
+            
+            # 如果最后一条记录不是今天，添加今天的实时数据
+            if str(history[-1]['record_date'])[:10] != today.strftime('%Y-%m-%d'):
+                actual_line.append({'date': today.strftime('%Y-%m-%d'), 'value': total_tasks - completed_tasks})
+        else:
+            # 兜底：如果没有历史记录，生成简单的两点线（开始日和今日）
+            actual_line.append({'date': start_date.strftime('%Y-%m-%d'), 'value': total_tasks})
+            if today > start_date:
+                actual_line.append({'date': today.strftime('%Y-%m-%d'), 'value': total_tasks - completed_tasks})
 
-    close_db()
-    return jsonify({
-        'project_name': project['project_name'],
-        'total_tasks': total_tasks,
-        'completed_tasks': completed_tasks,
-        'ideal_line': ideal_line,
-        'actual_line': actual_line
-    })
+        return jsonify({
+            'project_name': project['project_name'],
+            'total_tasks': total_tasks,
+            'completed_tasks': completed_tasks,
+            'ideal_line': ideal_line,
+            'actual_line': actual_line
+        })
 
 # ========== 仪表盘统计 API ==========
 @app.route('/api/dashboard/stats', methods=['GET'])
 @cached(ttl=60)
 def get_dashboard_stats():
-    conn = get_db()
-    total_projects = conn.execute("SELECT COUNT(*) as c FROM projects").fetchone()['c']
-    in_progress = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status = '进行中'").fetchone()['c']
-    completed = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status = '已完成'").fetchone()['c']
-    delayed = conn.execute("SELECT COUNT(*) as c FROM projects WHERE plan_end_date < date('now') AND status NOT IN ('已完成', '已终止', '已验收', '质保期')").fetchone()['c']
-    on_departure = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')").fetchone()['c']
-    total_issues = conn.execute("SELECT COUNT(*) as c FROM issues WHERE status != '已解决'").fetchone()['c']
-    critical_issues = conn.execute("SELECT COUNT(*) as c FROM issues WHERE status != '已解决' AND severity = '高'").fetchone()['c']
-    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-    tasks_completed_this_week = conn.execute("SELECT COUNT(*) as c FROM tasks WHERE is_completed = 1 AND completed_date >= ?", (week_ago,)).fetchone()['c']
-    
-    # 统计逾期里程碑总数
-    overdue_milestones_total = conn.execute('''
-        SELECT COUNT(*) as c FROM milestones 
-        WHERE is_completed = 0 AND target_date < date('now')
-    ''').fetchone()['c']
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        total_projects = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects")).fetchone()['c']
+        in_progress = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('进行中',)).fetchone()['c']
+        completed = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('已完成',)).fetchone()['c']
+        
+        now_sql = "date('now')"
+        sql_delayed = DatabasePool.format_sql(f"SELECT COUNT(*) as c FROM projects WHERE plan_end_date < {now_sql} AND status NOT IN ('已完成', '已终止', '已验收', '质保期')")
+        delayed = cursor.execute(sql_delayed).fetchone()['c']
+        
+        on_departure = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')")).fetchone()['c']
+        total_issues = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ?"), ('已解决',)).fetchone()['c']
+        critical_issues = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ? AND severity = ?"), ('已解决', '高')).fetchone()['c']
+        
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        sql_task_comp = DatabasePool.format_sql("SELECT COUNT(*) as c FROM tasks WHERE is_completed = ? AND completed_date >= ?")
+        tasks_completed_this_week = cursor.execute(sql_task_comp, (True, week_ago,)).fetchone()['c']
+        
+        # 统计逾期里程碑总数
+        sql_overdue_m = DatabasePool.format_sql(f'''
+            SELECT COUNT(*) as c FROM milestones 
+            WHERE is_completed = ? AND target_date < {now_sql}
+        ''')
+        overdue_milestones_total = cursor.execute(sql_overdue_m, (False,)).fetchone()['c']
 
     
-    # 按状态分组统计
-    status_stats = conn.execute('''
-        SELECT status, COUNT(*) as count FROM projects GROUP BY status
-    ''').fetchall()
-    
-    projects_progress = []
-    rows = conn.execute('''
-        SELECT p.id, p.project_name, p.hospital_name, p.progress, p.status, p.plan_end_date,
-        (SELECT COUNT(*) FROM milestones m WHERE m.project_id = p.id AND m.is_completed = 0 AND m.target_date < date('now')) as overdue_count
-        FROM projects p WHERE p.status NOT IN ('已完成', '已终止') 
-        ORDER BY overdue_count DESC, progress DESC
-    ''').fetchall()
-    
-    for row in rows:
-        p_dict = dict(row)
-        # 获取该项目的风险得分
-        _, risk_score = scan_project_risks(p_dict['id'], conn.cursor())
-        p_dict['risk_score'] = risk_score
+        # 按状态分组统计
+        status_stats = cursor.execute(DatabasePool.format_sql('''
+            SELECT status, COUNT(*) as count FROM projects GROUP BY status
+        ''')).fetchall()
         
-        # 判定阶段
-        if p_dict['status'] in ['暂停', '离场待返']: p_dict['phase'] = '离场'
-        elif p_dict['plan_end_date'] and p_dict['plan_end_date'] < datetime.now().strftime('%Y-%m-%d'): p_dict['phase'] = '延期'
-        elif p_dict['progress'] < 30: p_dict['phase'] = '启动期'
-        elif p_dict['progress'] < 70: p_dict['phase'] = '实施中'
-        else: p_dict['phase'] = '收尾期'
+        projects_progress = []
+        sql_proj_prog = DatabasePool.format_sql(f'''
+            SELECT p.id, p.project_name, p.hospital_name, p.progress, p.status, p.plan_end_date,
+            (SELECT COUNT(*) FROM milestones m_ov WHERE m_ov.project_id = p.id AND m_ov.is_completed = ? AND m_ov.target_date < {now_sql}) as overdue_count
+            FROM projects p WHERE p.status NOT IN ('已完成', '已终止') 
+            ORDER BY overdue_count DESC, progress DESC
+        ''')
+        rows = cursor.execute(sql_proj_prog, (False,)).fetchall()
         
-        projects_progress.append(p_dict)
+        current_date_str = datetime.now().strftime('%Y-%m-%d')
+        for row in rows:
+            p_dict = dict(row)
+            # 获取该项目的风险得分
+            risk_score = 0
+            p_dict['risk_score'] = risk_score
+            
+            # 判定阶段
+            if p_dict['status'] in ['暂停', '离场待返']: p_dict['phase'] = '离场'
+            elif p_dict['plan_end_date'] and str(p_dict['plan_end_date']) < current_date_str: p_dict['phase'] = '延期'
+            elif p_dict['progress'] < 30: p_dict['phase'] = '启动期'
+            elif p_dict['progress'] < 70: p_dict['phase'] = '实施中'
+            else: p_dict['phase'] = '收尾期'
+            
+            projects_progress.append(p_dict)
 
     
-    upcoming_reminders = conn.execute('''
-        SELECT n.*, p.project_name 
-        FROM notifications n 
-        LEFT JOIN projects p ON n.project_id = p.id
-        WHERE n.is_read = 0 AND (n.due_date IS NULL OR n.due_date >= date('now'))
-        ORDER BY n.due_date ASC LIMIT 10
-    ''').fetchall()
-    
-    # 本周工时统计
-    week_hours = conn.execute('SELECT SUM(work_hours) as total FROM work_logs WHERE log_date >= ?', (week_ago,)).fetchone()['total'] or 0
-    
-    # Connection closed by teardown
+        sql_notif = DatabasePool.format_sql(f'''
+            SELECT n.*, p.project_name 
+            FROM notifications n 
+            LEFT JOIN projects p ON n.project_id = p.id
+            WHERE n.is_read = ? AND (n.due_date IS NULL OR n.due_date >= {now_sql})
+            ORDER BY n.due_date ASC LIMIT 10
+        ''')
+        upcoming_reminders = cursor.execute(sql_notif, (False,)).fetchall()
+        
+        # 本周工时统计
+        sql_hours = DatabasePool.format_sql('SELECT SUM(work_hours) as total FROM work_logs WHERE log_date >= ?')
+        week_hours = cursor.execute(sql_hours, (week_ago,)).fetchone()['total'] or 0
     
     return api_response(True, {
         'stats': {
@@ -2760,57 +1883,62 @@ def get_dashboard_stats():
 # ========== 操作日志 API ==========
 @app.route('/api/operation-logs', methods=['GET'])
 def get_operation_logs():
-    conn = get_db()
-    entity_type = request.args.get('entity_type')
-    entity_id = request.args.get('entity_id')
-    
-    query = 'SELECT * FROM operation_logs WHERE 1=1'
-    params = []
-    
-    if entity_type:
-        query += ' AND entity_type = ?'
-        params.append(entity_type)
-    if entity_id:
-        query += ' AND entity_id = ?'
-        params.append(entity_id)
-    
-    query += ' ORDER BY created_at DESC LIMIT 100'
-    logs = conn.execute(query, params).fetchall()
-    close_db()
-    return jsonify([dict(l) for l in logs])
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        entity_type = request.args.get('entity_type')
+        entity_id = request.args.get('entity_id')
+        
+        query_text = 'SELECT * FROM operation_logs WHERE 1=1'
+        params = []
+        
+        if entity_type:
+            query_text += ' AND entity_type = ?'
+            params.append(entity_type)
+        if entity_id:
+            query_text += ' AND entity_id = ?'
+            params.append(entity_id)
+        
+        query_text += ' ORDER BY created_at DESC LIMIT 100'
+        logs = cursor.execute(DatabasePool.format_sql(query_text), params).fetchall()
+        return jsonify([dict(l) for l in logs])
 
 # ========== 数据导出 API ==========
 @app.route('/api/projects/<int:project_id>/export', methods=['GET'])
 def export_project_data(project_id):
     """导出项目完整数据为JSON"""
-    conn = get_db()
-    
-    project = dict(conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone())
-    stages = [dict(s) for s in conn.execute('SELECT * FROM project_stages WHERE project_id = ?', (project_id,)).fetchall()]
-    for stage in stages:
-        stage['tasks'] = [dict(t) for t in conn.execute('SELECT * FROM tasks WHERE stage_id = ?', (stage['id'],)).fetchall()]
-    
-    data = {
-        'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'project': project,
-        'stages': stages,
-        'interfaces': [dict(i) for i in conn.execute('SELECT * FROM interfaces WHERE project_id = ?', (project_id,)).fetchall()],
-        'issues': [dict(i) for i in conn.execute('SELECT * FROM issues WHERE project_id = ?', (project_id,)).fetchall()],
-        'milestones': [dict(m) for m in conn.execute('SELECT * FROM milestones WHERE project_id = ?', (project_id,)).fetchall()],
-        'members': [dict(m) for m in conn.execute('SELECT * FROM project_members WHERE project_id = ?', (project_id,)).fetchall()],
-        'contacts': [dict(c) for c in conn.execute('SELECT * FROM customer_contacts WHERE project_id = ?', (project_id,)).fetchall()],
-         'departures': [dict(d) for d in conn.execute('SELECT * FROM project_departures WHERE project_id = ?', (project_id,)).fetchall()],
-        'work_logs': [dict(w) for w in conn.execute('SELECT * FROM work_logs WHERE project_id = ?', (project_id,)).fetchall()],
-        'documents': [dict(d) for d in conn.execute('SELECT * FROM project_documents WHERE project_id = ?', (project_id,)).fetchall()],
-        'expenses': [dict(e) for e in conn.execute('SELECT * FROM project_expenses WHERE project_id = ?', (project_id,)).fetchall()],
-        'changes': [dict(c) for c in conn.execute('SELECT * FROM project_changes WHERE project_id = ?', (project_id,)).fetchall()],
-        'acceptances': [dict(a) for a in conn.execute('SELECT * FROM project_acceptances WHERE project_id = ?', (project_id,)).fetchall()],
-        'satisfaction': [dict(s) for s in conn.execute('SELECT * FROM customer_satisfaction WHERE project_id = ?', (project_id,)).fetchall()],
-        'follow_ups': [dict(f) for f in conn.execute('SELECT * FROM follow_up_records WHERE project_id = ?', (project_id,)).fetchall()],
-        'devices': [dict(d) for d in conn.execute('SELECT * FROM medical_devices WHERE project_id = ?', (project_id,)).fetchall()]
-    }
-    
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        
+        sql_p = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+        project = dict(cursor.execute(sql_p, (project_id,)).fetchone())
+        
+        sql_s = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
+        stages = [dict(s) for s in cursor.execute(sql_s, (project_id,)).fetchall()]
+        
+        for stage in stages:
+            sql_t = DatabasePool.format_sql('SELECT * FROM tasks WHERE stage_id = ?')
+            stage['tasks'] = [dict(t) for t in cursor.execute(sql_t, (stage['id'],)).fetchall()]
+        
+        data = {
+            'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'project': project,
+            'stages': stages,
+            'interfaces': [dict(i) for i in cursor.execute(DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?'), (project_id,)).fetchall()],
+            'issues': [dict(i) for i in cursor.execute(DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?'), (project_id,)).fetchall()],
+            'milestones': [dict(m) for m in cursor.execute(DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ?'), (project_id,)).fetchall()],
+            'members': [dict(m) for m in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_members WHERE project_id = ?'), (project_id,)).fetchall()],
+            'contacts': [dict(c) for c in cursor.execute(DatabasePool.format_sql('SELECT * FROM customer_contacts WHERE project_id = ?'), (project_id,)).fetchall()],
+             'departures': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ?'), (project_id,)).fetchall()],
+            'work_logs': [dict(w) for w in cursor.execute(DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ?'), (project_id,)).fetchall()],
+            'documents': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_documents WHERE project_id = ?'), (project_id,)).fetchall()],
+            'expenses': [dict(e) for e in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_expenses WHERE project_id = ?'), (project_id,)).fetchall()],
+            'changes': [dict(c) for c in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_changes WHERE project_id = ?'), (project_id,)).fetchall()],
+            'acceptances': [dict(a) for a in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_acceptances WHERE project_id = ?'), (project_id,)).fetchall()],
+            'satisfaction': [dict(s) for s in cursor.execute(DatabasePool.format_sql('SELECT * FROM customer_satisfaction WHERE project_id = ?'), (project_id,)).fetchall()],
+            'follow_ups': [dict(f) for f in cursor.execute(DatabasePool.format_sql('SELECT * FROM follow_up_records WHERE project_id = ?'), (project_id,)).fetchall()],
+            'devices': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM medical_devices WHERE project_id = ?'), (project_id,)).fetchall()]
+        }
+        
     return jsonify(data)
 
 
@@ -2820,90 +1948,84 @@ def export_project_data(project_id):
 @app.route('/api/approvals/pending', methods=['GET'])
 def get_pending_approvals():
     """获取所有待审批项"""
-    conn = get_db()
-    
-    # 待审批变更
-    changes = conn.execute('''
-        SELECT c.*, p.project_name, p.hospital_name 
-        FROM project_changes c
-        JOIN projects p ON c.project_id = p.id
-        WHERE c.status = '待审批'
-    ''').fetchall()
-    
-    # 待审批离场 (离场本身目前没有独立状态，但可以根据离场记录中的备注或特定字段判断，或者直接根据未返场且需要审核的规则)
-    # 这里简单起见，目前离场申请在add_project_departure中是直接生效的，
-    # 我们可以增加一个 status 字段给 project_departures，或者直接让用户审核“变更申请”中的人员/时间变更
-    
-    close_db()
-    return jsonify({
-        'changes': [dict(c) for c in changes],
-        'departures': [] # 预留
-    })
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        
+        # 待审批变更
+        sql_changes = DatabasePool.format_sql('''
+            SELECT c.*, p.project_name, p.hospital_name 
+            FROM project_changes c
+            JOIN projects p ON c.project_id = p.id
+            WHERE c.status = ?
+        ''')
+        changes = cursor.execute(sql_changes, ('待审批',)).fetchall()
+        
+        return jsonify({
+            'changes': [dict(c) for c in changes],
+            'departures': [] # 预留
+        })
 
 # ========== 知识库 (KB) API ==========
 @app.route('/api/kb', methods=['GET'])
 def get_kb_list():
     category = request.args.get('category')
     search = request.args.get('search')
-    conn = get_db()
-    query = 'SELECT * FROM knowledge_base WHERE 1=1'
-    params = []
-    if category:
-        query += ' AND category = ?'
-        params.append(category)
-    if search:
-        query += ' AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)'
-        params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
-    query += ' ORDER BY created_at DESC'
-    items = conn.execute(query, params).fetchall()
-    close_db()
-    return jsonify([dict(i) for i in items])
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        query_text = 'SELECT * FROM knowledge_base WHERE 1=1'
+        params = []
+        if category:
+            query_text += ' AND category = ?'
+            params.append(category)
+        if search:
+            query_text += ' AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)'
+            params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
+        query_text += ' ORDER BY created_at DESC'
+        items = cursor.execute(DatabasePool.format_sql(query_text), params).fetchall()
+        return jsonify([dict(i) for i in items])
 
 @app.route('/api/kb/<int:kid>', methods=['GET'])
 def get_kb_item(kid):
-    conn = get_db()
-    item = conn.execute('SELECT * FROM knowledge_base WHERE id = ?', (kid,)).fetchone()
-    close_db()
-    if item:
-        return jsonify(dict(item))
-    return jsonify({'error': 'Item not found'}), 404
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        item = cursor.execute(DatabasePool.format_sql('SELECT * FROM knowledge_base WHERE id = ?'), (kid,)).fetchone()
+        if item:
+            return jsonify(dict(item))
+        return jsonify({'error': 'Item not found'}), 404
 
 @app.route('/api/kb', methods=['POST'])
 def add_kb_item():
     try:
-        conn = get_db()
-        
-        # 支持 multipart/form-data 或 JSON
-        if request.content_type and 'multipart/form-data' in request.content_type:
-            data = request.form.to_dict()
-            file = request.files.get('attachment')
-        else:
-            data = request.json
-            file = None
-
-        attachment_path = None
-        if file and file.filename != '':
-            try:
-                # 使用百度网盘上传
-                # 项目ID作为目录隔离
-                # 只有当 file 对象非空且有内容时才上传
-                project_id = data.get('project_id') or 'common'
-                attachment_path = storage_service.upload_file(file, project_id)
-            except Exception as e:
-                # 打印完整堆栈以方便调试
-                import traceback
-                traceback.print_exc()
-                return jsonify({'success': False, 'message': f'上传失败: {str(e)}'}), 500
-
-        conn.execute('''
-            INSERT INTO knowledge_base (category, title, content, tags, assoc_stage, project_id, author, attachment_path, external_link)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
-              data.get('assoc_stage'), data.get('project_id'), data.get('author'),
-              attachment_path, data.get('external_link')))
-        conn.commit()
-        close_db()
-        return jsonify({'success': True})
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # 支持 multipart/form-data 或 JSON
+            if request.content_type and 'multipart/form-data' in request.content_type:
+                data = request.form.to_dict()
+                file = request.files.get('attachment')
+            else:
+                data = request.json
+                file = None
+    
+            attachment_path = None
+            if file and file.filename != '':
+                try:
+                    # 使用百度网盘上传
+                    project_id = data.get('project_id') or 'common'
+                    attachment_path = storage_service.upload_file(file, project_id)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return jsonify({'success': False, 'message': f'上传失败: {str(e)}'}), 500
+    
+            cursor.execute(DatabasePool.format_sql('''
+                INSERT INTO knowledge_base (category, title, content, tags, assoc_stage, project_id, author, attachment_path, external_link)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''), (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
+                  data.get('assoc_stage'), data.get('project_id'), data.get('author'),
+                  attachment_path, data.get('external_link')))
+            conn.commit()
+            return jsonify({'success': True})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2912,49 +2034,51 @@ def add_kb_item():
 @app.route('/api/kb/<int:kid>', methods=['PUT'])
 def update_kb_item(kid):
     try:
-        conn = get_db()
-        
-        # 支持 multipart/form-data 或 JSON
-        if request.content_type and 'multipart/form-data' in request.content_type:
-            data = request.form.to_dict()
-            file = request.files.get('attachment')
-        else:
-            data = request.json
-            file = None
+        with DatabasePool.get_connection() as conn:
+            cursor = conn.cursor()
             
-        # 获取旧数据
-        old_item = conn.execute('SELECT attachment_path FROM knowledge_base WHERE id = ?', (kid,)).fetchone()
-        attachment_path = old_item['attachment_path'] if old_item else None
-
-        if file and file.filename != '':
-            try:
-                # 1. 上传新文件
-                project_id = data.get('project_id') or 'common'
-                new_path = storage_service.upload_file(file, project_id)
+            # 支持 multipart/form-data 或 JSON
+            if request.content_type and 'multipart/form-data' in request.content_type:
+                data = request.form.to_dict()
+                file = request.files.get('attachment')
+            else:
+                data = request.json
+                file = None
                 
-                # 2. 如果成功，尝试删除旧文件 (如果存在且不是同一个文件)
-                if attachment_path and attachment_path != new_path:
-                    try:
-                        if not os.path.exists(attachment_path): # 只有当它不是本地文件时才调用网盘删除
-                             storage_service.delete_file(attachment_path)
-                    except:
-                        pass # 删除旧文件失败不影响更新
-                
-                attachment_path = new_path
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                return jsonify({'success': False, 'message': f'上传文件更新失败: {str(e)}'}), 500
-
-        conn.execute('''
-            UPDATE knowledge_base SET category=?, title=?, content=?, tags=?, assoc_stage=?, 
-            attachment_path=?, external_link=?, updated_at=CURRENT_TIMESTAMP
-            WHERE id=?
-        ''', (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
-              data.get('assoc_stage'), attachment_path, data.get('external_link'), kid))
-        conn.commit()
-        close_db()
-        return jsonify({'success': True})
+            # 获取旧数据
+            sql_old = DatabasePool.format_sql('SELECT attachment_path FROM knowledge_base WHERE id = ?')
+            old_item = cursor.execute(sql_old, (kid,)).fetchone()
+            attachment_path = old_item['attachment_path'] if old_item else None
+    
+            if file and file.filename != '':
+                try:
+                    # 1. 上传新文件
+                    project_id = data.get('project_id') or 'common'
+                    new_path = storage_service.upload_file(file, project_id)
+                    
+                    # 2. 如果成功，尝试删除旧文件 (如果存在且不是同一个文件)
+                    if attachment_path and attachment_path != new_path:
+                        try:
+                            if not os.path.exists(attachment_path): # 只有当它不是本地文件时才调用网盘删除
+                                 storage_service.delete_file(attachment_path)
+                        except:
+                            pass # 删除旧文件失败不影响更新
+                    
+                    attachment_path = new_path
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return jsonify({'success': False, 'message': f'上传文件更新失败: {str(e)}'}), 500
+    
+            sql_update = DatabasePool.format_sql('''
+                UPDATE knowledge_base SET category=?, title=?, content=?, tags=?, assoc_stage=?, 
+                attachment_path=?, external_link=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            ''')
+            cursor.execute(sql_update, (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
+                  data.get('assoc_stage'), attachment_path, data.get('external_link'), kid))
+            conn.commit()
+            return jsonify({'success': True})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -3224,7 +2348,7 @@ def ai_summarize_weekly():
 
         # 获取此项目的近期动态 (日志、问题、里程碑)
         logs = conn.execute('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 10', (project_id,)).fetchall()
-        issues = conn.execute('SELECT * FROM issues WHERE project_id = ? AND status != "已解决" LIMIT 10', (project_id,)).fetchall()
+        issues = conn.execute("SELECT * FROM issues WHERE project_id = ? AND status != '已解决' LIMIT 10", (project_id,)).fetchall()
         
         context = f"""
         【项目信息】
@@ -3441,8 +2565,8 @@ def ai_generate_daily_report():
     completed_tasks = conn.execute('''
         SELECT t.* FROM tasks t
         JOIN project_stages s ON t.stage_id = s.id
-        WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date = ?
-    ''', (project_id, report_date)).fetchall()
+        WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date = ?
+    ''', (project_id, True, report_date)).fetchall()
     
     # 3. 活跃问题 (高风险或待处理)
     active_issues = conn.execute('''
@@ -4038,44 +3162,45 @@ def get_map_config():
 def save_map_config():
     """保存地图服务配置"""
     data = request.json or {}
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    try:
-        # 预加载现有配置以处理脱敏
-        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
-        existing = {row['config_key'].replace('map_', ''): row['value'] for row in cursor.fetchall()}
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
         
-        for key, val in data.items():
-            db_key = f"map_{key}"
-            final_val = val
+        try:
+            # 预加载现有配置以处理脱敏
+            sql_load = DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
+            cursor.execute(sql_load)
+            existing = {row['config_key'].replace('map_', ''): row['value'] for row in cursor.fetchall()}
             
-            # 脱敏逻辑：如果前台传回带 * 的值，说明没改，保留原值
-            if key in ['baidu_ak', 'amap_key', 'tianditu_key', 'google_ak'] and val and '****' in val:
-                final_val = existing.get(key)
+            for key, val in data.items():
+                db_key = f"map_{key}"
+                final_val = val
                 
-            cursor.execute('''
-                INSERT INTO system_config (config_key, value) VALUES (?, ?)
-                ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-            ''', (db_key, str(final_val) if final_val is not None else ""))
+                # 脱敏逻辑：如果前台传回带 * 的值，说明没改，保留原值
+                if key in ['baidu_ak', 'amap_key', 'tianditu_key', 'google_ak'] and val and '****' in val:
+                    final_val = existing.get(key)
+                    
+                sql_ins = DatabasePool.format_sql('''
+                    INSERT INTO system_config (config_key, value) VALUES (?, ?)
+                    ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                ''')
+                cursor.execute(sql_ins, (db_key, str(final_val) if final_val is not None else ""))
+                
+            conn.commit()
             
-        conn.commit()
-        
-        # 立即更新全局 GeoService 配置
-        from utils.geo_service import geo_service
-        geo_service.reload_config()
-        
-        return jsonify({'success': True, 'message': '地图服务配置已保存'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
+            # 立即更新全局 GeoService 配置
+            from utils.geo_service import geo_service
+            geo_service.reload_config()
+            
+            return jsonify({'success': True, 'message': '地图服务配置已保存'})
+        except Exception as e:
+            return jsonify({'success': False, 'message': str(e)}), 500
 
 
 if __name__ == '__main__':
     with app.app_context():
+        from app_config import NOTIFICATION_CONFIG
         init_db()
-        reload_notification_config()
+        reload_notification_config(NOTIFICATION_CONFIG)
     # 启动报告自动归档调度器（含晨会简报、项目哨兵等定时任务）
     # 注意：debug 模式下 Flask reloader 会 fork 子进程，
     # 必须在子进程中启动调度器（或关闭 reloader），否则 Timer 线程会丢失

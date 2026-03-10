@@ -1,7 +1,23 @@
 from flask import jsonify, request
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, date
+from decimal import Decimal
 import time
+
+
+def _json_safe(value):
+    """Convert non-JSON-native DB values (Decimal/date/datetime) recursively."""
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
 
 def api_response(success=True, data=None, message="", code=200):
     """
@@ -11,7 +27,7 @@ def api_response(success=True, data=None, message="", code=200):
         "success": success,
         "code": code,
         "message": message,
-        "data": data,
+        "data": _json_safe(data),
         "timestamp": datetime.now().isoformat()
     }), code
 

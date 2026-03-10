@@ -18,7 +18,7 @@ import threading
 import logging
 import json
 from datetime import datetime, timedelta
-from database import get_db, close_db
+from database import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -219,30 +219,29 @@ class ReportScheduler:
     # ------------------------------------------------------------------
     def _get_active_projects(self):
         """获取所有活跃项目"""
-        conn = get_db()
-        projects = conn.execute("""
-            SELECT * FROM projects 
-            WHERE status NOT IN ('已完成', '已终止')
-        """).fetchall()
-        return projects
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql("""
+                SELECT * FROM projects 
+                WHERE status NOT IN ('已完成', '已终止')
+            """)
+            return conn.execute(sql).fetchall()
 
     def _has_archive(self, project_id, report_type, report_date):
         """检查是否已有归档"""
-        conn = get_db()
-        row = conn.execute(
-            "SELECT id FROM report_archive WHERE project_id = ? AND report_type = ? AND report_date = ?",
-            (project_id, report_type, report_date)
-        ).fetchone()
-        return row is not None
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql("SELECT id FROM report_archive WHERE project_id = ? AND report_type = ? AND report_date = ?")
+            row = conn.execute(sql, (project_id, report_type, report_date)).fetchone()
+            return row is not None
 
     def _save_archive(self, project_id, report_type, report_date, content, generated_by='auto'):
         """保存报告归档"""
-        conn = get_db()
-        conn.execute("""
-            INSERT INTO report_archive (project_id, report_type, report_date, content, generated_by)
-            VALUES (?, ?, ?, ?, ?)
-        """, (project_id, report_type, report_date, content, generated_by))
-        conn.commit()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql("""
+                INSERT INTO report_archive (project_id, report_type, report_date, content, generated_by)
+                VALUES (?, ?, ?, ?, ?)
+            """)
+            conn.execute(sql, (project_id, report_type, report_date, content, generated_by))
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Daily report
@@ -275,42 +274,36 @@ class ReportScheduler:
             except Exception as e:
                 logger.error("  ❌ 项目 %s 日报生成失败: %s", project['project_name'], e)
             finally:
-                try:
-                    close_db()
-                except:
-                    pass
+                pass
 
         logger.info("日报自动生成完成: %d/%d 个项目", success_count, len(projects))
 
     def _build_daily_report(self, project_id, project, report_date):
         """构建单个项目的日报内容"""
-        conn = get_db()
+        with DatabasePool.get_connection() as conn:
+            # 今日工作日志
+            sql_logs = DatabasePool.format_sql("SELECT * FROM work_logs WHERE project_id = ? AND log_date = ?")
+            daily_logs = conn.execute(sql_logs, (project_id, report_date)).fetchall()
 
-        # 今日工作日志
-        daily_logs = conn.execute(
-            "SELECT * FROM work_logs WHERE project_id = ? AND log_date = ?",
-            (project_id, report_date)
-        ).fetchall()
+            # 今日完成任务
+            sql_tasks = DatabasePool.format_sql("""
+                SELECT t.task_name, s.stage_name FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date = ?
+            """)
+            completed_tasks = conn.execute(sql_tasks, (project_id, True, report_date)).fetchall()
 
-        # 今日完成任务
-        completed_tasks = conn.execute("""
-            SELECT t.task_name, s.stage_name FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date = ?
-        """, (project_id, report_date)).fetchall()
+            # 活跃问题
+            sql_issues = DatabasePool.format_sql("""
+                SELECT * FROM issues 
+                WHERE project_id = ? AND status != '已解决'
+                ORDER BY severity DESC LIMIT 5
+            """)
+            active_issues = conn.execute(sql_issues, (project_id,)).fetchall()
 
-        # 活跃问题
-        active_issues = conn.execute("""
-            SELECT * FROM issues 
-            WHERE project_id = ? AND status != '已解决'
-            ORDER BY severity DESC LIMIT 5
-        """, (project_id,)).fetchall()
-
-        # 阶段概况
-        stages = conn.execute(
-            "SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order",
-            (project_id,)
-        ).fetchall()
+            # 阶段概况
+            sql_stages = DatabasePool.format_sql("SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order")
+            stages = conn.execute(sql_stages, (project_id,)).fetchall()
 
         # 明日计划
         tmr_plans = [l['tomorrow_plan'] for l in daily_logs if l['tomorrow_plan']]
@@ -476,40 +469,30 @@ class ReportScheduler:
 
     def _build_weekly_report(self, project_id, project, today):
         """构建单个项目的周报"""
-        from database import DatabasePool
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
         with DatabasePool.get_connection() as conn:
-            stages = [dict(s) for s in conn.execute(
-            "SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order",
-            (project_id,)
-        ).fetchall()]
+            sql_st = DatabasePool.format_sql("SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order")
+            stages = [dict(s) for s in conn.execute(sql_st, (project_id,)).fetchall()]
 
-        completed_tasks = [dict(t) for t in conn.execute("""
-            SELECT t.task_name, s.stage_name, t.completed_date 
-            FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
-            WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date >= ?
-        """, (project_id, week_ago)).fetchall()]
+            sql_tasks = DatabasePool.format_sql("""
+                SELECT t.task_name, s.stage_name, t.completed_date 
+                FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
+                WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ?
+            """)
+            completed_tasks = [dict(t) for t in conn.execute(sql_tasks, (project_id, True, week_ago)).fetchall()]
 
-        new_issues = [dict(i) for i in conn.execute(
-            "SELECT * FROM issues WHERE project_id = ? AND created_at >= ?",
-            (project_id, week_ago)
-        ).fetchall()]
+            sql_ni = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND created_at >= ?")
+            new_issues = [dict(i) for i in conn.execute(sql_ni, (project_id, week_ago)).fetchall()]
 
-        pending_issues = [dict(i) for i in conn.execute(
-            "SELECT * FROM issues WHERE project_id = ? AND status != '已解决'",
-            (project_id,)
-        ).fetchall()]
+            sql_pi = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != '已解决'")
+            pending_issues = [dict(i) for i in conn.execute(sql_pi, (project_id,)).fetchall()]
 
-        interfaces = [dict(i) for i in conn.execute(
-            "SELECT * FROM interfaces WHERE project_id = ?",
-            (project_id,)
-        ).fetchall()]
+            sql_if = DatabasePool.format_sql("SELECT * FROM interfaces WHERE project_id = ?")
+            interfaces = [dict(i) for i in conn.execute(sql_if, (project_id,)).fetchall()]
 
-        work_logs = [dict(w) for w in conn.execute(
-            "SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date",
-            (project_id, week_ago)
-        ).fetchall()]
+            sql_logs = DatabasePool.format_sql("SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date")
+            work_logs = [dict(w) for w in conn.execute(sql_logs, (project_id, week_ago)).fetchall()]
 
         project_data = {
             "project": dict(project),
@@ -656,27 +639,24 @@ Markdown格式示例：
         if not force and self._has_archive(project_id, report_type, today):
             return {"exists": True, "message": f"今日{report_type}报告已存在"}
 
-        # 如果强制生成，先删除旧的
-        if force:
-            conn = get_db()
-            conn.execute(
-                "DELETE FROM report_archive WHERE project_id = ? AND report_type = ? AND report_date = ?",
-                (project_id, report_type, today)
-            )
-            conn.commit()
+        with DatabasePool.get_connection() as conn:
+            # 如果强制生成，先删除旧的
+            if force:
+                sql_del = DatabasePool.format_sql("DELETE FROM report_archive WHERE project_id = ? AND report_type = ? AND report_date = ?")
+                conn.execute(sql_del, (project_id, report_type, today))
+                conn.commit()
 
-        conn = get_db()
-        project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-        if not project:
-            return {"error": "项目不存在"}
+            sql_sel = DatabasePool.format_sql("SELECT * FROM projects WHERE id = ?")
+            project = conn.execute(sql_sel, (project_id,)).fetchone()
+            if not project:
+                return {"error": "项目不存在"}
 
-        if report_type == 'daily':
-            content = self._build_daily_report(project_id, project, today)
-        else:
-            content = self._build_weekly_report(project_id, project, today)
+            if report_type == 'daily':
+                content = self._build_daily_report(project_id, project, today)
+            else:
+                content = self._build_weekly_report(project_id, project, today)
 
-        self._save_archive(project_id, report_type, today, content, 'manual')
-        close_db()
+            self._save_archive(project_id, report_type, today, content, 'manual')
 
         return {"success": True, "report_date": today, "report_type": report_type}
 

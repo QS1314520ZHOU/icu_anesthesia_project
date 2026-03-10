@@ -1,6 +1,7 @@
 import requests
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from ai_config import ai_manager, TaskType
 from database import DatabasePool
@@ -169,15 +170,15 @@ class AIService:
                 # 1. 结构化风险扫描 (里程碑、整体进度)
                 overdue_milestones = conn.execute('''
                     SELECT name, target_date FROM milestones 
-                    WHERE project_id = ? AND is_completed = 0 AND target_date < date('now')
-                ''', (project_id,)).fetchall()
+                    WHERE project_id = ? AND is_completed = ? AND target_date < date('now')
+                ''', (project_id, False)).fetchall()
                 
                 for m in overdue_milestones:
                     risk_score += 20
                     detected_risks.append({"type": "进度逾期", "keyword": "里程碑逾期", "content": f"里程碑【{m['name']}】已逾期", "date": m['target_date']})
 
                 project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-                if project and project['plan_end_date'] and project['plan_end_date'] < datetime.now().strftime('%Y-%m-%d'):
+                if project and project['plan_end_date'] and str(project['plan_end_date']) < datetime.now().strftime('%Y-%m-%d'):
                     if project['status'] not in ['已完成', '已验收', '质保期']:
                         risk_score += 30
                         detected_risks.append({"type": "进度逾期", "keyword": "项目整体延期", "content": "项目计划结束日期已过，但尚未进入验收"})

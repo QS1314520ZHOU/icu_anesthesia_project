@@ -9,7 +9,7 @@
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
-from database import get_db, close_db
+from database import DatabasePool
 
 logger = logging.getLogger(__name__)
 
@@ -19,21 +19,21 @@ class DependencyService:
     @staticmethod
     def get_dependencies(project_id):
         """获取项目所有任务依赖关系"""
-        conn = get_db()
-        deps = conn.execute('''
-            SELECT td.id, td.task_id, td.depends_on_task_id, td.dependency_type,
-                   t1.task_name as task_name, t2.task_name as depends_on_name,
-                   s1.stage_name as task_stage, s2.stage_name as depends_on_stage,
-                   t1.is_completed as task_completed, t2.is_completed as dep_completed
-            FROM task_dependencies td
-            JOIN tasks t1 ON td.task_id = t1.id
-            JOIN tasks t2 ON td.depends_on_task_id = t2.id
-            JOIN project_stages s1 ON t1.stage_id = s1.id
-            JOIN project_stages s2 ON t2.stage_id = s2.id
-            WHERE s1.project_id = ?
-            ORDER BY s1.stage_order, t1.id
-        ''', (project_id,)).fetchall()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT td.id, td.task_id, td.depends_on_task_id, td.dependency_type,
+                       t1.task_name as task_name, t2.task_name as depends_on_name,
+                       s1.stage_name as task_stage, s2.stage_name as depends_on_stage,
+                       t1.is_completed as task_completed, t2.is_completed as dep_completed
+                FROM task_dependencies td
+                JOIN tasks t1 ON td.task_id = t1.id
+                JOIN tasks t2 ON td.depends_on_task_id = t2.id
+                JOIN project_stages s1 ON t1.stage_id = s1.id
+                JOIN project_stages s2 ON t2.stage_id = s2.id
+                WHERE s1.project_id = ?
+                ORDER BY s1.stage_order, t1.id
+            ''')
+            deps = conn.execute(sql, (project_id,)).fetchall()
         return [dict(d) for d in deps]
 
     @staticmethod
@@ -41,38 +41,33 @@ class DependencyService:
         """添加任务依赖关系（检测循环）"""
         if task_id == depends_on_task_id:
             return {'success': False, 'message': '任务不能依赖自身'}
-
-        conn = get_db()
-
-        # 检查是否已存在
-        existing = conn.execute(
-            'SELECT id FROM task_dependencies WHERE task_id = ? AND depends_on_task_id = ?',
-            (task_id, depends_on_task_id)
-        ).fetchone()
-        if existing:
-            close_db()
-            return {'success': False, 'message': '该依赖关系已存在'}
-
-        # 检测循环依赖
-        if DependencyService._would_create_cycle(conn, task_id, depends_on_task_id):
-            close_db()
-            return {'success': False, 'message': '添加该依赖会导致循环依赖'}
-
-        conn.execute('''
-            INSERT INTO task_dependencies (task_id, depends_on_task_id, dependency_type)
-            VALUES (?, ?, ?)
-        ''', (task_id, depends_on_task_id, dependency_type))
-        conn.commit()
-        close_db()
+    
+        with DatabasePool.get_connection() as conn:
+            # 检查是否已存在
+            sql_check = DatabasePool.format_sql('SELECT id FROM task_dependencies WHERE task_id = ? AND depends_on_task_id = ?')
+            existing = conn.execute(sql_check, (task_id, depends_on_task_id)).fetchone()
+            if existing:
+                return {'success': False, 'message': '该依赖关系已存在'}
+    
+            # 检测循环依赖
+            if DependencyService._would_create_cycle(conn, task_id, depends_on_task_id):
+                return {'success': False, 'message': '添加该依赖会导致循环依赖'}
+    
+            sql_ins = DatabasePool.format_sql('''
+                INSERT INTO task_dependencies (task_id, depends_on_task_id, dependency_type)
+                VALUES (?, ?, ?)
+            ''')
+            conn.execute(sql_ins, (task_id, depends_on_task_id, dependency_type))
+            conn.commit()
         return {'success': True, 'message': '依赖关系已添加'}
 
     @staticmethod
     def remove_dependency(dep_id):
         """删除依赖关系"""
-        conn = get_db()
-        conn.execute('DELETE FROM task_dependencies WHERE id = ?', (dep_id,))
-        conn.commit()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('DELETE FROM task_dependencies WHERE id = ?')
+            conn.execute(sql, (dep_id,))
+            conn.commit()
         return {'success': True}
 
     @staticmethod
@@ -82,6 +77,7 @@ class DependencyService:
         # 等价于：task_id 的下游链条中是否包含 depends_on_task_id
         visited = set()
         queue = deque([task_id])
+        sql = DatabasePool.format_sql('SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?')
         while queue:
             current = queue.popleft()
             if current == depends_on_task_id:
@@ -90,10 +86,7 @@ class DependencyService:
                 continue
             visited.add(current)
             # 查找 current 的下游任务（谁依赖 current）
-            downstream = conn.execute(
-                'SELECT task_id FROM task_dependencies WHERE depends_on_task_id = ?',
-                (current,)
-            ).fetchall()
+            downstream = conn.execute(sql, (current,)).fetchall()
             for row in downstream:
                 queue.append(row['task_id'])
         return False
@@ -101,27 +94,27 @@ class DependencyService:
     @staticmethod
     def get_critical_path(project_id):
         """计算项目关键路径 (CPM)"""
-        conn = get_db()
-
-        # 获取所有任务
-        tasks = conn.execute('''
-            SELECT t.id, t.task_name, t.is_completed, t.completed_date,
-                   s.stage_name, s.stage_order, s.plan_start_date, s.plan_end_date
-            FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ?
-            ORDER BY s.stage_order, t.id
-        ''', (project_id,)).fetchall()
-
-        # 获取依赖关系
-        deps = conn.execute('''
-            SELECT td.task_id, td.depends_on_task_id
-            FROM task_dependencies td
-            JOIN tasks t ON td.task_id = t.id
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ?
-        ''', (project_id,)).fetchall()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            # 获取所有任务
+            sql_tasks = DatabasePool.format_sql('''
+                SELECT t.id, t.task_name, t.is_completed, t.completed_date,
+                       s.stage_name, s.stage_order, s.plan_start_date, s.plan_end_date
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+                ORDER BY s.stage_order, t.id
+            ''')
+            tasks = conn.execute(sql_tasks, (project_id,)).fetchall()
+    
+            # 获取依赖关系
+            sql_deps = DatabasePool.format_sql('''
+                SELECT td.task_id, td.depends_on_task_id
+                FROM task_dependencies td
+                JOIN tasks t ON td.task_id = t.id
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+            ''')
+            deps = conn.execute(sql_deps, (project_id,)).fetchall()
 
         if not tasks:
             return {'critical_path': [], 'all_tasks': [], 'summary': '暂无任务数据'}
@@ -213,53 +206,53 @@ class DependencyService:
     @staticmethod
     def get_impact_analysis(task_id):
         """分析某任务延迟对下游的影响"""
-        conn = get_db()
-
-        task = conn.execute('''
-            SELECT t.id, t.task_name, s.stage_name, s.project_id
-            FROM tasks t JOIN project_stages s ON t.stage_id = s.id
-            WHERE t.id = ?
-        ''', (task_id,)).fetchone()
-
-        if not task:
-            close_db()
-            return {'affected': [], 'message': '任务不存在'}
-
-        # BFS 找到所有下游任务
-        affected = []
-        visited = set()
-        queue = deque([task_id])
-        depth = 0
-
-        while queue:
-            level_size = len(queue)
-            depth += 1
-            for _ in range(level_size):
-                current = queue.popleft()
-                if current in visited:
-                    continue
-                visited.add(current)
-
-                downstream = conn.execute('''
-                    SELECT td.task_id, t.task_name, t.is_completed, s.stage_name
-                    FROM task_dependencies td
-                    JOIN tasks t ON td.task_id = t.id
-                    JOIN project_stages s ON t.stage_id = s.id
-                    WHERE td.depends_on_task_id = ?
-                ''', (current,)).fetchall()
-
-                for d in downstream:
-                    if d['task_id'] not in visited:
-                        affected.append({
-                            'task_id': d['task_id'],
-                            'task_name': d['task_name'],
-                            'stage_name': d['stage_name'],
-                            'is_completed': bool(d['is_completed']),
-                            'impact_depth': depth
-                        })
-                        queue.append(d['task_id'])
-
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            sql_task = DatabasePool.format_sql('''
+                SELECT t.id, t.task_name, s.stage_name, s.project_id
+                FROM tasks t JOIN project_stages s ON t.stage_id = s.id
+                WHERE t.id = ?
+            ''')
+            task = conn.execute(sql_task, (task_id,)).fetchone()
+    
+            if not task:
+                return {'affected': [], 'message': '任务不存在'}
+    
+            # BFS 找到所有下游任务
+            affected = []
+            visited = set()
+            queue = deque([task_id])
+            depth = 0
+            
+            sql_downstream = DatabasePool.format_sql('''
+                SELECT td.task_id, t.task_name, t.is_completed, s.stage_name
+                FROM task_dependencies td
+                JOIN tasks t ON td.task_id = t.id
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE td.depends_on_task_id = ?
+            ''')
+    
+            while queue:
+                level_size = len(queue)
+                depth += 1
+                for _ in range(level_size):
+                    current = queue.popleft()
+                    if current in visited:
+                        continue
+                    visited.add(current)
+    
+                    downstream = conn.execute(sql_downstream, (current,)).fetchall()
+    
+                    for d in downstream:
+                        if d['task_id'] not in visited:
+                            affected.append({
+                                'task_id': d['task_id'],
+                                'task_name': d['task_name'],
+                                'stage_name': d['stage_name'],
+                                'is_completed': bool(d['is_completed']),
+                                'impact_depth': depth
+                            })
+                            queue.append(d['task_id'])
+    
         return {
             'source_task': dict(task),
             'affected': affected,
@@ -270,49 +263,47 @@ class DependencyService:
     @staticmethod
     def get_available_dependencies(task_id):
         """获取可作为依赖的任务列表（同项目、非自身、非已依赖、不会成环）"""
-        conn = get_db()
-
-        # 获取当前任务所属项目
-        task = conn.execute('''
-            SELECT t.id, s.project_id FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id WHERE t.id = ?
-        ''', (task_id,)).fetchone()
-
-        if not task:
-            close_db()
-            return []
-
-        # 获取已有依赖
-        existing = set(row['depends_on_task_id'] for row in conn.execute(
-            'SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?', (task_id,)
-        ).fetchall())
-
-        # 获取同项目所有任务
-        all_tasks = conn.execute('''
-            SELECT t.id, t.task_name, s.stage_name, s.stage_order
-            FROM tasks t JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ? AND t.id != ?
-            ORDER BY s.stage_order, t.id
-        ''', (task['project_id'], task_id)).fetchall()
-
-        result = []
-        for t in all_tasks:
-            if t['id'] not in existing:
-                result.append({
-                    'id': t['id'],
-                    'task_name': t['task_name'],
-                    'stage_name': t['stage_name'],
-                    'already_dep': False
-                })
-            else:
-                result.append({
-                    'id': t['id'],
-                    'task_name': t['task_name'],
-                    'stage_name': t['stage_name'],
-                    'already_dep': True
-                })
-
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            # 获取当前任务所属项目
+            sql_task = DatabasePool.format_sql('''
+                SELECT t.id, s.project_id FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id WHERE t.id = ?
+            ''')
+            task = conn.execute(sql_task, (task_id,)).fetchone()
+    
+            if not task:
+                return []
+    
+            # 获取已有依赖
+            sql_existing = DatabasePool.format_sql('SELECT depends_on_task_id FROM task_dependencies WHERE task_id = ?')
+            existing = set(row['depends_on_task_id'] for row in conn.execute(sql_existing, (task_id,)).fetchall())
+    
+            # 获取同项目所有任务
+            sql_all = DatabasePool.format_sql('''
+                SELECT t.id, t.task_name, s.stage_name, s.stage_order
+                FROM tasks t JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ? AND t.id != ?
+                ORDER BY s.stage_order, t.id
+            ''')
+            all_tasks = conn.execute(sql_all, (task['project_id'], task_id)).fetchall()
+    
+            result = []
+            for t in all_tasks:
+                if t['id'] not in existing:
+                    result.append({
+                        'id': t['id'],
+                        'task_name': t['task_name'],
+                        'stage_name': t['stage_name'],
+                        'already_dep': False
+                    })
+                else:
+                    result.append({
+                        'id': t['id'],
+                        'task_name': t['task_name'],
+                        'stage_name': t['stage_name'],
+                        'already_dep': True
+                    })
+    
         return result
 
 

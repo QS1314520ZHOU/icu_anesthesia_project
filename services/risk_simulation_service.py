@@ -52,8 +52,8 @@ class RiskSimulationService:
                 # 4. 获取受影响的里程碑
                 milestones = conn.execute('''
                     SELECT * FROM milestones 
-                    WHERE project_id = ? AND is_completed = 0
-                ''', (project_id,)).fetchall()
+                    WHERE project_id = ? AND is_completed = ?
+                ''', (project_id, False)).fetchall()
                 
                 # 5. 调用 AI 生成“蝴蝶效应”描述
                 narration = RiskSimulationService._generate_ai_narration(

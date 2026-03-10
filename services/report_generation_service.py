@@ -218,14 +218,14 @@ class ReportGenerationService:
                 tasks = conn.execute(
                     '''SELECT t.*, s.stage_name FROM tasks t 
                        JOIN project_stages s ON t.stage_id = s.id 
-                       WHERE s.project_id = ? AND t.is_completed = 1 AND t.completed_date >= ? AND t.completed_date < ?''',
-                    (project_id, start_date, end_date)
+                       WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ? AND t.completed_date < ?''',
+                    (project_id, True, start_date, end_date)
                 ).fetchall()
                 
                 # 获取该期间完成的里程碑
                 milestones = conn.execute(
-                    'SELECT * FROM milestones WHERE project_id = ? AND is_completed = 1 AND completed_date >= ? AND completed_date < ?',
-                    (project_id, start_date, end_date)
+                    'SELECT * FROM milestones WHERE project_id = ? AND is_completed = ? AND completed_date >= ? AND completed_date < ?',
+                    (project_id, True, start_date, end_date)
                 ).fetchall()
                 
                 # 获取财务数据 (汇总回款金额)

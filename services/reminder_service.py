@@ -4,10 +4,9 @@
 提供逾期检测、长时间未处理问题检测、项目健康度评估等功能
 """
 
-import sqlite3
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
-from database import get_db
+from database import DatabasePool
 
 class ReminderService:
     """智能提醒服务"""
@@ -30,19 +29,23 @@ class ReminderService:
     
     def check_overdue_milestones(self) -> List[Dict]:
         """检查已逾期的里程碑"""
-        conn = get_db()
         today = datetime.now().strftime('%Y-%m-%d')
         
-        milestones = conn.execute('''
-            SELECT m.id, m.name, m.target_date, p.id as project_id, 
-                   p.project_name, p.hospital_name
-            FROM milestones m
-            JOIN projects p ON m.project_id = p.id
-            WHERE m.is_completed = 0 
-              AND m.target_date < ?
-              AND p.status NOT IN ('已完成', '已终止')
-            ORDER BY m.target_date ASC
-        ''', (today,)).fetchall()
+        with DatabasePool.get_connection() as conn:
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            
+            milestones = conn.execute(f'''
+                SELECT m.id, m.name, m.target_date, p.id as project_id, 
+                       p.project_name, p.hospital_name
+                FROM milestones m
+                JOIN projects p ON m.project_id = p.id
+                WHERE m.is_completed = {placeholder} 
+                  AND m.target_date < {placeholder}
+                  AND p.status NOT IN ('已完成', '已终止')
+                ORDER BY m.target_date ASC
+            ''', (False, today)).fetchall()
         
         result = []
         for m in milestones:
@@ -72,33 +75,37 @@ class ReminderService:
         if days is None:
             days = self.OVERDUE_WARNING_DAYS
             
-        conn = get_db()
         today = datetime.now().strftime('%Y-%m-%d')
         deadline = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d')
         
-        # 即将到期的里程碑
-        milestones = conn.execute('''
-            SELECT m.id, m.name, m.target_date, p.id as project_id, 
-                   p.project_name, p.hospital_name
-            FROM milestones m
-            JOIN projects p ON m.project_id = p.id
-            WHERE m.is_completed = 0 
-              AND m.target_date >= ? AND m.target_date <= ?
-              AND p.status NOT IN ('已完成', '已终止')
-            ORDER BY m.target_date ASC
-        ''', (today, deadline)).fetchall()
-        
-        # 即将到期的阶段
-        stages = conn.execute('''
-            SELECT s.id, s.stage_name, s.plan_end_date, p.id as project_id,
-                   p.project_name, p.hospital_name
-            FROM project_stages s
-            JOIN projects p ON s.project_id = p.id
-            WHERE s.status != '已完成'
-              AND s.plan_end_date >= ? AND s.plan_end_date <= ?
-              AND p.status NOT IN ('已完成', '已终止')
-            ORDER BY s.plan_end_date ASC
-        ''', (today, deadline)).fetchall()
+        with DatabasePool.get_connection() as conn:
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            
+            # 即将到期的里程碑
+            milestones = conn.execute(f'''
+                SELECT m.id, m.name, m.target_date, p.id as project_id, 
+                       p.project_name, p.hospital_name
+                FROM milestones m
+                JOIN projects p ON m.project_id = p.id
+                WHERE m.is_completed = {placeholder} 
+                  AND m.target_date >= {placeholder} AND m.target_date <= {placeholder}
+                  AND p.status NOT IN ('已完成', '已终止')
+                ORDER BY m.target_date ASC
+            ''', (False, today, deadline)).fetchall()
+            
+            # 即将到期的阶段
+            stages = conn.execute(f'''
+                SELECT s.id, s.stage_name, s.plan_end_date, p.id as project_id,
+                       p.project_name, p.hospital_name
+                FROM project_stages s
+                JOIN projects p ON s.project_id = p.id
+                WHERE s.status != '已完成'
+                  AND s.plan_end_date >= {placeholder} AND s.plan_end_date <= {placeholder}
+                  AND p.status NOT IN ('已完成', '已终止')
+                ORDER BY s.plan_end_date ASC
+            ''', (today, deadline)).fetchall()
         
         result = []
         for m in milestones:
@@ -143,26 +150,30 @@ class ReminderService:
                 "severity": "medium"
             })
         
-        return sorted(result, key=lambda x: x['deadline'])
+        return sorted(result, key=lambda x: str(x['deadline'] or '')[:10])
     
     def check_stale_issues(self, days: int = None) -> List[Dict]:
         """检查长时间未处理的问题"""
         if days is None:
             days = self.STALE_ISSUE_DAYS
             
-        conn = get_db()
         cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
         
-        issues = conn.execute('''
-            SELECT i.id, i.issue_type, i.description, i.severity, i.status,
-                   i.created_at, p.id as project_id, p.project_name, p.hospital_name
-            FROM issues i
-            JOIN projects p ON i.project_id = p.id
-            WHERE i.status != '已解决'
-              AND i.created_at < ?
-              AND p.status NOT IN ('已完成', '已终止')
-            ORDER BY i.severity DESC, i.created_at ASC
-        ''', (cutoff,)).fetchall()
+        with DatabasePool.get_connection() as conn:
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            
+            issues = conn.execute(f'''
+                SELECT i.id, i.issue_type, i.description, i.severity, i.status,
+                       i.created_at, p.id as project_id, p.project_name, p.hospital_name
+                FROM issues i
+                JOIN projects p ON i.project_id = p.id
+                WHERE i.status != '已解决'
+                  AND i.created_at < {placeholder}
+                  AND p.status NOT IN ('已完成', '已终止')
+                ORDER BY i.severity DESC, i.created_at ASC
+            ''', (cutoff,)).fetchall()
         
         return [{
             "id": i['id'],
@@ -185,45 +196,50 @@ class ReminderService:
         if days is None:
             days = self.IDLE_PROJECT_DAYS
             
-        conn = get_db()
         cutoff = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
         
-        # 查找最近没有工作日志的活跃项目
-        projects = conn.execute('''
-            SELECT p.id, p.project_name, p.hospital_name, p.status, p.progress,
-                   p.project_manager, p.updated_at,
-                   (SELECT MAX(log_date) FROM work_logs WHERE project_id = p.id) as last_log_date
-            FROM projects p
-            WHERE p.status IN ('进行中', '试运行')
-            ORDER BY last_log_date ASC NULLS FIRST
-        ''').fetchall()
+        with DatabasePool.get_connection() as conn:
+            # 查找最近没有工作日志的活跃项目
+            projects = conn.execute('''
+                SELECT p.id, p.project_name, p.hospital_name, p.status, p.progress,
+                       p.project_manager, p.updated_at,
+                       (SELECT MAX(log_date) FROM work_logs WHERE project_id = p.id) as last_log_date
+                FROM projects p
+                WHERE p.status IN ('进行中', '试运行')
+                ORDER BY last_log_date ASC NULLS FIRST
+            ''').fetchall()
         
         idle_projects = []
         for p in projects:
-            last_activity = p['last_log_date'] or p['updated_at'][:10] if p['updated_at'] else None
-            if last_activity and last_activity < cutoff:
-                days_idle = (datetime.now() - datetime.strptime(str(last_activity).split(' ')[0], '%Y-%m-%d')).days
+            last_activity = p['last_log_date'] or p['updated_at']
+            if last_activity:
+                last_activity_str = str(last_activity)[:10]
+                if last_activity_str < cutoff:
+                    days_idle = (datetime.now() - datetime.strptime(last_activity_str, '%Y-%m-%d')).days
 
-                idle_projects.append({
-                    "id": p['id'],
-                    "project_name": p['project_name'],
-                    "hospital": p['hospital_name'],
-                    "status": p['status'],
-                    "progress": p['progress'],
-                    "manager": p['project_manager'],
-                    "last_activity": last_activity,
-                    "days_idle": days_idle,
-                    "type": "idle_project",
-                    "severity": "high" if days_idle > 30 else "medium"
-                })
+                    idle_projects.append({
+                        "id": p['id'],
+                        "project_name": p['project_name'],
+                        "hospital": p['hospital_name'],
+                        "status": p['status'],
+                        "progress": p['progress'],
+                        "manager": p['project_manager'],
+                        "last_activity": last_activity,
+                        "days_idle": days_idle,
+                        "type": "idle_project",
+                        "severity": "high" if days_idle > 30 else "medium"
+                    })
         
         return idle_projects
     
     def get_unread_count(self) -> int:
         """获取未读通知数量"""
-        conn = get_db()
-        result = conn.execute('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0').fetchone()
-        return result['count'] if result else 0
+        with DatabasePool.get_connection() as conn:
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            result = conn.execute(f'SELECT COUNT(*) as count FROM notifications WHERE is_read = {placeholder}', (False,)).fetchone()
+            return result['count'] if result else 0
     
     def get_daily_digest(self) -> Dict[str, Any]:
         """生成每日摘要"""
@@ -233,18 +249,22 @@ class ReminderService:
         idle = self.check_idle_projects()
         
         # 统计今日完成的任务
-        conn = get_db()
         today = datetime.now().strftime('%Y-%m-%d')
-        completed_today = conn.execute('''
-            SELECT COUNT(*) as count FROM tasks 
-            WHERE is_completed = 1 AND completed_date = ?
-        ''', (today,)).fetchone()['count']
-        
-        # 活跃项目数
-        active_projects = conn.execute('''
-            SELECT COUNT(*) as count FROM projects 
-            WHERE status IN ('进行中', '试运行')
-        ''').fetchone()['count']
+        with DatabasePool.get_connection() as conn:
+            from app_config import DB_CONFIG
+            db_type = DB_CONFIG.get('TYPE', 'sqlite')
+            placeholder = '%s' if db_type == 'postgres' else '?'
+            
+            completed_today = conn.execute(f'''
+                SELECT COUNT(*) as count FROM tasks 
+                WHERE is_completed = {placeholder} AND completed_date = {placeholder}
+            ''', (True, today)).fetchone()['count']
+            
+            # 活跃项目数
+            active_projects = conn.execute('''
+                SELECT COUNT(*) as count FROM projects 
+                WHERE status IN ('进行中', '试运行')
+            ''').fetchone()['count']
         
         return {
             "date": today,

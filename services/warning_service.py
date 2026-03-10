@@ -3,38 +3,34 @@
 检测项目中需要关注的风险点并生成预警
 """
 from datetime import datetime, timedelta
-import sqlite3
-import os
-
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'database.db')
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from database import DatabasePool
 
 def check_milestone_warnings():
     """检查里程碑逾期预警（提前3/7天）"""
-    conn = get_db()
-    cursor = conn.cursor()
     today = datetime.now().date()
     warnings = []
     
-    # 查找未完成且即将到期的里程碑
-    cursor.execute('''
-        SELECT m.id, m.name, m.target_date, m.project_id, p.project_name
-        FROM milestones m
-        JOIN projects p ON m.project_id = p.id
-        WHERE m.is_completed = 0 
-          AND p.status NOT IN ('已完成', '已终止')
-        ORDER BY m.target_date ASC
-    ''')
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        # 查找未完成且即将到期的里程碑
+        from app_config import DB_CONFIG
+        db_type = DB_CONFIG.get('TYPE', 'sqlite')
+        placeholder = '%s' if db_type == 'postgres' else '?'
+        cursor.execute(f'''
+            SELECT m.id, m.name, m.target_date, m.project_id, p.project_name
+            FROM milestones m
+            JOIN projects p ON m.project_id = p.id
+            WHERE m.is_completed = {placeholder} 
+              AND p.status NOT IN ('已完成', '已终止')
+            ORDER BY m.target_date ASC
+        ''', (False,))
     
     for row in cursor.fetchall():
         try:
-            if not row['target_date'] or not row['target_date'].strip():
+            target_str = str(row['target_date']).strip()[:10] if row.get('target_date') else ""
+            if not target_str:
                 continue
-            target = datetime.strptime(row['target_date'].strip(), '%Y-%m-%d').date()
+            target = datetime.strptime(target_str, '%Y-%m-%d').date()
         except (ValueError, AttributeError):
             continue
         days_until = (target - today).days
@@ -79,7 +75,6 @@ def check_milestone_warnings():
                 'message': f"里程碑「{row['name']}」将在 {days_until} 天后到期"
             })
     
-    conn.close()
     return warnings
 
 def check_task_stagnation():
@@ -92,24 +87,24 @@ def check_task_stagnation():
 
 def check_interface_timeout():
     """检查接口对接超时预警"""
-    conn = get_db()
-    cursor = conn.cursor()
     today = datetime.now().date()
     warnings = []
     
-    # 查找未完成且可能超时的接口
-    cursor.execute('''
-        SELECT i.id, i.interface_name as name, i.status, i.plan_date, i.project_id, p.project_name
-        FROM interfaces i
-        JOIN projects p ON i.project_id = p.id
-        WHERE i.status NOT IN ('已完成', '已取消')
-          AND p.status NOT IN ('已完成', '已终止')
-          AND i.plan_date IS NOT NULL
-    ''')
+    with DatabasePool.get_connection() as conn:
+        cursor = conn.cursor()
+        # 查找未完成且可能超时的接口
+        cursor.execute('''
+            SELECT i.id, i.interface_name as name, i.status, i.plan_date, i.project_id, p.project_name
+            FROM interfaces i
+            JOIN projects p ON i.project_id = p.id
+            WHERE i.status NOT IN ('已完成', '已取消')
+              AND p.status NOT IN ('已完成', '已终止')
+              AND i.plan_date IS NOT NULL
+        ''')
     
     for row in cursor.fetchall():
         try:
-            plan_date = datetime.strptime(row['plan_date'], '%Y-%m-%d').date()
+            plan_date = datetime.strptime(str(row['plan_date'])[:10], '%Y-%m-%d').date()
             days_overdue = (today - plan_date).days
             
             if days_overdue > 0:
@@ -127,7 +122,6 @@ def check_interface_timeout():
         except:
             pass
     
-    conn.close()
     return warnings
 
 def get_all_warnings():

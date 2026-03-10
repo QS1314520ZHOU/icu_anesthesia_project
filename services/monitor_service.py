@@ -5,7 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from threading import Thread
-from database import get_db, DatabasePool
+from database import DatabasePool
 from app_config import NOTIFICATION_CONFIG
 
 class MonitorService:
@@ -123,132 +123,144 @@ class MonitorService:
 
     def get_notifications(self, limit=50):
         """获取通知列表"""
-        conn = get_db()
-        notifications = conn.execute('''
-            SELECT n.*, p.project_name 
-            FROM notifications n 
-            LEFT JOIN projects p ON n.project_id = p.id
-            ORDER BY n.created_at DESC LIMIT ?
-        ''', (limit,)).fetchall()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                SELECT n.*, p.project_name 
+                FROM notifications n 
+                LEFT JOIN projects p ON n.project_id = p.id
+                ORDER BY n.created_at DESC LIMIT ?
+            ''')
+            notifications = conn.execute(sql, (limit,)).fetchall()
         return [dict(n) for n in notifications]
 
     def create_notification(self, data):
         """创建通知"""
-        conn = get_db()
-        conn.execute('''
-            INSERT INTO notifications (project_id, title, content, type, due_date, remind_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (data.get('project_id'), data['title'], data.get('content', ''), 
-              data.get('type', 'info'), data.get('due_date'), data.get('remind_type', 'once')))
-        conn.commit()
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                INSERT INTO notifications (project_id, title, content, type, due_date, remind_type)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''')
+            conn.execute(sql, (data.get('project_id'), data['title'], data.get('content', ''), 
+                  data.get('type', 'info'), data.get('due_date'), data.get('remind_type', 'once')))
+            conn.commit()
         self.send_notification_async(data['title'], data.get('content', ''), data.get('type', 'info'), data.get('project_id'))
         return True
 
     def mark_as_read(self, nid=None):
         """标记已读"""
-        conn = get_db()
-        if nid:
-            conn.execute('UPDATE notifications SET is_read = 1 WHERE id = ?', (nid,))
-        else:
-            conn.execute('UPDATE notifications SET is_read = 1 WHERE is_read = 0')
-        conn.commit()
+        with DatabasePool.get_connection() as conn:
+            if nid:
+                sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE id = ?')
+                conn.execute(sql, (True, nid))
+            else:
+                sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE is_read = ?')
+                conn.execute(sql, (True, False))
+            conn.commit()
         return True
 
     def delete_notifications(self, nid=None):
         """删除通知"""
-        conn = get_db()
-        if nid:
-            conn.execute('DELETE FROM notifications WHERE id = ?', (nid,))
-        else:
-            conn.execute('DELETE FROM notifications')
-        conn.commit()
+        with DatabasePool.get_connection() as conn:
+            if nid:
+                sql = DatabasePool.format_sql('DELETE FROM notifications WHERE id = ?')
+                conn.execute(sql, (nid,))
+            else:
+                sql = DatabasePool.format_sql('DELETE FROM notifications')
+                conn.execute(sql)
+            conn.commit()
         return True
 
     def get_unread_count(self):
         """获取未读数"""
-        conn = get_db()
-        count = conn.execute('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0').fetchone()['count']
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('SELECT COUNT(*) as count FROM notifications WHERE is_read = ?')
+            count = conn.execute(sql, (False,)).fetchone()['count']
         return count
 
     def check_and_create_reminders(self):
         """核心逻辑：扫描业务状态并生成预警提醒"""
-        conn = get_db()
-        today = datetime.now().strftime('%Y-%m-%d')
-        three_days_later = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d')
-        created_reminders = []
-        notifications_to_send = []
-        
-        # 1. 检查即将逾期的阶段
-        upcoming_stages = conn.execute('''
-            SELECT s.*, p.project_name FROM project_stages s
-            JOIN projects p ON s.project_id = p.id
-            WHERE s.plan_end_date BETWEEN ? AND ? AND s.progress < 100
-            AND p.status NOT IN ('暂停', '离场待返', '已终止', '已完成')
-        ''', (today, three_days_later)).fetchall()
-        
-        for stage in upcoming_stages:
-            existing = conn.execute('''
-                SELECT id FROM notifications 
-                WHERE project_id = ? AND title LIKE ? AND created_at > date('now', '-1 day')
-            ''', (stage['project_id'], f"%{stage['stage_name']}%")).fetchone()
-            if not existing:
-                title = f"⚠️ 阶段即将到期: {stage['stage_name']}"
-                content = f"项目【{stage['project_name']}】的【{stage['stage_name']}】阶段将于 {stage['plan_end_date']} 到期，当前进度 {stage['progress']}%"
-                self.create_notification({
-                    'project_id': stage['project_id'],
-                    'title': title,
-                    'content': content,
-                    'type': 'warning',
-                    'due_date': stage['plan_end_date']
-                })
-                created_reminders.append(f"{stage['project_name']} - {stage['stage_name']}")
-        
-        # 2. 检查已逾期的项目
-        overdue_projects = conn.execute('''
-            SELECT * FROM projects WHERE plan_end_date < ? 
-            AND status NOT IN ('已完成', '已终止', '已验收', '质保期', '暂停', '离场待返')
-        ''', (today,)).fetchall()
-        
-        for p in overdue_projects:
-            existing = conn.execute('''
-                SELECT id FROM notifications 
-                WHERE project_id = ? AND type = 'danger' AND created_at > date('now', '-3 day')
-            ''', (p['id'],)).fetchone()
-            if not existing:
-                title = f"🚨 项目已逾期: {p['project_name']}"
-                content = f"项目原计划于 {p['plan_end_date']} 完成，当前进度 {p['progress']}%，请尽快处理！"
-                self.create_notification({
-                    'project_id': p['id'],
-                    'title': title,
-                    'content': content,
-                    'type': 'danger'
-                })
-                created_reminders.append(f"逾期: {p['project_name']}")
-        
-        # 3. 检查高危问题
-        critical_issues = conn.execute('''
-            SELECT i.*, p.project_name FROM issues i
-            JOIN projects p ON i.project_id = p.id
-            WHERE i.severity = '高' AND i.status = '待处理' 
-            AND i.created_at < date('now', '-2 day')
-        ''').fetchall()
-        
-        for issue in critical_issues:
-            existing = conn.execute('''
-                SELECT id FROM notifications 
-                WHERE project_id = ? AND content LIKE ? AND created_at > date('now', '-2 day')
-            ''', (issue['project_id'], f"%{issue['description'][:20]}%")).fetchone()
-            if not existing:
-                title = f"⚠️ 高危问题未处理"
-                content = f"项目【{issue['project_name']}】存在高危问题超过2天未处理：{issue['description'][:50]}..."
-                self.create_notification({
-                    'project_id': issue['project_id'],
-                    'title': title,
-                    'content': content,
-                    'type': 'warning'
-                })
-                created_reminders.append(f"高危问题: {issue['project_name']}")
-
+        with DatabasePool.get_connection() as conn:
+            today = datetime.now().strftime('%Y-%m-%d')
+            three_days_later = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d')
+            created_reminders = []
+            
+            # 1. 检查即将逾期的阶段
+            sql_upcoming = DatabasePool.format_sql('''
+                SELECT s.*, p.project_name FROM project_stages s
+                JOIN projects p ON s.project_id = p.id
+                WHERE s.plan_end_date BETWEEN ? AND ? AND s.progress < 100
+                AND p.status NOT IN ('暂停', '离场待返', '已终止', '已完成')
+            ''')
+            upcoming_stages = conn.execute(sql_upcoming, (today, three_days_later)).fetchall()
+            
+            for stage in upcoming_stages:
+                sql_check = DatabasePool.format_sql('''
+                    SELECT id FROM notifications 
+                    WHERE project_id = ? AND title LIKE ? AND created_at > date('now', '-1 day')
+                ''')
+                existing = conn.execute(sql_check, (stage['project_id'], f"%{stage['stage_name']}%")).fetchone()
+                if not existing:
+                    title = f"⚠️ 阶段即将到期: {stage['stage_name']}"
+                    content = f"项目【{stage['project_name']}】的【{stage['stage_name']}】阶段将于 {stage['plan_end_date']} 到期，当前进度 {stage['progress']}%"
+                    self.create_notification({
+                        'project_id': stage['project_id'],
+                        'title': title,
+                        'content': content,
+                        'type': 'warning',
+                        'due_date': stage['plan_end_date']
+                    })
+                    created_reminders.append(f"{stage['project_name']} - {stage['stage_name']}")
+            
+            # 2. 检查已逾期的项目
+            sql_overdue = DatabasePool.format_sql('''
+                SELECT * FROM projects WHERE plan_end_date < ? 
+                AND status NOT IN ('已完成', '已终止', '已验收', '质保期', '暂停', '离场待返')
+            ''')
+            overdue_projects = conn.execute(sql_overdue, (today,)).fetchall()
+            
+            for p in overdue_projects:
+                sql_check = DatabasePool.format_sql('''
+                    SELECT id FROM notifications 
+                    WHERE project_id = ? AND type = 'danger' AND created_at > date('now', '-3 day')
+                ''')
+                existing = conn.execute(sql_check, (p['id'],)).fetchone()
+                if not existing:
+                    title = f"🚨 项目已逾期: {p['project_name']}"
+                    content = f"项目原计划于 {p['plan_end_date']} 完成，当前进度 {p['progress']}%，请尽快处理！"
+                    self.create_notification({
+                        'project_id': p['id'],
+                        'title': title,
+                        'content': content,
+                        'type': 'danger'
+                    })
+                    created_reminders.append(f"逾期: {p['project_name']}")
+            
+            # 3. 检查高危问题
+            sql_issues = DatabasePool.format_sql('''
+                SELECT i.*, p.project_name FROM issues i
+                JOIN projects p ON i.project_id = p.id
+                WHERE i.severity = '高' AND i.status = '待处理' 
+                AND i.created_at < date('now', '-2 day')
+            ''')
+            critical_issues = conn.execute(sql_issues).fetchall()
+            
+            for issue in critical_issues:
+                sql_check = DatabasePool.format_sql('''
+                    SELECT id FROM notifications 
+                    WHERE project_id = ? AND content LIKE ? AND created_at > date('now', '-2 day')
+                ''')
+                existing = conn.execute(sql_check, (issue['project_id'], f"%{issue['description'][:20]}%")).fetchone()
+                if not existing:
+                    title = f"⚠️ 高危问题未处理"
+                    content = f"项目【{issue['project_name']}】存在高危问题超过2天未处理：{issue['description'][:50]}..."
+                    self.create_notification({
+                        'project_id': issue['project_id'],
+                        'title': title,
+                        'content': content,
+                        'type': 'warning'
+                    })
+                    created_reminders.append(f"高危问题: {issue['project_name']}")
+    
         return created_reminders
 
 # 全局实例
