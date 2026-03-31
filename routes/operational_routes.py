@@ -15,7 +15,7 @@ def get_stage_baselines():
 @operational_bp.route('/analyze-change', methods=['POST'])
 def analyze_change():
     """需求变更影响分析"""
-    data = request.json
+    data = request.json or {}
     project_id = data.get('project_id')
     description = data.get('description')
     

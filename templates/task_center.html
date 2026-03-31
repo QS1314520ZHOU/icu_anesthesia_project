@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务中心</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --text: #1f2937;
+            --muted: #6b7280;
+            --line: #dbe1e8;
+            --primary: #166534;
+            --primary-soft: #dcfce7;
+            --warn: #b45309;
+            --warn-soft: #fef3c7;
+            --danger: #b91c1c;
+            --danger-soft: #fee2e2;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+            color: var(--text);
+            background: linear-gradient(180deg, #eef6f1 0%, var(--bg) 35%, #f7f7f7 100%);
+        }
+        .wrap {
+            max-width: 1180px;
+            margin: 0 auto;
+            padding: 28px 20px 40px;
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 30px;
+        }
+        .sub {
+            color: var(--muted);
+            margin-bottom: 22px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+            margin-bottom: 18px;
+        }
+        .stat, .panel {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+        }
+        .stat {
+            padding: 18px;
+        }
+        .stat .label {
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .stat .value {
+            margin-top: 8px;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .toolbar {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr auto auto auto;
+            gap: 12px;
+            padding: 16px;
+            margin-bottom: 18px;
+        }
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            padding: 16px;
+            margin-bottom: 18px;
+        }
+        .panel {
+            overflow: hidden;
+        }
+        input, select, button {
+            width: 100%;
+            border-radius: 12px;
+            border: 1px solid var(--line);
+            padding: 11px 12px;
+            font-size: 14px;
+            background: #fff;
+        }
+        button {
+            cursor: pointer;
+            background: #0f766e;
+            color: #fff;
+            border: none;
+            font-weight: 600;
+        }
+        button.secondary {
+            background: #475569;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 14px 16px;
+            border-top: 1px solid var(--line);
+            text-align: left;
+            vertical-align: top;
+            font-size: 14px;
+        }
+        th {
+            color: var(--muted);
+            font-weight: 600;
+            background: #f8fafc;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .processing { color: var(--warn); background: var(--warn-soft); }
+        .completed { color: var(--primary); background: var(--primary-soft); }
+        .failed { color: var(--danger); background: var(--danger-soft); }
+        .task-type {
+            display: inline-block;
+            padding: 3px 9px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            cursor: pointer;
+        }
+        .task-type.ai_analysis { color: #1d4ed8; background: #dbeafe; }
+        .task-type.weekly_report { color: #7c2d12; background: #ffedd5; }
+        .task-type.all_weekly_report { color: #6d28d9; background: #ede9fe; }
+        .muted { color: var(--muted); }
+        .clickable {
+            cursor: pointer;
+            color: #0f766e;
+            font-weight: 600;
+        }
+        .cell-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        tr.failed-row {
+            background: linear-gradient(90deg, rgba(185,28,28,0.05), rgba(255,255,255,0));
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+        }
+        .actions button {
+            width: auto;
+            padding: 8px 12px;
+            font-size: 13px;
+        }
+        .helper-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1.4fr auto;
+            gap: 12px;
+            padding: 16px;
+            margin-bottom: 18px;
+            align-items: end;
+        }
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .field label {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 700;
+        }
+        .helper-note {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+        .helper-note.strong {
+            color: #0f766e;
+            font-weight: 700;
+        }
+        .actions-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .actions-bar .status-text {
+            font-size: 12px;
+            color: var(--muted);
+        }
+        .preview {
+            max-width: 420px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .link-btn {
+            background: transparent;
+            color: #0f766e;
+            border: none;
+            padding: 0;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        .modal-mask {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 999;
+        }
+        .modal-mask.show {
+            display: flex;
+        }
+        .toast {
+            position: fixed;
+            right: 20px;
+            top: 20px;
+            min-width: 240px;
+            max-width: 420px;
+            background: #111827;
+            color: #fff;
+            padding: 12px 14px;
+            border-radius: 12px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+            z-index: 1200;
+            display: none;
+        }
+        .toast.show { display: block; }
+        .toast.success { background: #166534; }
+        .toast.error { background: #991b1b; }
+        .modal-card {
+            width: min(980px, 100%);
+            max-height: 90vh;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .modal-title {
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .modal-meta {
+            color: var(--muted);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .modal-body {
+            padding: 20px;
+            overflow: auto;
+        }
+        .detail-block {
+            margin-bottom: 18px;
+        }
+        .detail-label {
+            font-size: 12px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+        }
+        .detail-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.7;
+            background: #f8fafc;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px;
+        }
+        .detail-content.markdown {
+            white-space: normal;
+        }
+        .detail-content.markdown h1,
+        .detail-content.markdown h2,
+        .detail-content.markdown h3 {
+            margin: 0 0 12px;
+            line-height: 1.35;
+        }
+        .detail-content.markdown p,
+        .detail-content.markdown li {
+            margin: 0 0 10px;
+            line-height: 1.75;
+        }
+        .detail-content.markdown ul,
+        .detail-content.markdown ol {
+            padding-left: 22px;
+            margin: 8px 0 14px;
+        }
+        .detail-content.markdown code {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .detail-content.markdown pre {
+            background: #0f172a;
+            color: #e2e8f0;
+            padding: 14px;
+            border-radius: 12px;
+            overflow: auto;
+        }
+        .detail-content.markdown table {
+            margin-top: 10px;
+            font-size: 13px;
+        }
+        .detail-content.markdown th,
+        .detail-content.markdown td {
+            border: 1px solid var(--line);
+            padding: 8px 10px;
+        }
+        @media (max-width: 900px) {
+            .stats, .toolbar, .quick-actions, .helper-grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 640px) {
+            .stats, .toolbar, .quick-actions, .helper-grid { grid-template-columns: 1fr; }
+            th:nth-child(5), td:nth-child(5),
+            th:nth-child(6), td:nth-child(6),
+            th:nth-child(7), td:nth-child(7) { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <h1>任务中心</h1>
+        <div class="sub">查看 AI 分析、项目周报、全局周报等后台任务的运行状态，并支持失败后重试。</div>
+        <div style="margin-bottom:18px; display:flex; gap:10px; flex-wrap:wrap;">
+            <a href="/" style="text-decoration:none;">
+                <button type="button" class="secondary" style="width:auto;">← 返回主仪表盘</button>
+            </a>
+            <button type="button" onclick="loadTasks()" style="width:auto;">刷新任务</button>
+            <button type="button" class="secondary" onclick="copyViewLink()" style="width:auto;">复制当前视图链接</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat"><div class="label">处理中</div><div class="value" id="stat-processing">0</div></div>
+            <div class="stat"><div class="label">已完成</div><div class="value" id="stat-completed">0</div></div>
+            <div class="stat"><div class="label">失败</div><div class="value" id="stat-failed">0</div></div>
+            <div class="stat"><div class="label">总任务</div><div class="value" id="stat-total">0</div></div>
+        </div>
+
+        <div id="taskResultCount" class="sub" style="margin-top:-8px;margin-bottom:16px;">当前结果：0 条</div>
+
+        <div class="panel toolbar">
+            <select id="projectId">
+                <option value="">全部项目</option>
+            </select>
+            <select id="status">
+                <option value="">全部状态</option>
+                <option value="processing">处理中</option>
+                <option value="completed">已完成</option>
+                <option value="failed">失败</option>
+            </select>
+            <select id="taskType">
+                <option value="">全部类型</option>
+                <option value="ai_analysis">项目AI分析</option>
+                <option value="weekly_report">项目周报</option>
+                <option value="all_weekly_report">全局周报</option>
+                <option value="report_archive">报告归档</option>
+                <option value="knowledge_extract">知识提炼</option>
+                <option value="global_briefing">全局晨会简报</option>
+                <option value="ai_cruise">AI巡航体检</option>
+            </select>
+            <button onclick="loadTasks()">查询</button>
+            <button class="secondary" onclick="resetFilters()">重置</button>
+            <button class="secondary" onclick="cleanupCompletedTasks()">清理已完成</button>
+        </div>
+
+        <div class="panel helper-grid">
+            <div class="field">
+                <label for="quickProjectId">任务项目</label>
+                <select id="quickProjectId">
+                    <option value="">请选择项目</option>
+                </select>
+                <div class="helper-note">项目 AI 分析、项目周报、报告归档会直接使用这里的项目。</div>
+            </div>
+            <div class="field">
+                <label for="knowledgeIssueId">知识提炼问题</label>
+                <select id="knowledgeIssueId">
+                    <option value="">请先选择项目</option>
+                </select>
+                <div class="helper-note" id="knowledgeIssueHint">从当前项目的未解决问题中选择，不再手填 issue_id。</div>
+            </div>
+            <button type="button" class="secondary" onclick="syncQuickProjectFromFilter()">使用当前筛选项目</button>
+        </div>
+
+        <div class="actions-bar">
+            <div id="quickActionStatus" class="status-text">请选择项目后再触发项目相关任务。</div>
+        </div>
+
+        <div class="panel quick-actions">
+            <button id="btnGlobalBriefing" onclick="triggerQuickTask('/api/standup/briefing/async')">📣 生成晨会简报</button>
+            <button id="btnAiCruise" onclick="triggerQuickTask('/api/ai/cruise/async')">🛰️ AI巡航体检</button>
+            <button id="btnArchive" onclick="triggerArchiveTask()">🗃️ 生成报告归档</button>
+            <button id="btnKnowledge" onclick="triggerKnowledgeTask()">🧠 知识提炼</button>
+            <button id="btnAnalysis" onclick="triggerProjectAnalysisTask()">🤖 项目AI分析</button>
+            <button id="btnWeekly" onclick="triggerProjectWeeklyReportTask()">📋 项目周报</button>
+        </div>
+
+        <div class="panel">
+            <table>
+                <thead>
+                    <tr>
+                        <th>任务</th>
+                        <th>状态</th>
+                        <th>项目</th>
+                        <th>参数</th>
+                        <th>创建时间</th>
+                        <th>耗时</th>
+                        <th>结果 / 错误</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="taskTable">
+                    <tr><td colspan="8" class="muted">正在加载任务数据...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal-mask" id="taskModal" onclick="closeTaskDetail(event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <div class="modal-title" id="modalTitle">任务详情</div>
+                    <div class="modal-meta" id="modalMeta"></div>
+                </div>
+                <button class="secondary" style="width:auto;" onclick="closeTaskDetail()">关闭</button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-block">
+                    <div class="detail-label">参数摘要</div>
+                    <div class="detail-content" id="modalPayload">-</div>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-label">结果内容
+                        <button class="link-btn" onclick="copyTaskText('modalResult')">复制</button>
+                        <button class="link-btn" onclick="downloadTaskResult('md')">下载 MD</button>
+                        <button class="link-btn" onclick="downloadTaskResult('txt')">下载 TXT</button>
+                    </div>
+                    <div class="detail-content" id="modalResult">-</div>
+                </div>
+                <div class="detail-block">
+                    <div class="detail-label">错误信息 <button class="link-btn" onclick="copyTaskText('modalError')">复制</button></div>
+                    <div class="detail-content" id="modalError">-</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let currentDetailTaskId = null;
+        let toastTimer = null;
+        let projectOptions = [];
+        let projectMap = {};
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function badge(status) {
+            const labelMap = {
+                processing: '处理中',
+                completed: '已完成',
+                failed: '失败'
+            };
+            return `<span class="badge ${status}">${labelMap[status] || status}</span>`;
+        }
+
+        function showToast(message, type = 'success') {
+            const el = document.getElementById('toast');
+            el.textContent = message;
+            el.className = `toast show ${type}`;
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => {
+                el.className = 'toast';
+            }, 2600);
+        }
+
+        function taskTypeBadge(taskType) {
+            const labelMap = {
+                ai_analysis: '项目AI分析',
+                weekly_report: '项目周报',
+                all_weekly_report: '全局周报',
+                report_archive: '报告归档',
+                knowledge_extract: '知识提炼',
+                global_briefing: '全局晨会简报',
+                ai_cruise: 'AI巡航体检'
+            };
+            return `<span class="task-type ${taskType || 'generic'}" onclick="applyTaskTypeFilter('${taskType || ''}')">${labelMap[taskType] || taskType || '未分类'}</span>`;
+        }
+
+        function applyTaskTypeFilter(taskType) {
+            document.getElementById('taskType').value = taskType || '';
+            loadTasks();
+        }
+
+        function applyStatusFilter(status) {
+            document.getElementById('status').value = status || '';
+            loadTasks();
+        }
+
+        function applyProjectFilter(projectId) {
+            document.getElementById('projectId').value = projectId || '';
+            loadTasks();
+        }
+
+        function getProjectLabel(projectId) {
+            if (!projectId) return '-';
+            const project = projectMap[String(projectId)];
+            if (!project) return String(projectId);
+            const name = project.project_name || `项目${projectId}`;
+            const hospital = project.hospital_name || '';
+            return hospital ? `${name} / ${hospital}` : name;
+        }
+
+        function getTaskProjectLabel(item) {
+            if (!item || !item.project_id) return '-';
+            if (item.project_name || item.hospital_name) {
+                const name = item.project_name || `项目${item.project_id}`;
+                const hospital = item.hospital_name || '';
+                return hospital ? `${name} / ${hospital}` : name;
+            }
+            return getProjectLabel(item.project_id);
+        }
+
+        function formatDateTime(value) {
+            if (!value) return '-';
+            return String(value).replace('T', ' ').slice(0, 19);
+        }
+
+        function formatDuration(createdAt, updatedAt, status) {
+            if (!createdAt || !updatedAt) return '-';
+            const start = new Date(String(createdAt).replace(' ', 'T'));
+            const end = new Date(String(updatedAt).replace(' ', 'T'));
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return '-';
+            const diffMs = Math.max(0, end - start);
+            const seconds = Math.floor(diffMs / 1000);
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const remain = seconds % 60;
+            const prefix = status === 'processing' ? '进行中 ' : '';
+            if (hours > 0) return `${prefix}${hours}h ${minutes}m ${remain}s`;
+            if (minutes > 0) return `${prefix}${minutes}m ${remain}s`;
+            return `${prefix}${remain}s`;
+        }
+
+        function renderResultContent(elementId, content) {
+            const el = document.getElementById(elementId);
+            const text = content || '-';
+            if (typeof text === 'string') {
+                const trimmed = text.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                    try {
+                        const parsed = JSON.parse(trimmed);
+                        el.classList.remove('markdown');
+                        el.textContent = JSON.stringify(parsed, null, 2);
+                        return;
+                    } catch (err) {
+                        // Fall through to markdown/plain rendering.
+                    }
+                }
+            }
+            const looksLikeMarkdown = typeof text === 'string' && (
+                text.includes('# ') ||
+                text.includes('## ') ||
+                text.includes('- ') ||
+                text.includes('|') ||
+                text.includes('```')
+            );
+            if (looksLikeMarkdown && window.marked) {
+                el.classList.add('markdown');
+                el.innerHTML = marked.parse(text);
+            } else {
+                el.classList.remove('markdown');
+                el.textContent = text;
+            }
+        }
+
+        async function retryTask(taskId) {
+            const res = await fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+            const data = await res.json();
+            if (!data.success) {
+                showToast(data.message || '重试失败', 'error');
+                return;
+            }
+            if (data.data?.task_id) {
+                await loadTasks();
+                showTaskDetail(data.data.task_id);
+                showToast('已创建重试任务');
+            } else {
+                loadTasks();
+            }
+        }
+
+        async function triggerQuickTask(url, body) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : '{}'
+            });
+            const data = await res.json();
+            if (!data.success) {
+                showToast(data.message || data.error || '触发失败', 'error');
+                return;
+            }
+            await loadTasks();
+            const taskId = data.data?.task_id || data.task_id;
+            if (taskId) {
+                showTaskDetail(taskId);
+                showToast(`任务已创建：${taskId.slice(0, 8)}`);
+            }
+        }
+
+        function requireQuickProjectId() {
+            const projectId = document.getElementById('quickProjectId').value.trim();
+            if (!projectId) {
+                showToast('请先选择项目', 'error');
+                return null;
+            }
+            return projectId;
+        }
+
+        function updateQuickActionState() {
+            const projectId = document.getElementById('quickProjectId').value.trim();
+            const issueId = document.getElementById('knowledgeIssueId').value.trim();
+            const statusEl = document.getElementById('quickActionStatus');
+
+            const projectButtons = ['btnArchive', 'btnAnalysis', 'btnWeekly'];
+            projectButtons.forEach(id => {
+                const btn = document.getElementById(id);
+                if (!btn) return;
+                btn.disabled = !projectId;
+                btn.title = projectId ? `将对 ${getProjectLabel(projectId)} 执行任务` : '请先选择项目';
+            });
+
+            const knowledgeBtn = document.getElementById('btnKnowledge');
+            if (knowledgeBtn) {
+                knowledgeBtn.disabled = !issueId;
+                knowledgeBtn.title = issueId ? '将基于当前选中问题执行知识提炼' : '请先选择项目并选中问题';
+            }
+
+            if (!projectId) {
+                statusEl.textContent = '请选择项目后再触发项目相关任务。';
+                statusEl.className = 'status-text';
+                return;
+            }
+
+            if (!issueId) {
+                statusEl.textContent = `当前项目：${getProjectLabel(projectId)}。如需知识提炼，请继续选择问题。`;
+                statusEl.className = 'status-text strong';
+                return;
+            }
+
+            statusEl.textContent = `当前项目：${getProjectLabel(projectId)}，知识提炼问题已就绪。`;
+            statusEl.className = 'status-text strong';
+        }
+
+        function syncQuickProjectFromFilter() {
+            const filterProjectId = document.getElementById('projectId').value.trim();
+            if (!filterProjectId) {
+                showToast('当前筛选里没有项目可同步', 'error');
+                return;
+            }
+            document.getElementById('quickProjectId').value = filterProjectId;
+            loadIssuesForProject(filterProjectId);
+            updateQuickActionState();
+            showToast('已同步当前筛选项目');
+        }
+
+        async function triggerArchiveTask() {
+            const projectId = requireQuickProjectId();
+            if (!projectId) return;
+            await triggerQuickTask(`/api/projects/${projectId}/report-archive/generate`, {
+                report_type: 'daily',
+                force: true
+            });
+        }
+
+        async function triggerProjectAnalysisTask() {
+            const projectId = requireQuickProjectId();
+            if (!projectId) return;
+            await triggerQuickTask(`/api/projects/${projectId}/ai-analysis`);
+        }
+
+        async function triggerProjectWeeklyReportTask() {
+            const projectId = requireQuickProjectId();
+            if (!projectId) return;
+            await triggerQuickTask(`/api/projects/${projectId}/weekly-report`);
+        }
+
+        async function triggerKnowledgeTask() {
+            const issueId = document.getElementById('knowledgeIssueId').value;
+            if (!issueId) {
+                showToast('请先选择要提炼的问题', 'error');
+                return;
+            }
+            await triggerQuickTask('/api/ai/knowledge/extract/async', {
+                issue_id: Number(issueId)
+            });
+        }
+
+        async function loadProjects() {
+            const projectFilter = document.getElementById('projectId');
+            const quickProject = document.getElementById('quickProjectId');
+            const previousFilter = projectFilter.value;
+            const previousQuick = quickProject.value;
+
+            try {
+                const res = await fetch('/api/projects');
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message || data.error || '项目加载失败');
+
+                projectOptions = data.data || [];
+                projectMap = {};
+                projectOptions.forEach(project => {
+                    projectMap[String(project.id)] = project;
+                });
+
+                const optionsHtml = projectOptions.map(project => {
+                    const label = `${escapeHtml(project.project_name || ('项目' + project.id))}${project.hospital_name ? ' / ' + escapeHtml(project.hospital_name) : ''}`;
+                    return `<option value="${escapeHtml(project.id)}">${label}</option>`;
+                }).join('');
+
+                projectFilter.innerHTML = `<option value="">全部项目</option>${optionsHtml}`;
+                quickProject.innerHTML = `<option value="">请选择项目</option>${optionsHtml}`;
+
+                if (previousFilter && projectMap[String(previousFilter)]) {
+                    projectFilter.value = previousFilter;
+                }
+                if (previousQuick && projectMap[String(previousQuick)]) {
+                    quickProject.value = previousQuick;
+                } else if (projectFilter.value) {
+                    quickProject.value = projectFilter.value;
+                }
+                updateQuickActionState();
+            } catch (err) {
+                showToast('项目列表加载失败: ' + err.message, 'error');
+            }
+        }
+
+        async function loadIssuesForProject(projectId) {
+            const issueSelect = document.getElementById('knowledgeIssueId');
+            const issueHint = document.getElementById('knowledgeIssueHint');
+
+            if (!projectId) {
+                issueSelect.innerHTML = '<option value="">请先选择项目</option>';
+                issueHint.textContent = '从当前项目的未解决问题中选择，不再手填 issue_id。';
+                updateQuickActionState();
+                return;
+            }
+
+            issueSelect.innerHTML = '<option value="">加载问题中...</option>';
+            issueHint.textContent = `正在读取 ${getProjectLabel(projectId)} 的问题列表...`;
+
+            try {
+                const res = await fetch(`/api/projects/${projectId}/issues`);
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message || data.error || '问题加载失败');
+
+                const issues = (data.data || []).filter(issue => issue.status !== '已解决');
+                if (!issues.length) {
+                    issueSelect.innerHTML = '<option value="">当前项目暂无未解决问题</option>';
+                    issueHint.textContent = '当前项目没有可提炼的问题，可以先去项目详情页补录或选择别的项目。';
+                    updateQuickActionState();
+                    return;
+                }
+
+                issueSelect.innerHTML = '<option value="">请选择要提炼的问题</option>' + issues.map(issue => {
+                    const summary = escapeHtml((issue.description || '未命名问题').slice(0, 40));
+                    const severity = escapeHtml(issue.severity || '未分级');
+                    return `<option value="${escapeHtml(issue.id)}">[${severity}] #${escapeHtml(issue.id)} ${summary}</option>`;
+                }).join('');
+                issueHint.textContent = `已加载 ${issues.length} 个未解决问题。`;
+                updateQuickActionState();
+            } catch (err) {
+                issueSelect.innerHTML = '<option value="">问题加载失败</option>';
+                issueHint.textContent = '问题列表读取失败，请稍后重试。';
+                showToast('问题列表加载失败: ' + err.message, 'error');
+                updateQuickActionState();
+            }
+        }
+
+        async function cleanupCompletedTasks() {
+            const projectId = document.getElementById('projectId').value.trim();
+            const params = new URLSearchParams();
+            if (projectId) params.set('project_id', projectId);
+            const res = await fetch(`/api/tasks/cleanup-completed?${params.toString()}`, { method: 'POST' });
+            const data = await res.json();
+            if (!data.success) {
+                showToast(data.message || '清理失败', 'error');
+                return;
+            }
+            loadTasks();
+            showToast('已清理完成任务');
+        }
+
+        async function copyTaskText(elementId) {
+            const text = document.getElementById(elementId).textContent || '';
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('已复制到剪贴板');
+            } catch (err) {
+                showToast('复制失败，请手动复制', 'error');
+            }
+        }
+
+        async function copyViewLink() {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                showToast('当前视图链接已复制');
+            } catch (err) {
+                showToast('复制链接失败，请手动复制', 'error');
+            }
+        }
+
+        function downloadTaskResult(format) {
+            if (!currentDetailTaskId) {
+                showToast('当前没有可下载的任务', 'error');
+                return;
+            }
+            window.open(`/api/tasks/${currentDetailTaskId}/download?format=${format}`, '_blank');
+        }
+
+        function closeTaskDetail(event) {
+            if (!event || event.target.id === 'taskModal') {
+                currentDetailTaskId = null;
+                document.getElementById('taskModal').classList.remove('show');
+            }
+        }
+
+        async function showTaskDetail(taskId) {
+            const res = await fetch(`/api/tasks/${taskId}`);
+            const data = await res.json();
+            if (!data.success) {
+                showToast(data.message || '加载任务详情失败', 'error');
+                return;
+            }
+            const item = data.data || {};
+            const projectLabel = getTaskProjectLabel(item);
+            document.getElementById('modalTitle').textContent = item.title || '任务详情';
+            document.getElementById('modalMeta').textContent =
+                `${item.task_type || '-'} | 状态: ${item.status || '-'} | 项目: ${projectLabel}`;
+            document.getElementById('modalPayload').textContent = item.payload_summary || '-';
+            renderResultContent('modalResult', item.result || '-');
+            document.getElementById('modalError').textContent = item.error || '-';
+            if (item.source_endpoint) {
+                document.getElementById('modalMeta').textContent += ` | 来源: ${item.source_endpoint}`;
+            }
+            if (item.retried_from_task_id) {
+                document.getElementById('modalMeta').textContent += ` | 重试自: ${item.retried_from_task_id}`;
+            }
+            currentDetailTaskId = taskId;
+            document.getElementById('taskModal').classList.add('show');
+        }
+
+        function resetFilters() {
+            document.getElementById('projectId').value = '';
+            document.getElementById('status').value = '';
+            document.getElementById('taskType').value = '';
+            syncUrlFilters();
+            loadTasks();
+        }
+
+        function syncUrlFilters() {
+            const params = new URLSearchParams();
+            const projectId = document.getElementById('projectId').value.trim();
+            const status = document.getElementById('status').value;
+            const taskType = document.getElementById('taskType').value;
+            if (projectId) params.set('project_id', projectId);
+            if (status) params.set('status', status);
+            if (taskType) params.set('task_type', taskType);
+            const query = params.toString();
+            const nextUrl = `${window.location.pathname}${query ? '?' + query : ''}`;
+            window.history.replaceState({}, '', nextUrl);
+        }
+
+        async function loadTasks() {
+            const params = new URLSearchParams();
+            const projectId = document.getElementById('projectId').value.trim();
+            const status = document.getElementById('status').value;
+            const taskType = document.getElementById('taskType').value;
+            if (projectId) params.set('project_id', projectId);
+            if (status) params.set('status', status);
+            if (taskType) params.set('task_type', taskType);
+            params.set('limit', '100');
+            syncUrlFilters();
+
+            const filterSummary = [projectId ? getProjectLabel(projectId) : '', status || '', taskType || ''].filter(Boolean).join(' / ');
+            const sub = document.querySelector('.sub');
+            if (sub) {
+                sub.textContent = filterSummary
+                    ? `查看 AI 分析、项目周报、全局周报等后台任务。当前筛选：${filterSummary}`
+                    : '查看 AI 分析、项目周报、全局周报等后台任务的运行状态，并支持失败后重试。';
+            }
+
+            const res = await fetch(`/api/tasks?${params.toString()}`);
+            const data = await res.json();
+            const tbody = document.getElementById('taskTable');
+
+            if (!data.success) {
+                tbody.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+                return;
+            }
+
+            const items = data.data.items || [];
+            const statsSummary = data.data.summary || {};
+            document.getElementById('stat-processing').textContent = statsSummary.processing || 0;
+            document.getElementById('stat-completed').textContent = statsSummary.completed || 0;
+            document.getElementById('stat-failed').textContent = statsSummary.failed || 0;
+            document.getElementById('stat-total').textContent = statsSummary.total || 0;
+            document.getElementById('taskResultCount').textContent = `当前结果：${items.length} 条`;
+            if (!items.length) {
+                const hasFilter = projectId || status || taskType;
+                const emptySummary = [projectId ? getProjectLabel(projectId) : '', status || '', taskType || ''].filter(Boolean).join(' / ');
+                tbody.innerHTML = hasFilter
+                    ? `<tr><td colspan="8" class="muted">未找到匹配的任务记录${emptySummary ? `（当前筛选：${escapeHtml(emptySummary)}）` : ''}</td></tr>`
+                    : '<tr><td colspan="8" class="muted">暂无任务记录</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = items.map(item => {
+                const preview = item.error || item.result_preview || item.result || '';
+                const retryBtn = item.status === 'failed'
+                    ? `<button onclick="retryTask('${escapeHtml(item.task_id)}')">重试</button>`
+                    : '';
+                return `
+                    <tr class="${item.status === 'failed' ? 'failed-row' : ''}">
+                        <td>
+                            <div>${taskTypeBadge(escapeHtml(item.task_type || ''))}</div>
+                            <div class="cell-title">${escapeHtml(item.title || '-')}</div>
+                            <div class="muted">${escapeHtml(item.task_id || '-')}</div>
+                            <div style="margin-top:8px;"><button class="link-btn" onclick="showTaskDetail('${escapeHtml(item.task_id)}')">查看详情</button></div>
+                        </td>
+                        <td><span onclick="applyStatusFilter('${escapeHtml(item.status || '')}')">${badge(item.status || 'unknown')}</span></td>
+                        <td>${item.project_id ? `<span class="clickable" onclick="applyProjectFilter('${escapeHtml(item.project_id)}')">${escapeHtml(getTaskProjectLabel(item))}</span>` : '-'}</td>
+                        <td>${escapeHtml(item.payload_summary || '-')}</td>
+                        <td>${escapeHtml(formatDateTime(item.created_at))}</td>
+                        <td>${escapeHtml(formatDuration(item.created_at, item.updated_at || item.created_at, item.status))}</td>
+                        <td><div class="preview">${escapeHtml(preview || '-')}</div></td>
+                        <td><div class="actions">${retryBtn}</div></td>
+                    </tr>
+                `;
+            }).join('');
+
+            if (currentDetailTaskId) {
+                showTaskDetail(currentDetailTaskId);
+            }
+        }
+
+        function hydrateFiltersFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const projectId = params.get('project_id');
+            const status = params.get('status');
+            const taskType = params.get('task_type');
+            if (projectId) document.getElementById('projectId').value = projectId;
+            if (status) document.getElementById('status').value = status;
+            if (taskType) document.getElementById('taskType').value = taskType;
+        }
+
+        document.getElementById('quickProjectId').addEventListener('change', function () {
+            loadIssuesForProject(this.value);
+        });
+        document.getElementById('knowledgeIssueId').addEventListener('change', updateQuickActionState);
+
+        (async function initTaskCenter() {
+            await loadProjects();
+            hydrateFiltersFromUrl();
+            const filterProjectId = document.getElementById('projectId').value;
+            if (filterProjectId && projectMap[String(filterProjectId)]) {
+                document.getElementById('quickProjectId').value = filterProjectId;
+            }
+            await loadIssuesForProject(document.getElementById('quickProjectId').value);
+            updateQuickActionState();
+            loadTasks();
+        })();
+
+        setInterval(loadTasks, 15000);
+    </script>
+</body>
+</html>

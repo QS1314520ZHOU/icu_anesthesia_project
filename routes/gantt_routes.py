@@ -13,29 +13,29 @@ def get_gantt_data(project_id):
     try:
         with DatabasePool.get_connection() as conn:
             # 1. 获取所有阶段及其日期
-            stages = conn.execute('''
+            stages = conn.execute(DatabasePool.format_sql('''
                 SELECT id, stage_name, plan_start_date, plan_end_date, progress, stage_order
                 FROM project_stages
                 WHERE project_id = ?
                 ORDER BY stage_order
-            ''', (project_id,)).fetchall()
+            '''), (project_id,)).fetchall()
             
             # 2. 获取所有任务及其依赖
-            tasks = conn.execute('''
+            tasks = conn.execute(DatabasePool.format_sql('''
                 SELECT t.id, t.task_name, t.stage_id, t.is_completed, t.completed_date
                 FROM tasks t
                 JOIN project_stages s ON t.stage_id = s.id
                 WHERE s.project_id = ?
-            ''', (project_id,)).fetchall()
+            '''), (project_id,)).fetchall()
             
             # 3. 获取依赖关系
-            deps = conn.execute('''
+            deps = conn.execute(DatabasePool.format_sql('''
                 SELECT td.task_id, td.depends_on_task_id
                 FROM task_dependencies td
                 JOIN tasks t ON td.task_id = t.id
                 JOIN project_stages s ON t.stage_id = s.id
                 WHERE s.project_id = ?
-            ''', (project_id,)).fetchall()
+            '''), (project_id,)).fetchall()
 
         # 整理数据
         # Frappe Gantt 需要 YYYY-MM-DD

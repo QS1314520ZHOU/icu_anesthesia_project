@@ -12,3 +12,9 @@ uploads/
 node_modules/
 .DS_Store
 *.log
+temp_downloads/
+temp_reports/
+audit_results.txt
+verify_output*.txt
+tmp_*.txt
+*.xlsx

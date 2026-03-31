@@ -19,20 +19,7 @@ class AlignmentService:
     @staticmethod
     def _table_columns(conn, table_name):
         """Return a set of column names for a table."""
-        if DatabasePool.is_postgres():
-            rows = conn.execute(
-                """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = %s
-                """,
-                (table_name,),
-            ).fetchall()
-            return {r['column_name'] for r in rows}
-
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-        # sqlite PRAGMA table_info columns: cid, name, type, ...
-        return {r['name'] if isinstance(r, dict) else r[1] for r in rows}
+        return DatabasePool.get_table_columns(conn, table_name)
 
     # ================================================================
     #  第一层：标准接口库管理
@@ -45,18 +32,18 @@ class AlignmentService:
             cols = AlignmentService._table_columns(conn, 'interface_specs')
 
             if 'spec_version' in cols:
-                rows = conn.execute('''
+                rows = conn.execute(DatabasePool.format_sql('''
                     SELECT spec_version, category,
                            COUNT(*) as interface_count,
                            MAX(created_at) as last_updated
                     FROM interface_specs
                     GROUP BY spec_version, category
                     ORDER BY category, spec_version DESC
-                ''').fetchall()
+                ''')).fetchall()
                 return [dict(r) for r in rows]
 
             # Compatibility fallback for the newer interface_specs schema.
-            rows = conn.execute('''
+            rows = conn.execute(DatabasePool.format_sql('''
                 SELECT COALESCE(NULLIF(category, ''), '默认标准') as spec_version,
                        COALESCE(NULLIF(category, ''), 'common') as category,
                        COUNT(*) as interface_count,
@@ -66,7 +53,7 @@ class AlignmentService:
                 GROUP BY COALESCE(NULLIF(category, ''), '默认标准'),
                          COALESCE(NULLIF(category, ''), 'common')
                 ORDER BY spec_version DESC
-            ''').fetchall()
+            ''')).fetchall()
             return [dict(r) for r in rows]
 
     @staticmethod
@@ -79,40 +66,40 @@ class AlignmentService:
             legacy_mode = 'spec_version' in spec_cols and 'spec_interface_id' in field_cols
 
             if legacy_mode:
-                interfaces = conn.execute('''
+                interfaces = conn.execute(DatabasePool.format_sql('''
                     SELECT * FROM interface_specs
                     WHERE spec_version = ?
                     ORDER BY sort_order, id
-                ''', (spec_version,)).fetchall()
+                '''), (spec_version,)).fetchall()
 
                 result = []
                 for iface in interfaces:
                     iface_dict = dict(iface)
-                    fields = conn.execute('''
+                    fields = conn.execute(DatabasePool.format_sql('''
                         SELECT * FROM interface_spec_fields
                         WHERE spec_interface_id = ?
                         ORDER BY sort_order, id
-                    ''', (iface_dict['id'],)).fetchall()
+                    '''), (iface_dict['id'],)).fetchall()
                     iface_dict['fields'] = [dict(f) for f in fields]
                     result.append(iface_dict)
                 return result
 
             # Compatibility mode for current schema.
-            interfaces = conn.execute('''
+            interfaces = conn.execute(DatabasePool.format_sql('''
                 SELECT * FROM interface_specs
                 WHERE COALESCE(NULLIF(category, ''), '默认标准') = ?
                   AND COALESCE(spec_source, 'our') IN ('our', 'standard')
                 ORDER BY interface_name, id
-            ''', (spec_version,)).fetchall()
+            '''), (spec_version,)).fetchall()
 
             result = []
             for iface in interfaces:
                 iface_dict = dict(iface)
-                fields = conn.execute('''
+                fields = conn.execute(DatabasePool.format_sql('''
                     SELECT * FROM interface_spec_fields
                     WHERE spec_id = ?
                     ORDER BY field_order, id
-                ''', (iface_dict['id'],)).fetchall()
+                '''), (iface_dict['id'],)).fetchall()
 
                 normalized_fields = []
                 for f in fields:
@@ -141,7 +128,6 @@ class AlignmentService:
     def save_spec_interface(data):
         """保存/更新一个标准接口定义（含字段）"""
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
             spec_cols = AlignmentService._table_columns(conn, 'interface_specs')
             field_cols = AlignmentService._table_columns(conn, 'interface_spec_fields')
             legacy_mode = 'spec_version' in spec_cols and 'spec_interface_id' in field_cols
@@ -150,13 +136,13 @@ class AlignmentService:
             if legacy_mode:
                 if interface_id:
                     # 更新
-                    cursor.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         UPDATE interface_specs SET
                             spec_version=?, category=?, system_name=?,
                             interface_name=?, interface_code=?, description=?,
                             protocol=?, view_name=?, is_required=?, sort_order=?
                         WHERE id=?
-                    ''', (
+                    '''), (
                         data['spec_version'], data['category'], data['system_name'],
                         data['interface_name'], data.get('interface_code', ''),
                         data.get('description', ''), data.get('protocol', '视图'),
@@ -165,25 +151,28 @@ class AlignmentService:
                     ))
                 else:
                     # 新建
-                    cursor.execute('''
+                    insert_sql = '''
                         INSERT INTO interface_specs
                         (spec_version, category, system_name, interface_name,
                          interface_code, description, protocol, view_name,
                          is_required, sort_order)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
+                    '''
+                    if DatabasePool.is_postgres():
+                        insert_sql += ' RETURNING id'
+                    insert_cursor = conn.execute(DatabasePool.format_sql(insert_sql), (
                         data['spec_version'], data['category'], data['system_name'],
                         data['interface_name'], data.get('interface_code', ''),
                         data.get('description', ''), data.get('protocol', '视图'),
                         data.get('view_name', ''), data.get('is_required', 0),
                         data.get('sort_order', 0)
                     ))
-                    interface_id = cursor.lastrowid
+                    interface_id = DatabasePool.get_inserted_id(insert_cursor)
             else:
                 # New schema mapping.
                 category = data.get('spec_version') or data.get('category') or '默认标准'
                 if interface_id:
-                    cursor.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         UPDATE interface_specs SET
                             spec_source = 'our',
                             category = ?,
@@ -196,7 +185,7 @@ class AlignmentService:
                             view_name = ?,
                             parsed_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    ''', (
+                    '''), (
                         category,
                         data.get('vendor_name', '自定义标准'),
                         data.get('system_name', ''),
@@ -208,12 +197,15 @@ class AlignmentService:
                         interface_id
                     ))
                 else:
-                    cursor.execute('''
+                    insert_sql = '''
                         INSERT INTO interface_specs
                         (spec_source, category, vendor_name, system_type, interface_name,
                          transcode, protocol, description, view_name, parsed_at)
                         VALUES ('our', ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ''', (
+                    '''
+                    if DatabasePool.is_postgres():
+                        insert_sql += ' RETURNING id'
+                    insert_cursor = conn.execute(DatabasePool.format_sql(insert_sql), (
                         category,
                         data.get('vendor_name', '自定义标准'),
                         data.get('system_name', ''),
@@ -223,21 +215,21 @@ class AlignmentService:
                         data.get('description', ''),
                         data.get('view_name', ''),
                     ))
-                    interface_id = cursor.lastrowid
+                    interface_id = DatabasePool.get_inserted_id(insert_cursor)
 
             # 保存字段 —— 先删后插
             if legacy_mode:
-                cursor.execute(
-                    'DELETE FROM interface_spec_fields WHERE spec_interface_id=?',
+                conn.execute(
+                    DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_interface_id=?'),
                     (interface_id,)
                 )
                 for idx, field in enumerate(data.get('fields', [])):
-                    cursor.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO interface_spec_fields
                         (spec_interface_id, field_name, field_label, field_type,
                          is_required, max_length, sample_value, remark, sort_order)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
+                    '''), (
                         interface_id,
                         field['field_name'], field.get('field_label', ''),
                         field.get('field_type', 'VARCHAR'),
@@ -245,17 +237,17 @@ class AlignmentService:
                         field.get('sample_value', ''), field.get('remark', ''), idx
                     ))
             else:
-                cursor.execute(
-                    'DELETE FROM interface_spec_fields WHERE spec_id=?',
+                conn.execute(
+                    DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_id=?'),
                     (interface_id,)
                 )
                 for idx, field in enumerate(data.get('fields', [])):
-                    cursor.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO interface_spec_fields
                         (spec_id, field_name, field_name_cn, field_type,
-                         is_required, field_length, sample_value, remark, field_order)
+                        is_required, field_length, sample_value, remark, field_order)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
+                    '''), (
                         interface_id,
                         field.get('field_name', ''),
                         field.get('field_label', ''),
@@ -275,10 +267,10 @@ class AlignmentService:
         with DatabasePool.get_connection() as conn:
             field_cols = AlignmentService._table_columns(conn, 'interface_spec_fields')
             if 'spec_interface_id' in field_cols:
-                conn.execute('DELETE FROM interface_spec_fields WHERE spec_interface_id=?', (spec_id,))
+                conn.execute(DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_interface_id=?'), (spec_id,))
             else:
-                conn.execute('DELETE FROM interface_spec_fields WHERE spec_id=?', (spec_id,))
-            conn.execute('DELETE FROM interface_specs WHERE id=?', (spec_id,))
+                conn.execute(DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_id=?'), (spec_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM interface_specs WHERE id=?'), (spec_id,))
             conn.commit()
 
     @staticmethod
@@ -753,16 +745,18 @@ class AlignmentService:
         完整对齐流程：解析 → 对齐 → 持久化
         """
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
             # 创建会话
-            cursor.execute('''
+            insert_sql = '''
                 INSERT INTO alignment_sessions
                 (project_id, spec_version, vendor_name,
                  vendor_doc_path, status, created_by)
                 VALUES (?, ?, ?, ?, 'parsing', ?)
-            ''', (project_id, spec_version, vendor_name,
+            '''
+            if DatabasePool.is_postgres():
+                insert_sql += ' RETURNING id'
+            insert_cursor = conn.execute(DatabasePool.format_sql(insert_sql), (project_id, spec_version, vendor_name,
                   file_path or '', created_by))
-            session_id = cursor.lastrowid
+            session_id = DatabasePool.get_inserted_id(insert_cursor)
             conn.commit()
 
         try:
@@ -784,7 +778,7 @@ class AlignmentService:
                 doc_text = raw_text
             with DatabasePool.get_connection() as conn:
                 conn.execute(
-                    'UPDATE alignment_sessions SET vendor_doc_text=?, status=? WHERE id=?',
+                    DatabasePool.format_sql('UPDATE alignment_sessions SET vendor_doc_text=?, status=? WHERE id=?'),
                     (doc_text[:50000], 'aligning', session_id))
 
             # Step 2: 加载我方标准
@@ -906,20 +900,21 @@ class AlignmentService:
         spec_map = {s['id']: s for s in spec_interfaces}
 
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-
             for item in ai_result.get('alignments', []):
                 spec_id = item.get('spec_id')
                 if spec_id not in spec_map:
                     continue
 
-                cursor.execute('''
+                insert_sql = '''
                     INSERT INTO alignment_results
                     (session_id, spec_interface_id, match_status, confidence,
                      vendor_interface_name, vendor_view_name, vendor_protocol,
                      vendor_description, diff_summary, risk_note)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                '''
+                if DatabasePool.is_postgres():
+                    insert_sql += ' RETURNING id'
+                insert_cursor = conn.execute(DatabasePool.format_sql(insert_sql), (
                     session_id, spec_id,
                     item.get('match_status', 'missing'),
                     item.get('confidence', 0),
@@ -930,7 +925,7 @@ class AlignmentService:
                     item.get('diff_summary', ''),
                     item.get('risk_note', ''),
                 ))
-                result_id = cursor.lastrowid
+                result_id = DatabasePool.get_inserted_id(insert_cursor)
 
                 # 保存字段映射
                 for fm in item.get('field_mappings', []):
@@ -944,13 +939,13 @@ class AlignmentService:
                     if not spec_field_id:
                         continue
 
-                    cursor.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO alignment_field_maps
                         (alignment_result_id, spec_field_id,
                          vendor_field_name, vendor_field_type,
                          map_status, transform_rule, confidence)
                         VALUES (?, ?, ?, ?, 'auto', ?, ?)
-                    ''', (
+                    '''), (
                         result_id, spec_field_id,
                         fm.get('vendor_field', ''),
                         fm.get('vendor_type', ''),
@@ -960,12 +955,12 @@ class AlignmentService:
 
             # 处理对方多出的接口
             for extra in ai_result.get('extras', []):
-                cursor.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO alignment_results
                     (session_id, spec_interface_id, match_status, confidence,
                      vendor_interface_name, diff_summary, risk_note)
                     VALUES (?, 0, 'extra', 0, ?, ?, ?)
-                ''', (
+                '''), (
                     session_id,
                     extra.get('name', ''),
                     extra.get('suggestion', ''),
@@ -986,7 +981,7 @@ class AlignmentService:
         score = round((matched * 100 + partial * 60) / total, 1) if total > 0 else 0
 
         with DatabasePool.get_connection() as conn:
-            conn.execute('''
+            conn.execute(DatabasePool.format_sql('''
                 UPDATE alignment_sessions SET
                     status='completed',
                     total_spec_interfaces=?,
@@ -996,7 +991,7 @@ class AlignmentService:
                     ai_summary=?,
                     completed_at=?
                 WHERE id=?
-            ''', (
+            '''), (
                 total, matched, partial, missing, extras, score,
                 ai_result.get('summary', ''),
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -1007,7 +1002,7 @@ class AlignmentService:
     def _update_session_status(session_id, status, error=''):
         with DatabasePool.get_connection() as conn:
             conn.execute(
-                'UPDATE alignment_sessions SET status=?, ai_summary=? WHERE id=?',
+                DatabasePool.format_sql('UPDATE alignment_sessions SET status=?, ai_summary=? WHERE id=?'),
                 (status, error, session_id))
 
     # ================================================================
@@ -1018,11 +1013,11 @@ class AlignmentService:
     def get_sessions(project_id):
         """获取项目的所有对齐会话"""
         with DatabasePool.get_connection() as conn:
-            rows = conn.execute('''
+            rows = conn.execute(DatabasePool.format_sql('''
                 SELECT * FROM alignment_sessions
                 WHERE project_id = ?
                 ORDER BY created_at DESC
-            ''', (project_id,)).fetchall()
+            '''), (project_id,)).fetchall()
             return [dict(r) for r in rows]
 
     @staticmethod
@@ -1030,7 +1025,7 @@ class AlignmentService:
         """获取对齐会话详情（含每条对齐结果）"""
         with DatabasePool.get_connection() as conn:
             session = conn.execute(
-                'SELECT * FROM alignment_sessions WHERE id=?',
+                DatabasePool.format_sql('SELECT * FROM alignment_sessions WHERE id=?'),
                 (session_id,)
             ).fetchone()
             if not session:
@@ -1038,7 +1033,7 @@ class AlignmentService:
 
             session_dict = dict(session)
 
-            results = conn.execute('''
+            results = conn.execute(DatabasePool.format_sql('''
                 SELECT ar.*, isp.interface_name as spec_interface_name,
                        isp.system_name as spec_system_name,
                        isp.interface_code as spec_code,
@@ -1056,13 +1051,13 @@ class AlignmentService:
                         WHEN 'extra' THEN 3
                     END,
                     ar.confidence DESC
-            ''', (session_id,)).fetchall()
+            '''), (session_id,)).fetchall()
 
             result_list = []
             for r in results:
                 r_dict = dict(r)
                 # 加载字段映射
-                field_maps = conn.execute('''
+                field_maps = conn.execute(DatabasePool.format_sql('''
                     SELECT afm.*, isf.field_name as spec_field_name,
                            isf.field_label as spec_field_label,
                            isf.field_type as spec_field_type,
@@ -1071,7 +1066,7 @@ class AlignmentService:
                     LEFT JOIN interface_spec_fields isf ON afm.spec_field_id = isf.id
                     WHERE afm.alignment_result_id = ?
                     ORDER BY isf.sort_order
-                ''', (r_dict['id'],)).fetchall()
+                '''), (r_dict['id'],)).fetchall()
                 r_dict['field_maps'] = [dict(fm) for fm in field_maps]
                 result_list.append(r_dict)
 
@@ -1082,36 +1077,36 @@ class AlignmentService:
     def confirm_result(result_id, confirmed_by, manual_note=''):
         """人工确认某条对齐结果"""
         with DatabasePool.get_connection() as conn:
-            conn.execute('''
+            conn.execute(DatabasePool.format_sql('''
                 UPDATE alignment_results SET
                     is_confirmed=1, confirmed_by=?, confirmed_at=?, manual_note=?
                 WHERE id=?
-            ''', (confirmed_by, datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            '''), (confirmed_by, datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                   manual_note, result_id))
 
     @staticmethod
     def update_field_map(map_id, vendor_field_name, transform_rule=''):
         """手动修正字段映射"""
         with DatabasePool.get_connection() as conn:
-            conn.execute('''
+            conn.execute(DatabasePool.format_sql('''
                 UPDATE alignment_field_maps SET
                     vendor_field_name=?, transform_rule=?, map_status='manual'
                 WHERE id=?
-            ''', (vendor_field_name, transform_rule, map_id))
+            '''), (vendor_field_name, transform_rule, map_id))
 
     @staticmethod
     def delete_session(session_id):
         """删除对齐会话及其全部结果"""
         with DatabasePool.get_connection() as conn:
             # 先删字段映射
-            conn.execute('''
+            conn.execute(DatabasePool.format_sql('''
                 DELETE FROM alignment_field_maps
                 WHERE alignment_result_id IN
                     (SELECT id FROM alignment_results WHERE session_id=?)
-            ''', (session_id,))
-            conn.execute('DELETE FROM alignment_results WHERE session_id=?',
+            '''), (session_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM alignment_results WHERE session_id=?'),
                          (session_id,))
-            conn.execute('DELETE FROM alignment_sessions WHERE id=?',
+            conn.execute(DatabasePool.format_sql('DELETE FROM alignment_sessions WHERE id=?'),
                          (session_id,))
             conn.commit()
 

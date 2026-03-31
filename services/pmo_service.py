@@ -12,29 +12,29 @@ class PMOService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 区域分布 (基于医院名称前缀或行政区划，这里简单按医院名分组)
-                regional_stats = conn.execute('''
+                regional_stats = conn.execute(DatabasePool.format_sql('''
                     SELECT hospital_name as region, COUNT(*) as count, AVG(progress) as avg_progress
                     FROM projects
-                    WHERE status != '已结项'
+                    WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
                     GROUP BY hospital_name
-                ''').fetchall()
+                ''')).fetchall()
 
                 # 2. PM 负荷
-                pm_workload = conn.execute('''
+                pm_workload = conn.execute(DatabasePool.format_sql('''
                     SELECT project_manager, COUNT(*) as count, SUM(progress)/COUNT(*) as avg_progress
                     FROM projects
-                    WHERE status != '已结项'
+                    WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
                     GROUP BY project_manager
                     ORDER BY count DESC
-                ''').fetchall()
+                ''')).fetchall()
 
                 # 3. 风险分布
-                risk_distribution = conn.execute('''
+                risk_distribution = conn.execute(DatabasePool.format_sql('''
                     SELECT severity as risk_level, COUNT(*) as count
                     FROM issues
                     WHERE status != '已解决' AND status != '已关闭'
                     GROUP BY severity
-                ''').fetchall()
+                ''')).fetchall()
 
                 return {
                     "regional": [dict(r) for r in regional_stats],

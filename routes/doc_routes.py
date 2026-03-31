@@ -16,7 +16,7 @@ def get_project_documents(project_id):
 @doc_bp.route('/projects/<int:project_id>/documents', methods=['POST'])
 def add_project_document(project_id):
     if 'file' not in request.files:
-        data = request.form.to_dict() if request.form else request.json
+        data = request.form.to_dict() if request.form else (request.json or {})
         doc_service.add_project_document(project_id, data)
         return api_response(True)
     
@@ -97,13 +97,13 @@ def get_project_expenses(project_id):
 
 @doc_bp.route('/projects/<int:project_id>/expenses', methods=['POST'])
 def add_project_expense(project_id):
-    data = request.json
+    data = request.json or {}
     doc_service.add_project_expense(project_id, data)
     return api_response(True)
 
 @doc_bp.route('/expenses/<int:expense_id>', methods=['PUT'])
 def update_expense(expense_id):
-    data = request.json
+    data = request.json or {}
     doc_service.update_expense(expense_id, data)
     return api_response(True)
 

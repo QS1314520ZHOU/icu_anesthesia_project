@@ -2,6 +2,25 @@
  * 交付地图模块 - 基于 ECharts
  */
 
+function hydrateMapModeFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('map_mode');
+    if (mode === 'heatmap' || mode === 'normal') {
+        window.currentMapMode = mode;
+    }
+}
+
+function syncMapModeToUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (window.currentMapMode && window.currentMapMode !== 'normal') {
+        params.set('map_mode', window.currentMapMode);
+    } else {
+        params.delete('map_mode');
+    }
+    const query = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${query ? '?' + query : ''}`);
+}
+
 async function initDeliveryMap() {
     const container = document.getElementById('mapView');
     container.innerHTML = `
@@ -11,7 +30,9 @@ async function initDeliveryMap() {
                     <span style="font-size: 24px;">🗺️</span> 交付数字孪生仪表盘
                 </div>
                 <div class="btn-group" style="display: flex; gap: 10px; align-items: center;">
+                    <button class="btn btn-sm" style="background: rgba(148, 163, 184, 0.15); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; padding: 6px 12px;" onclick="copyCurrentViewLink()">复制当前视图链接</button>
                     <button class="btn btn-sm" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 6px 12px;" onclick="initDeliveryMap()">刷新数据</button>
+                    <button class="btn btn-sm" style="background: rgba(148, 163, 184, 0.15); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; padding: 6px 12px;" onclick="showDashboard()">← 返回仪表盘</button>
                 </div>
             </div>
             <div class="panel-body" style="flex: 1; position: relative; min-height: 500px; padding: 0; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);">
@@ -27,6 +48,8 @@ async function initDeliveryMap() {
 
     // 默认视图模式 'normal' or 'heatmap'
     if (typeof window.currentMapMode === 'undefined') window.currentMapMode = 'normal';
+    hydrateMapModeFromUrl();
+    syncMapModeToUrl();
 
     try {
         // 更新按钮文字
@@ -330,5 +353,6 @@ function createMapToggleButton() {
 
 function toggleMapMode() {
     window.currentMapMode = window.currentMapMode === 'normal' ? 'heatmap' : 'normal';
+    syncMapModeToUrl();
     initDeliveryMap();
 }

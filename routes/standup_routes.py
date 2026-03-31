@@ -163,11 +163,11 @@ def get_wecom_config():
     
     with DatabasePool.get_connection() as conn:
         # 尝试从数据库获取
-        row = conn.execute("SELECT value FROM system_config WHERE config_key = 'wecom_webhook'").fetchone()
+        row = conn.execute(DatabasePool.format_sql("SELECT value FROM system_config WHERE config_key = 'wecom_webhook'")).fetchone()
         if row:
             webhook = row['value']
         
-        row = conn.execute("SELECT value FROM system_config WHERE config_key = 'wecom_enabled'").fetchone()
+        row = conn.execute(DatabasePool.format_sql("SELECT value FROM system_config WHERE config_key = 'wecom_enabled'")).fetchone()
         if row:
             enabled = row['value'] == 'true'
             
@@ -193,8 +193,6 @@ def update_wecom_config():
     enabled = data.get('enabled', False)
     
     from database import DatabasePool
-    from app_config import DB_CONFIG
-    db_type = DB_CONFIG.get('TYPE', 'sqlite')
     
     with DatabasePool.get_connection() as conn:
         # 如果提交的是带有省略号的预览值，则不更新数据库中的真实 Webhook

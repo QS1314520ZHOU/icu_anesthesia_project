@@ -122,37 +122,28 @@ class AuthService:
                 coords = geo_service.resolve_coords(loc)
                 lng, lat = coords if coords else (None, None)
                 
-                from app_config import DB_CONFIG
-                db_type = DB_CONFIG.get('TYPE', 'sqlite')
-                
-                if db_type == 'postgres':
-                    sql = '''
-                        INSERT INTO project_members 
-                        (project_id, name, role, email, status, current_city, lng, lat, is_onsite, join_date)
-                        VALUES (%s, %s, %s, %s, '在岗', %s, %s, %s, TRUE, %s)
-                        ON CONFLICT (project_id, name) DO UPDATE SET
-                            role = EXCLUDED.role,
-                            email = EXCLUDED.email,
-                            current_city = EXCLUDED.current_city,
-                            lng = EXCLUDED.lng,
-                            lat = EXCLUDED.lat,
-                            join_date = EXCLUDED.join_date
-                    '''
-                    conn.execute(sql, (project_id, user['display_name'], role_label, user['email'], loc, lng, lat, datetime.now().strftime('%Y-%m-%d')))
-                else:
-                    conn.execute('''
-                        INSERT OR REPLACE INTO project_members 
-                        (project_id, name, role, email, status, current_city, lng, lat, is_onsite, join_date)
-                        VALUES (?, ?, ?, ?, '在岗', ?, ?, ?, 1, ?)
-                    ''', (
-                        project_id, 
-                        user['display_name'], 
-                        role_label, 
-                        user['email'], 
-                        loc, 
-                        lng, lat,
-                        datetime.now().strftime('%Y-%m-%d')
-                    ))
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO project_members 
+                    (project_id, name, role, email, status, current_city, lng, lat, is_onsite, join_date)
+                    VALUES (?, ?, ?, ?, '在岗', ?, ?, ?, ?, ?)
+                    ON CONFLICT (project_id, name) DO UPDATE SET
+                        role = EXCLUDED.role,
+                        email = EXCLUDED.email,
+                        current_city = EXCLUDED.current_city,
+                        lng = EXCLUDED.lng,
+                        lat = EXCLUDED.lat,
+                        join_date = EXCLUDED.join_date
+                '''), (
+                    project_id,
+                    user['display_name'],
+                    role_label,
+                    user['email'],
+                    loc,
+                    lng,
+                    lat,
+                    True,
+                    datetime.now().strftime('%Y-%m-%d')
+                ))
                 conn.commit()
 
     def bind_wecom(self, user_id: int, wecom_userid: str) -> dict:
@@ -193,13 +184,11 @@ class AuthService:
         from app_config import DB_CONFIG
         db_type = DB_CONFIG.get('TYPE', 'sqlite')
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            
             PK_AUTO = "SERIAL PRIMARY KEY" if db_type == 'postgres' else "INTEGER PRIMARY KEY AUTOINCREMENT"
             TIMESTAMP_TYPE = "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP" if db_type == 'postgres' else "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
             
             # 用户表
-            cursor.execute(f'''
+            conn.execute(f'''
                 CREATE TABLE IF NOT EXISTS users (
                     id {PK_AUTO},
                     username TEXT UNIQUE NOT NULL,
@@ -216,13 +205,13 @@ class AuthService:
             try:
                 db_type = DB_CONFIG.get('TYPE', 'sqlite')
                 if db_type == 'postgres':
-                    cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE")
+                    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE")
                 else:
-                    cursor.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
+                    conn.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
             except:
                 pass
             # Token表
-            cursor.execute(f'''
+            conn.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_tokens (
                     id {PK_AUTO},
                     user_id INTEGER,
@@ -234,7 +223,7 @@ class AuthService:
             ''')
             
             # 项目成员表 - 关联项目和用户
-            cursor.execute(f'''
+            conn.execute(f'''
                 CREATE TABLE IF NOT EXISTS project_user_access (
                     id {PK_AUTO},
                     project_id INTEGER NOT NULL,
@@ -250,7 +239,7 @@ class AuthService:
             
             # 检查是否需要创建默认管理员
             sql_adm = DatabasePool.format_sql('SELECT id FROM users WHERE username = ?')
-            admin = cursor.execute(sql_adm, ('admin',)).fetchone()
+            admin = conn.execute(sql_adm, ('admin',)).fetchone()
             if not admin:
                 self.register('admin', 'admin123', 'admin@local', '系统管理员', 'admin')
     
@@ -344,13 +333,14 @@ class AuthService:
             return None
         
         with DatabasePool.get_connection() as conn:
+            active_flag = True if DatabasePool.is_postgres() else 1
             sql = DatabasePool.format_sql('''
                 SELECT u.id, u.username, u.display_name, u.role, u.wecom_userid, t.expires_at
                 FROM user_tokens t
                 JOIN users u ON t.user_id = u.id
-                WHERE t.token = ? AND u.is_active = {'TRUE' if DatabasePool.is_postgres() else '1'}
+                WHERE t.token = ? AND u.is_active = ?
             ''')
-            result = conn.execute(sql, (token,)).fetchone()
+            result = conn.execute(sql, (token, active_flag)).fetchone()
             
             if not result:
                 return None
@@ -382,10 +372,10 @@ class AuthService:
     def get_all_users(self) -> list:
         """获取所有用户列表（管理员用）"""
         with DatabasePool.get_connection() as conn:
-            users = conn.execute('''
+            users = conn.execute(DatabasePool.format_sql('''
                 SELECT id, username, email, display_name, role, is_active, last_login, created_at
                 FROM users ORDER BY created_at DESC
-            ''').fetchall()
+            ''')).fetchall()
             return [dict(u) for u in users]
     
     def update_user_role(self, user_id: int, new_role: str) -> Dict[str, Any]:
@@ -433,19 +423,11 @@ class AuthService:
             role = 'member'
         with DatabasePool.get_connection() as conn:
             try:
-                from app_config import DB_CONFIG
-                db_type = DB_CONFIG.get('TYPE', 'sqlite')
-                if db_type == 'postgres':
-                    conn.execute('''
-                        INSERT INTO project_user_access (project_id, user_id, role)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role
-                    ''', (project_id, user_id, role))
-                else:
-                    conn.execute('''
-                        INSERT OR REPLACE INTO project_user_access (project_id, user_id, role)
-                        VALUES (?, ?, ?)
-                    ''', (project_id, user_id, role))
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO project_user_access (project_id, user_id, role)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (project_id, user_id) DO UPDATE SET role = EXCLUDED.role
+                '''), (project_id, user_id, role))
                 conn.commit()
                 
                 # 同步到 project_members 表
@@ -524,7 +506,7 @@ class AuthService:
                 return {"success": False, "message": "管理员用户不存在"}
             
             # 获取所有项目
-            projects = conn.execute('SELECT id FROM projects').fetchall()
+            projects = conn.execute(DatabasePool.format_sql('SELECT id FROM projects')).fetchall()
             for p in projects:
                 # 检查是否已有成员
                 sql_m = DatabasePool.format_sql('''
@@ -532,19 +514,11 @@ class AuthService:
                 ''')
                 existing = conn.execute(sql_m, (p['id'],)).fetchone()
                 if not existing:
-                    from app_config import DB_CONFIG
-                    db_type = DB_CONFIG.get('TYPE', 'sqlite')
-                    if db_type == 'postgres':
-                        conn.execute('''
-                            INSERT INTO project_user_access (project_id, user_id, role)
-                            VALUES (%s, %s, 'owner')
-                            ON CONFLICT (project_id, user_id) DO NOTHING
-                        ''', (p['id'], admin['id']))
-                    else:
-                        conn.execute('''
-                            INSERT OR IGNORE INTO project_user_access (project_id, user_id, role)
-                            VALUES (?, ?, 'owner')
-                        ''', (p['id'], admin['id']))
+                    conn.execute(DatabasePool.format_sql('''
+                        INSERT INTO project_user_access (project_id, user_id, role)
+                        VALUES (?, ?, 'owner')
+                        ON CONFLICT (project_id, user_id) DO NOTHING
+                    '''), (p['id'], admin['id']))
             conn.commit()
             return {"success": True, "message": f"已迁移 {len(projects)} 个项目"}
 

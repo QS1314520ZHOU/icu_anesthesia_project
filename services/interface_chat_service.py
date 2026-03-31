@@ -44,7 +44,7 @@ class InterfaceChatService:
         """
         # 获取对照详情
         with DatabasePool.get_connection() as conn:
-            comp = conn.execute('''
+            comp = conn.execute(DatabasePool.format_sql('''
                 SELECT ic.*, 
                        os.interface_name as our_name, os.transcode as our_transcode,
                        os.protocol as our_protocol, os.endpoint_url, os.action_name,
@@ -57,7 +57,7 @@ class InterfaceChatService:
                 LEFT JOIN interface_specs os ON ic.our_spec_id = os.id
                 LEFT JOIN interface_specs vs ON ic.vendor_spec_id = vs.id
                 WHERE ic.id = ? AND ic.project_id = ?
-            ''', (comparison_id, project_id)).fetchone()
+            '''), (comparison_id, project_id)).fetchone()
 
             if not comp:
                 return {'answer': '未找到该对照记录', 'code_blocks': []}
@@ -65,7 +65,7 @@ class InterfaceChatService:
             comp = dict(comp)
 
             # 获取字段映射
-            mappings = [dict(m) for m in conn.execute('''
+            mappings = [dict(m) for m in conn.execute(DatabasePool.format_sql('''
                 SELECT fm.*,
                        of.field_name_cn as our_cn, of.field_type as our_type,
                        of.is_required as our_required, of.sample_value as our_sample,
@@ -77,7 +77,7 @@ class InterfaceChatService:
                 LEFT JOIN interface_spec_fields vf ON fm.vendor_field_id = vf.id
                 WHERE fm.comparison_id = ?
                 ORDER BY fm.our_field_name
-            ''', (comparison_id,)).fetchall()]
+            '''), (comparison_id,)).fetchall()]
 
         # 自动检测格式
         if req_format == 'auto':
@@ -174,22 +174,22 @@ class InterfaceChatService:
         with DatabasePool.get_connection() as conn:
             # 项目信息
             project = conn.execute(
-                'SELECT project_name, hospital_name FROM projects WHERE id = ?',
+                DatabasePool.format_sql('SELECT project_name, hospital_name FROM projects WHERE id = ?'),
                 (project_id,)
             ).fetchone()
             if project:
                 lines.append(f"项目: {project['project_name']} ({project['hospital_name']})")
 
             # 我方标准接口摘要
-            our_specs = conn.execute('''
+            our_specs = conn.execute(DatabasePool.format_sql('''
                 SELECT id, interface_name, transcode, system_type, protocol, 
                        view_name, action_name, endpoint_url, data_direction, description
                 FROM interface_specs
                 WHERE (project_id = ? OR project_id IS NULL) 
-                  AND spec_source = 'our_standard'
+                  AND spec_source IN ('our_standard', 'our', 'standard')
                   AND (category = ? OR category IS NULL)
                 ORDER BY system_type
-            ''', (project_id, category)).fetchall()
+            '''), (project_id, category)).fetchall()
 
             if our_specs:
                 lines.append(f"\n=== 我方标准接口 ({len(our_specs)} 个) ===")
@@ -204,13 +204,13 @@ class InterfaceChatService:
                     )
 
             # 对方接口摘要
-            vendor_specs = conn.execute('''
+            vendor_specs = conn.execute(DatabasePool.format_sql('''
                 SELECT id, interface_name, transcode, system_type, protocol,
                        view_name, action_name, endpoint_url, vendor_name, description
                 FROM interface_specs
                 WHERE project_id = ? AND spec_source = 'vendor'
                 ORDER BY system_type
-            ''', (project_id,)).fetchall()
+            '''), (project_id,)).fetchall()
 
             if vendor_specs:
                 lines.append(f"\n=== 对方接口 ({len(vendor_specs)} 个) ===")
@@ -225,7 +225,7 @@ class InterfaceChatService:
                     )
 
             # 对照结果摘要
-            comparisons = conn.execute('''
+            comparisons = conn.execute(DatabasePool.format_sql('''
                 SELECT ic.id, ic.gap_count, ic.transform_count, ic.match_confidence,
                        os.interface_name as our_name, os.transcode as our_transcode,
                        vs.interface_name as vendor_name, vs.transcode as vendor_transcode
@@ -233,7 +233,7 @@ class InterfaceChatService:
                 LEFT JOIN interface_specs os ON ic.our_spec_id = os.id
                 LEFT JOIN interface_specs vs ON ic.vendor_spec_id = vs.id
                 WHERE ic.project_id = ? AND (ic.category = ? OR ic.category IS NULL)
-            ''', (project_id, category)).fetchall()
+            '''), (project_id, category)).fetchall()
 
             if comparisons:
                 lines.append(f"\n=== 对照结果 ({len(comparisons)} 对) ===")
@@ -250,12 +250,12 @@ class InterfaceChatService:
 
                     # 对有差异的接口，加载字段映射摘要
                     if c['gap_count'] > 0 or c['transform_count'] > 0:
-                        field_maps = conn.execute('''
+                        field_maps = conn.execute(DatabasePool.format_sql('''
                             SELECT our_field_name, vendor_field_name, mapping_status, transform_rule
                             FROM field_mappings
                             WHERE comparison_id = ? AND mapping_status != 'matched'
                             LIMIT 10
-                        ''', (c['id'],)).fetchall()
+                        '''), (c['id'],)).fetchall()
                         for fm in field_maps:
                             fm = dict(fm)
                             lines.append(

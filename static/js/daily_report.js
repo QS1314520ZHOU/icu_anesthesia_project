@@ -23,7 +23,7 @@ async function generateDailyReport(projectId) {
         // 3. 渲染结果
         if (res.report) {
             // 将 Markdown 转换为 HTML (依赖 marked.js)
-            const htmlContent = marked.parse(res.report);
+            const htmlContent = renderAiMarkdown(res.report);
             contentDiv.innerHTML = `
                 <div class="report-container" style="line-height: 1.6; color: #333;">
                     ${htmlContent}
@@ -42,9 +42,9 @@ async function generateDailyReport(projectId) {
 function copyDailyReport() {
     const content = document.getElementById('dailyReportContent').innerText;
     navigator.clipboard.writeText(content).then(() => {
-        alert('日报内容已复制到剪贴板');
+        showToast('日报内容已复制到剪贴板', 'success');
     }).catch(err => {
         console.error('Copy failed', err);
-        alert('复制失败，请手动复制');
+        showToast('复制失败，请手动复制', 'danger');
     });
 }

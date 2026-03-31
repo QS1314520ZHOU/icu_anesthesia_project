@@ -31,7 +31,7 @@ def analyze_sentiment(project_id):
 def parse_work_log():
     """解析自然语言日报"""
     from flask import request
-    data = request.json
+    data = request.json or {}
     raw_text = data.get('raw_text', '')
     if not raw_text:
         return api_response(success=False, message="缺少输入文本")
@@ -49,7 +49,7 @@ def get_stale_items(project_id):
 def generate_chaser():
     """生成催单/提醒文案"""
     from flask import request
-    data = request.json
+    data = request.json or {}
     if not data:
         return api_response(success=False, message="缺少参数")
     
@@ -68,7 +68,7 @@ def get_recommended_actions(project_id):
 def auto_extract_knowledge():
     """手动触发知识提取"""
     from flask import request
-    data = request.json
+    data = request.json or {}
     issue_id = data.get('issue_id')
     if not issue_id:
         return api_response(success=False, message="缺少 issue_id 参数")

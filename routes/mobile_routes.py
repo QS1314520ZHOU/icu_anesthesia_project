@@ -5,9 +5,25 @@ from api_utils import api_response
 from database import DatabasePool
 from services.ai_service import ai_service
 from rag_service import rag_service
+from datetime import date, timedelta
 import json
+import re
 
 mobile_bp = Blueprint('mobile', __name__, url_prefix='/m')
+
+
+def _clean_mobile_ai_markdown(text: str) -> str:
+    """Strip citation artifacts and noisy footnote markers before mobile rendering."""
+    if not text:
+        return ''
+
+    cleaned = str(text)
+    cleaned = re.sub(r'【[^】\n]{0,120}†[^】\n]{0,120}】', '', cleaned)
+    cleaned = re.sub(r'\[\^\{\{thread-[^\]\n]{0,80}\]?', '', cleaned)
+    cleaned = re.sub(r'\[\^[^\]\n]{0,120}\]', '', cleaned)
+    cleaned = re.sub(r'\[\^[^\n]{0,120}$', '', cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
 
 # ====== 页面路由 ======
 @mobile_bp.route('/')
@@ -32,7 +48,8 @@ def mobile_auth():
     用户从企业微信打开时，通过 JS-SDK 拿到 code
     后端用 code 换 userid（复用现有 wecom_service）
     """
-    code = request.json.get('code', '')
+    data = request.json or {}
+    code = data.get('code', '')
     from services.wecom_service import wecom_service
     user_info = wecom_service.get_user_by_code(code)
     
@@ -54,7 +71,8 @@ def mobile_config():
 @mobile_bp.route('/api/kb/search', methods=['POST'])
 def kb_search():
     """知识库 RAG 智能搜索 —— 完全复用现有引擎"""
-    query = request.json.get('query', '')
+    data = request.json or {}
+    query = data.get('query', '')
     if not query:
         return api_response(False, message='请输入搜索内容')
     
@@ -71,10 +89,10 @@ def kb_search():
         kb_items = []
         if len(keyword_candidates) < 10:
             # 如果关键词命中太少，兜底全量（但限制加载 embedding 的数量）
-            all_rows = conn.execute('''
+            all_rows = conn.execute(DatabasePool.format_sql('''
                 SELECT id, title, content, category, tags, embedding 
                 FROM knowledge_base LIMIT 300
-            ''').fetchall()
+            ''')).fetchall()
             kb_items = [dict(r) for r in all_rows]
         else:
             # 第二阶段：只对候选集加载 embedding 做精排
@@ -116,9 +134,10 @@ def kb_search():
 @mobile_bp.route('/api/ai/chat', methods=['POST'])
 def ai_chat():
     """AI 对话 —— RAG 增强，复用现有 ai_service"""
-    message = request.json.get('message', '')
-    use_rag = request.json.get('use_rag', True)
-    history = request.json.get('history', [])  # 前端传来的对话历史
+    data = request.json or {}
+    message = data.get('message', '')
+    use_rag = data.get('use_rag', True)
+    history = data.get('history', [])  # 前端传来的对话历史
     
     if not message:
         return api_response(False, message='请输入问题')
@@ -140,10 +159,10 @@ def ai_chat():
             kb_items = []
             if len(keyword_candidates) < 5:
                 # 兜底：即使关键词没中，也加载一部分潜在大类数据
-                all_rows = conn.execute(
+                all_rows = conn.execute(DatabasePool.format_sql(
                     'SELECT id, title, content, category, tags, embedding '
                     'FROM knowledge_base LIMIT 200'
-                ).fetchall()
+                )).fetchall()
                 kb_items = [dict(r) for r in all_rows]
             else:
                 ids = [r['id'] for r in keyword_candidates]
@@ -272,6 +291,7 @@ def project_briefing(project_id):
 {chr(10).join([f"- {'✅' if dict(m)['is_completed'] else '⏳'} {dict(m)['name']} → {dict(m)['target_date']}" for m in milestones[:3]]) or '无'}"""
 
     result = ai_service.call_ai_api(system_prompt, user_content, task_type="summary")
+    result = _clean_mobile_ai_markdown(result)
     
     return api_response(True, data={
         'briefing': result,
@@ -285,8 +305,9 @@ def project_briefing(project_id):
 @mobile_bp.route('/api/log/quick', methods=['POST'])
 def quick_log():
     """快速记录工作日志 —— 支持自然语言输入，AI 自动解析"""
-    raw_text = request.json.get('content', '')
-    project_id = request.json.get('project_id')
+    data = request.json or {}
+    raw_text = data.get('content', '')
+    project_id = data.get('project_id')
     
     if not raw_text:
         return api_response(False, message='请输入日志内容')
@@ -327,7 +348,7 @@ def quick_log():
         ''')
         conn.execute(sql, (
             project_id,
-            request.json.get('engineer_name', ''),
+            data.get('engineer_name', ''),
             datetime.now().strftime('%Y-%m-%d'),
             parsed.get('work_content', raw_text),
             parsed.get('issues', ''),
@@ -343,8 +364,9 @@ def quick_log():
 @mobile_bp.route('/api/meeting/quick', methods=['POST'])
 def quick_meeting_note():
     """甲方沟通速记 —— AI 自动结构化"""
-    raw_text = request.json.get('content', '')
-    project_id = request.json.get('project_id')
+    data = request.json or {}
+    raw_text = data.get('content', '')
+    project_id = data.get('project_id')
     
     if not raw_text:
         return api_response(False, message='请输入沟通内容')
@@ -384,7 +406,7 @@ def quick_meeting_note():
             datetime.now().strftime('%Y-%m-%d'),
             parsed.get('contact_person', ''),
             json.dumps(parsed, ensure_ascii=False),
-            request.json.get('engineer_name', '')
+            data.get('engineer_name', '')
         ))
         
         # 自动创建提醒（如果有截止日期）
@@ -407,11 +429,12 @@ def quick_meeting_note():
 @mobile_bp.route('/api/kb/contribute', methods=['POST'])
 def contribute_knowledge():
     """从已解决问题一键沉淀为知识库条目"""
-    issue_id = request.json.get('issue_id')
-    project_id = request.json.get('project_id')
+    data = request.json or {}
+    issue_id = data.get('issue_id')
+    project_id = data.get('project_id')
     # 也支持手动输入
-    manual_title = request.json.get('title', '')
-    manual_content = request.json.get('content', '')
+    manual_title = data.get('title', '')
+    manual_content = data.get('content', '')
     
     if issue_id:
         # 从问题记录自动生成
@@ -469,7 +492,7 @@ def contribute_knowledge():
             kb_data.get('content', ''),
             kb_data.get('tags', ''),
             project_id,
-            request.json.get('engineer_name', '')
+            data.get('engineer_name', '')
         ))
         conn.commit()
     
@@ -501,17 +524,18 @@ def generate_daily_report(project_id):
         logs = conn.execute(sql_logs, (project_id, today)).fetchall()
         
         # 今日新增/解决的问题
+        tomorrow = (date.today() + timedelta(days=1)).strftime('%Y-%m-%d')
         sql_new = DatabasePool.format_sql('''
             SELECT description, severity FROM issues 
-            WHERE project_id = ? AND date(created_at) = ?
+            WHERE project_id = ? AND created_at >= ? AND created_at < ?
         ''')
-        new_issues = conn.execute(sql_new, (project_id, today)).fetchall()
+        new_issues = conn.execute(sql_new, (project_id, today, tomorrow)).fetchall()
         
         sql_res = DatabasePool.format_sql('''
             SELECT description FROM issues 
-            WHERE project_id = ? AND date(resolved_at) = ?
+            WHERE project_id = ? AND resolved_at >= ? AND resolved_at < ?
         ''')
-        resolved_issues = conn.execute(sql_res, (project_id, today)).fetchall()
+        resolved_issues = conn.execute(sql_res, (project_id, today, tomorrow)).fetchall()
         
         # 今日沟通记录
         sql_coms = DatabasePool.format_sql('''
@@ -547,6 +571,7 @@ def generate_daily_report(project_id):
 今日沟通：{', '.join([f"{dict(c)['contact_person']}: {dict(c)['summary'][:50]}" for c in comms]) or '无'}"""
 
     report = ai_service.call_ai_api(system_prompt, user_content, task_type="report")
+    report = _clean_mobile_ai_markdown(report)
     
     return api_response(True, data={'report': report, 'date': today})
 @mobile_bp.route('/api/project/acceptance-check/<int:project_id>', methods=['GET'])
@@ -554,11 +579,11 @@ def acceptance_readiness(project_id):
     """验收准备度自动检查"""
     with DatabasePool.get_connection() as conn:
         # 任务完成率
-        sql_total = DatabasePool.format_sql('SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=?')
-        total_tasks = conn.execute(sql_total, (project_id,)).fetchone()[0]
+        sql_total = DatabasePool.format_sql('SELECT COUNT(*) as c FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=?')
+        total_tasks = conn.execute(sql_total, (project_id,)).fetchone()['c']
         
-        sql_done = DatabasePool.format_sql('SELECT COUNT(*) FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=? AND t.is_completed=?')
-        done_tasks = conn.execute(sql_done, (project_id, True)).fetchone()[0]
+        sql_done = DatabasePool.format_sql('SELECT COUNT(*) as c FROM tasks t JOIN project_stages s ON t.stage_id=s.id WHERE s.project_id=? AND t.is_completed=?')
+        done_tasks = conn.execute(sql_done, (project_id, True)).fetchone()['c']
         
         # 接口完成情况
         sql_if = DatabasePool.format_sql('SELECT system_name, interface_name, status FROM interfaces WHERE project_id=?')
@@ -570,10 +595,10 @@ def acceptance_readiness(project_id):
         
         # 培训记录（检查是否有培训日志）
         sql_tr = DatabasePool.format_sql('''
-            SELECT COUNT(*) FROM work_logs 
+            SELECT COUNT(*) as c FROM work_logs 
             WHERE project_id=? AND (work_content LIKE '%培训%' OR work_content LIKE '%training%')
         ''')
-        training_logs = conn.execute(sql_tr, (project_id,)).fetchone()[0]
+        training_logs = conn.execute(sql_tr, (project_id,)).fetchone()['c']
         
         # 文档
         sql_doc = DatabasePool.format_sql('SELECT doc_name, doc_category FROM project_documents WHERE project_id=?')

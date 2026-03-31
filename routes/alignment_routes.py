@@ -43,7 +43,7 @@ def get_spec_interfaces():
 @alignment_bp.route('/specs', methods=['POST'])
 def save_spec_interface():
     """新增/更新标准接口"""
-    data = request.json
+    data = request.json or {}
     if not data or not data.get('interface_name'):
         return api_response(False, error='缺少接口名称')
     spec_id = alignment_service.save_spec_interface(data)
@@ -102,7 +102,8 @@ def parse_vendor_document():
             file_path = os.path.join(upload_dir, filename)
             file.save(file_path)
     elif request.is_json:
-        raw_text = request.json.get('raw_text', '')
+        data = request.json or {}
+        raw_text = data.get('raw_text', '')
     else:
         raw_text = request.form.get('raw_text', '')
 

@@ -207,7 +207,7 @@
                             <div style="font-size: 13px; color: #64748b;">${res.data.date || new Date().toLocaleDateString()}</div>
                         </div>
                         <div class="markdown-body">
-                            ${marked.parse(res.data.report)}
+                            ${marked.parse(cleanAiMarkdown(res.data.report))}
                         </div>
                     `;
                     document.getElementById('copyBtn').style.display = 'block';
@@ -220,10 +220,21 @@
             }
         }
 
+        function cleanAiMarkdown(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/【[^】\n]{0,120}†[^】\n]{0,120}】/g, '')
+                .replace(/\[\^\{\{thread-[^\]\n]{0,80}\]?/g, '')
+                .replace(/\[\^[^\]\n]{0,120}\]/g, '')
+                .replace(/\[\^[^\n]{0,120}$/gm, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
         function copyReport() {
             if (!rawReport) return;
             // Clean up basic markdown for plain text pasting
-            let textToCopy = rawReport
+            let textToCopy = cleanAiMarkdown(rawReport)
                 .replace(/\*\*/g, '')
                 .replace(/#/g, '')
                 .replace(/- /g, "• ");

@@ -124,7 +124,7 @@ async function saveAsset() {
     };
 
     if (!data.asset_name) {
-        alert('请填写资产名称');
+        showToast('请填写资产名称', 'warning');
         return;
     }
 
@@ -132,16 +132,16 @@ async function saveAsset() {
         await api.post('/assets', data);
         closeModal('assetModal');
         loadAssets();
-        alert('资产登记成功');
+        showToast('资产登记成功', 'success');
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'danger');
     }
 }
 
 function changeAssetStatus(id) {
-    alert('状态流转功能正在完善中。ID: ' + id);
+    showToast('状态流转功能正在完善中。ID: ' + id, 'info');
 }
 
 function editAsset(id) {
-    alert('编辑功能正在完善中。ID: ' + id);
+    showToast('编辑功能正在完善中。ID: ' + id, 'info');
 }

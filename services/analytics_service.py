@@ -150,16 +150,16 @@ class AnalyticsService:
     def get_dashboard_stats(self) -> Dict[str, Any]:
         """获取仪表盘统计数据"""
         with DatabasePool.get_connection() as conn:
-            total_projects = conn.execute("SELECT COUNT(*) as c FROM projects").fetchone()['c']
-            in_progress = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status = '进行中'").fetchone()['c']
-            completed = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status = '已完成'").fetchone()['c']
+            total_projects = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects")).fetchone()['c']
+            in_progress = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = '进行中'")).fetchone()['c']
+            completed = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = '已完成'")).fetchone()['c']
             
             overdue_sql = DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE plan_end_date < CURRENT_DATE AND status NOT IN ('已完成', '已终止', '已验收', '质保期')")
             delayed = conn.execute(overdue_sql).fetchone()['c']
             
-            on_departure = conn.execute("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')").fetchone()['c']
-            total_issues = conn.execute("SELECT COUNT(*) as c FROM issues WHERE status != '已解决'").fetchone()['c']
-            critical_issues = conn.execute("SELECT COUNT(*) as c FROM issues WHERE status != '已解决' AND severity = '高'").fetchone()['c']
+            on_departure = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')")).fetchone()['c']
+            total_issues = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != '已解决'")).fetchone()['c']
+            critical_issues = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != '已解决' AND severity = '高'")).fetchone()['c']
             
             week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             sql_tasks = DatabasePool.format_sql("SELECT COUNT(*) as c FROM tasks WHERE is_completed = ? AND completed_date >= ?")
@@ -171,23 +171,24 @@ class AnalyticsService:
             milestone_overdue_sql = DatabasePool.format_sql("SELECT COUNT(*) as c FROM milestones WHERE is_completed = ? AND target_date < CURRENT_DATE")
             overdue_milestones = conn.execute(milestone_overdue_sql, (False,)).fetchone()['c']
             
-            status_stats = conn.execute('''
+            status_stats = conn.execute(DatabasePool.format_sql('''
                 SELECT status, COUNT(*) as count FROM projects GROUP BY status
-            ''').fetchall()
+            ''')).fetchall()
             
             # 获取进行中项目的进度及风险
             projects_progress = []
-            rows = conn.execute('''
+            rows = conn.execute(DatabasePool.format_sql('''
                 SELECT id, project_name, hospital_name, progress, status, plan_end_date, risk_score
-                FROM projects WHERE status NOT IN ('已完成', '已终止') 
+                FROM projects WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期') 
                 ORDER BY risk_score DESC, progress DESC
-            ''').fetchall()
+            ''')).fetchall()
+            today_str = datetime.now().strftime('%Y-%m-%d')
             
             for row in rows:
                 p_dict = dict(row)
                 # 判定阶段
                 if p_dict['status'] in ['暂停', '离场待返']: p_dict['phase'] = '离场'
-                elif p_dict['plan_end_date'] and str(p_dict['plan_end_date']) < datetime.now().strftime('%Y-%m-%d'): p_dict['phase'] = '延期'
+                elif p_dict['plan_end_date'] and str(p_dict['plan_end_date']) < today_str: p_dict['phase'] = '延期'
                 elif p_dict['progress'] < 30: p_dict['phase'] = '启动期'
                 elif p_dict['progress'] < 70: p_dict['phase'] = '实施中'
                 else: p_dict['phase'] = '收尾期'
@@ -220,7 +221,7 @@ class AnalyticsService:
         """获取全局统计分析概览"""
         with DatabasePool.get_connection() as conn:
             # 项目基本统计
-            project_stats = conn.execute('''
+            project_stats = conn.execute(DatabasePool.format_sql('''
                 SELECT 
                     COUNT(*) as total,
                     SUM(CASE WHEN status = '进行中' THEN 1 ELSE 0 END) as in_progress,
@@ -229,16 +230,16 @@ class AnalyticsService:
                     SUM(CASE WHEN plan_end_date < CURRENT_DATE AND status NOT IN ('已完成', '已终止', '已验收', '质保期') THEN 1 ELSE 0 END) as overdue,
                     AVG(progress) as avg_progress
                 FROM projects
-            ''').fetchone()
+            ''')).fetchone()
             
             # 问题统计
-            issue_stats = conn.execute('''
+            issue_stats = conn.execute(DatabasePool.format_sql('''
                 SELECT 
                     COUNT(*) as total,
                     SUM(CASE WHEN status = '待处理' THEN 1 ELSE 0 END) as pending,
                     SUM(CASE WHEN severity = '高' AND status != '已解决' THEN 1 ELSE 0 END) as critical
                 FROM issues
-            ''').fetchone()
+            ''')).fetchone()
             
             # 本月工时与费用
             month_start = datetime.now().replace(day=1).strftime('%Y-%m-%d')
@@ -246,11 +247,11 @@ class AnalyticsService:
             month_expenses = conn.execute(DatabasePool.format_sql('SELECT SUM(amount) as total FROM project_expenses WHERE expense_date >= ?'), (month_start,)).fetchone()['total'] or 0
             
             # 按省份分布
-            by_province = conn.execute('''
+            by_province = conn.execute(DatabasePool.format_sql('''
                 SELECT province, COUNT(*) as count FROM projects 
                 WHERE province IS NOT NULL AND province != '' 
                 GROUP BY province ORDER BY count DESC
-            ''').fetchall()
+            ''')).fetchall()
             
             # 任务完成趋势 (最近30天)
             thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -272,12 +273,12 @@ class AnalyticsService:
     def get_geo_stats(self) -> Dict[str, Any]:
         """获取地理分布统计"""
         with DatabasePool.get_connection() as conn:
-            provinces = conn.execute('''
+            provinces = conn.execute(DatabasePool.format_sql('''
                 SELECT province, COUNT(*) as count, AVG(progress) as avg_progress 
                 FROM projects 
                 WHERE status != '已删除'
                 GROUP BY province
-            ''').fetchall()
+            ''')).fetchall()
             
             geo_stats = []
             for p in provinces:
@@ -291,13 +292,13 @@ class AnalyticsService:
                     'projects': [dict(proj) for proj in projects]
                 })
 
-            members = conn.execute('''
+            members = conn.execute(DatabasePool.format_sql('''
                 SELECT m.id, m.name, m.role, m.current_city, m.is_onsite, p.project_name, p.id as project_id
                 FROM project_members m
                 JOIN projects p ON m.project_id = p.id
                 WHERE m.current_city IS NOT NULL AND m.current_city != ''
                 AND m.status = '在岗'
-            ''').fetchall()
+            ''')).fetchall()
         
         return {
             'stats': geo_stats,
@@ -307,16 +308,16 @@ class AnalyticsService:
     def get_workload_stats(self) -> Dict[str, Any]:
         """获取成员负载统计"""
         with DatabasePool.get_connection() as conn:
-            workload = conn.execute('''
+            workload = conn.execute(DatabasePool.format_sql('''
                 SELECT project_manager as name, COUNT(*) as active_projects, 
                        AVG(progress) as avg_progress
                 FROM projects 
                 WHERE status NOT IN ('已完成', '已验收', '质保期')
                       AND project_manager IS NOT NULL
                 GROUP BY project_manager
-            ''').fetchall()
+            ''')).fetchall()
             
-            risk_distribution = conn.execute('''
+            risk_distribution = conn.execute(DatabasePool.format_sql('''
                 SELECT COUNT(*) as count, 
                        CASE 
                          WHEN risk_score >= 50 THEN '高风险'
@@ -325,7 +326,7 @@ class AnalyticsService:
                        END as risk_level
                 FROM projects
                 GROUP BY risk_level
-            ''').fetchall()
+            ''')).fetchall()
         
         return {
             'workload': [dict(w) for w in workload],
@@ -470,7 +471,7 @@ class AnalyticsService:
     def get_all_gantt_data(self) -> List[Dict[str, Any]]:
         """获取全项目甘特图数据"""
         with DatabasePool.get_connection() as conn:
-            projects = conn.execute("SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止') ORDER BY plan_start_date").fetchall()
+            projects = conn.execute(DatabasePool.format_sql("SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期') ORDER BY plan_start_date")).fetchall()
             result = []
             for p in projects:
                 pid = p['id']
@@ -489,19 +490,19 @@ class AnalyticsService:
         """按人员统计绩效"""
         with DatabasePool.get_connection() as conn:
             # 奖金统计
-            stage_bonuses = conn.execute('''
+            stage_bonuses = conn.execute(DatabasePool.format_sql('''
                 SELECT responsible_person, SUM(bonus_amount) as total_bonus, COUNT(*) as stage_count
                 FROM project_stages 
                 WHERE responsible_person IS NOT NULL AND status = '已完成'
                 GROUP BY responsible_person
-            ''').fetchall()
+            ''')).fetchall()
             
             # 报销统计
-            expenses = conn.execute('''
+            expenses = conn.execute(DatabasePool.format_sql('''
                 SELECT applicant, SUM(amount) as total_expense
                 FROM project_expenses WHERE status = '已报销'
                 GROUP BY applicant
-            ''').fetchall()
+            ''')).fetchall()
             expense_map = {e['applicant']: e['total_expense'] for e in expenses}
         
         performance = []
@@ -557,7 +558,7 @@ class AnalyticsService:
     def calculate_all_projects_hash(self) -> str:
         """计算所有活跃项目的数据哈希值"""
         with DatabasePool.get_connection() as conn:
-            projects = conn.execute("SELECT id FROM projects WHERE status NOT IN ('已完成', '已终止')").fetchall()
+            projects = conn.execute(DatabasePool.format_sql("SELECT id FROM projects WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')")).fetchall()
             combined_hash = "".join([self.calculate_project_hash(p['id']) for p in projects])
             return hashlib.md5(combined_hash.encode('utf-8')).hexdigest()
 
@@ -573,34 +574,24 @@ class AnalyticsService:
 
     def save_report_cache(self, project_id: int, report_type: str, content: str, data_hash: str):
         """保存报告缓存"""
-        from app_config import DB_CONFIG
-        db_type = DB_CONFIG.get('TYPE', 'sqlite')
         with DatabasePool.get_connection() as conn:
-            if db_type == 'postgres':
-                sql = '''
-                    INSERT INTO report_cache (project_id, report_type, content, data_hash, created_at)
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT (project_id, report_type) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        data_hash = EXCLUDED.data_hash,
-                        created_at = EXCLUDED.created_at
-                '''
-                conn.execute(sql, (project_id, report_type, content, data_hash))
-            else:
-                conn.execute('''
-                    INSERT OR REPLACE INTO report_cache (project_id, report_type, content, data_hash, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (project_id, report_type, content, data_hash, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            sql = DatabasePool.format_sql('''
+                INSERT INTO report_cache (project_id, report_type, content, data_hash, created_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (project_id, report_type) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    data_hash = EXCLUDED.data_hash,
+                    created_at = EXCLUDED.created_at
+            ''')
+            conn.execute(sql, (project_id, report_type, content, data_hash))
             conn.commit()
 
     def get_stage_baselines(self):
         """
         统计全系统各阶段的平均耗时 (基准工期库)
         """
-        from app_config import DB_CONFIG
-        db_type = DB_CONFIG.get('TYPE', 'sqlite')
         with DatabasePool.get_connection() as conn:
-            if db_type == 'postgres':
+            if DatabasePool.is_postgres():
                 sql = '''
                     SELECT stage_name, 
                            AVG(actual_end_date - actual_start_date) as avg_days,
@@ -611,18 +602,32 @@ class AnalyticsService:
                     HAVING COUNT(*) >= 1
                     ORDER BY avg_days ASC
                 '''
+                return [dict(row) for row in conn.execute(DatabasePool.format_sql(sql)).fetchall()]
             else:
-                sql = '''
-                    SELECT stage_name, 
-                           AVG(julianday(actual_end_date) - julianday(actual_start_date)) as avg_days,
-                           COUNT(*) as sample_count
+                rows = conn.execute(DatabasePool.format_sql('''
+                    SELECT stage_name, actual_start_date, actual_end_date
                     FROM project_stages
                     WHERE actual_start_date IS NOT NULL AND actual_end_date IS NOT NULL
-                    GROUP BY stage_name
-                    HAVING sample_count >= 1
-                    ORDER BY avg_days ASC
-                '''
-            return [dict(row) for row in conn.execute(sql).fetchall()]
+                    ORDER BY stage_name
+                ''')).fetchall()
+                grouped = {}
+                for row in rows:
+                    record = dict(row)
+                    start_dt = datetime.strptime(str(record['actual_start_date'])[:10], '%Y-%m-%d')
+                    end_dt = datetime.strptime(str(record['actual_end_date'])[:10], '%Y-%m-%d')
+                    grouped.setdefault(record['stage_name'], []).append((end_dt - start_dt).days)
+
+                result = []
+                for stage_name, durations in grouped.items():
+                    if not durations:
+                        continue
+                    result.append({
+                        'stage_name': stage_name,
+                        'avg_days': sum(durations) / len(durations),
+                        'sample_count': len(durations),
+                    })
+                result.sort(key=lambda item: item['avg_days'])
+                return result
 
 # 全局实例
 analytics_service = AnalyticsService()

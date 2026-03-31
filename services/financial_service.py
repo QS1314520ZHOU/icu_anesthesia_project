@@ -11,19 +11,19 @@ class FinancialService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 总收入 (Revenue)
-                revenue_total = conn.execute('SELECT SUM(amount) as total FROM project_revenue WHERE project_id = ?', (project_id,)).fetchone()['total'] or 0
+                revenue_total = conn.execute(DatabasePool.format_sql('SELECT SUM(amount) as total FROM project_revenue WHERE project_id = ?'), (project_id,)).fetchone()['total'] or 0
                 
                 # 2. 人力成本 (Labor Cost)
                 # 计算公式: 工时 / 8 * 成员日人天成本
-                labor_cost = conn.execute('''
+                labor_cost = conn.execute(DatabasePool.format_sql('''
                     SELECT SUM(wl.work_hours / 8.0 * pm.daily_rate) as total
                     FROM work_logs wl
                     JOIN project_members pm ON wl.member_id = pm.id
                     WHERE wl.project_id = ?
-                ''', (project_id,)).fetchone()['total'] or 0
+                '''), (project_id,)).fetchone()['total'] or 0
                 
                 # 3. 直接支出 (Expenses)
-                expenses_total = conn.execute("SELECT SUM(amount) as total FROM project_expenses WHERE project_id = ? AND status = '已批准'", (project_id,)).fetchone()['total'] or 0
+                expenses_total = conn.execute(DatabasePool.format_sql("SELECT SUM(amount) as total FROM project_expenses WHERE project_id = ? AND status = '已报销'"), (project_id,)).fetchone()['total'] or 0
                 
                 # 4. 计算毛利
                 gross_profit = revenue_total - labor_cost - expenses_total
@@ -51,14 +51,14 @@ class FinancialService:
         """获取项目成员成本分布"""
         try:
             with DatabasePool.get_connection() as conn:
-                costs = conn.execute('''
+                costs = conn.execute(DatabasePool.format_sql('''
                     SELECT pm.name, SUM(wl.work_hours / 8.0 * pm.daily_rate) as cost
                     FROM work_logs wl
                     JOIN project_members pm ON wl.member_id = pm.id
                     WHERE wl.project_id = ?
                     GROUP BY pm.id
                     ORDER BY cost DESC
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 return [dict(row) for row in costs]
         except Exception as e:
             logger.error(f"Error getting member costs for project {project_id}: {e}")
@@ -69,10 +69,10 @@ class FinancialService:
         """添加项目收入记录"""
         try:
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO project_revenue (project_id, amount, revenue_date, revenue_type, description)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (project_id, amount, revenue_date, revenue_type, description))
+                '''), (project_id, amount, revenue_date, revenue_type, description))
                 return {"success": True}
         except Exception as e:
             logger.error(f"Error adding revenue for project {project_id}: {e}")

@@ -182,6 +182,9 @@ class MonitorService:
         with DatabasePool.get_connection() as conn:
             today = datetime.now().strftime('%Y-%m-%d')
             three_days_later = (datetime.now() + timedelta(days=3)).strftime('%Y-%m-%d')
+            one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
             created_reminders = []
             
             # 1. 检查即将逾期的阶段
@@ -196,9 +199,9 @@ class MonitorService:
             for stage in upcoming_stages:
                 sql_check = DatabasePool.format_sql('''
                     SELECT id FROM notifications 
-                    WHERE project_id = ? AND title LIKE ? AND created_at > date('now', '-1 day')
+                    WHERE project_id = ? AND title LIKE ? AND created_at > ?
                 ''')
-                existing = conn.execute(sql_check, (stage['project_id'], f"%{stage['stage_name']}%")).fetchone()
+                existing = conn.execute(sql_check, (stage['project_id'], f"%{stage['stage_name']}%", one_day_ago)).fetchone()
                 if not existing:
                     title = f"⚠️ 阶段即将到期: {stage['stage_name']}"
                     content = f"项目【{stage['project_name']}】的【{stage['stage_name']}】阶段将于 {stage['plan_end_date']} 到期，当前进度 {stage['progress']}%"
@@ -221,9 +224,9 @@ class MonitorService:
             for p in overdue_projects:
                 sql_check = DatabasePool.format_sql('''
                     SELECT id FROM notifications 
-                    WHERE project_id = ? AND type = 'danger' AND created_at > date('now', '-3 day')
+                    WHERE project_id = ? AND type = 'danger' AND created_at > ?
                 ''')
-                existing = conn.execute(sql_check, (p['id'],)).fetchone()
+                existing = conn.execute(sql_check, (p['id'], three_days_ago)).fetchone()
                 if not existing:
                     title = f"🚨 项目已逾期: {p['project_name']}"
                     content = f"项目原计划于 {p['plan_end_date']} 完成，当前进度 {p['progress']}%，请尽快处理！"
@@ -240,16 +243,16 @@ class MonitorService:
                 SELECT i.*, p.project_name FROM issues i
                 JOIN projects p ON i.project_id = p.id
                 WHERE i.severity = '高' AND i.status = '待处理' 
-                AND i.created_at < date('now', '-2 day')
+                AND i.created_at < ?
             ''')
-            critical_issues = conn.execute(sql_issues).fetchall()
+            critical_issues = conn.execute(sql_issues, (two_days_ago,)).fetchall()
             
             for issue in critical_issues:
                 sql_check = DatabasePool.format_sql('''
                     SELECT id FROM notifications 
-                    WHERE project_id = ? AND content LIKE ? AND created_at > date('now', '-2 day')
+                    WHERE project_id = ? AND content LIKE ? AND created_at > ?
                 ''')
-                existing = conn.execute(sql_check, (issue['project_id'], f"%{issue['description'][:20]}%")).fetchone()
+                existing = conn.execute(sql_check, (issue['project_id'], f"%{issue['description'][:20]}%", two_days_ago)).fetchone()
                 if not existing:
                     title = f"⚠️ 高危问题未处理"
                     content = f"项目【{issue['project_name']}】存在高危问题超过2天未处理：{issue['description'][:50]}..."

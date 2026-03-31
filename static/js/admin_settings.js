@@ -615,7 +615,7 @@ var adminSettings = {
                 data.models = data.models.split(/[,，]/).map(s => s.trim()).filter(s => s);
             }
         } catch (e) {
-            alert('模型列表格式错误，请使用JSON数组或逗号分隔');
+            showToast('模型列表格式错误，请使用JSON数组或逗号分隔', 'warning');
             return;
         }
 
@@ -627,9 +627,8 @@ var adminSettings = {
             }
             this.closeAddConfigModal();
             this.loadAiConfigs();
-            // alert('保存成功'); // Optional: reduce noise
         } catch (e) {
-            alert('保存失败: ' + e.message);
+            showToast('保存失败: ' + e.message, 'danger');
         }
     },
 
@@ -639,7 +638,7 @@ var adminSettings = {
             await api.delete(`/admin/ai-configs/${id}`);
             this.loadAiConfigs();
         } catch (e) {
-            alert('删除失败: ' + e.message);
+            showToast('删除失败: ' + e.message, 'danger');
         }
     },
 
@@ -651,12 +650,12 @@ var adminSettings = {
         try {
             const res = await api.post(`/admin/ai-configs/${id}/test`);
             if (res.success) {
-                alert(`✅ ${res.message}`);
+                showToast(`✅ ${res.message}`, 'success');
             } else {
-                alert(`❌ ${res.message}\n详情: ${res.details || ''}`);
+                showToast(`❌ ${res.message}`, 'danger', 5000);
             }
         } catch (e) {
-            alert(`❌ 测试失败: ${e.message}`);
+            showToast(`❌ 测试失败: ${e.message}`, 'danger');
         } finally {
             btn.disabled = false;
             btn.innerHTML = originalText;
@@ -698,19 +697,19 @@ var adminSettings = {
         };
 
         if (data.enabled === 'true' && (!data.corp_id || !data.secret || !data.agent_id)) {
-            alert('启用企业微信时，企业ID、应用ID和Secret为必填项');
+            showToast('启用企业微信时，企业ID、应用ID和Secret为必填项', 'warning');
             return;
         }
 
         try {
             const res = await api.post('/admin/wecom-config', data);
             if (res.success) {
-                alert('✅ 企业微信配置已保存并生效');
+                showToast('✅ 企业微信配置已保存并生效', 'success');
             } else {
-                alert('❌ 保存失败: ' + res.message);
+                showToast('❌ 保存失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ 请求失败: ' + e.message);
+            showToast('❌ 请求失败: ' + e.message, 'danger');
         }
     },
 
@@ -770,19 +769,19 @@ var adminSettings = {
         };
 
         if (!config.r2.endpoint || !config.r2.bucket_name) {
-            alert('请填写 Endpoint 和 Bucket Name');
+            showToast('请填写 Endpoint 和 Bucket Name', 'warning');
             return;
         }
 
         try {
             const res = await api.post('/admin/storage/config', config);
             if (res.success) {
-                alert('✅ R2 配置保存成功，已切换为 R2 存储');
+                showToast('✅ R2 配置保存成功，已切换为 R2 存储', 'success');
             } else {
-                alert('❌ 保存失败: ' + res.message);
+                showToast('❌ 保存失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ 请求失败: ' + e.message);
+            showToast('❌ 请求失败: ' + e.message, 'danger');
         }
     },
 
@@ -799,7 +798,7 @@ var adminSettings = {
         };
 
         if (!config.endpoint || !config.bucket_name) {
-            alert('请填写 Endpoint 和 Bucket Name');
+            showToast('请填写 Endpoint 和 Bucket Name', 'warning');
             btn.disabled = false;
             btn.innerText = originalText;
             return;
@@ -808,12 +807,12 @@ var adminSettings = {
         try {
             const res = await api.post('/admin/storage/test-r2', config);
             if (res.success) {
-                alert('✅ 连接成功！R2 配置有效。');
+                showToast('✅ 连接成功！R2 配置有效。', 'success');
             } else {
-                alert('❌ 连接失败: ' + res.message);
+                showToast('❌ 连接失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ 测试失败: ' + e.message);
+            showToast('❌ 测试失败: ' + e.message, 'danger');
         } finally {
             btn.disabled = false;
             btn.innerText = originalText;
@@ -823,7 +822,7 @@ var adminSettings = {
     submitTokenJson: async function () {
         const jsonStr = document.getElementById('baiduTokenJson').value.trim();
         if (!jsonStr) {
-            alert('请输入 JSON 内容');
+            showToast('请输入 JSON 内容', 'warning');
             return;
         }
         try {
@@ -835,15 +834,15 @@ var adminSettings = {
 
             const res = await api.post('/admin/storage/manual-token', data);
             if (res.success) {
-                alert('✅ Token 保存成功');
+                showToast('✅ Token 保存成功', 'success');
                 document.getElementById('baiduTokenJson').value = '';
                 document.getElementById('manualTokenSection').style.display = 'none';
                 this.checkStorageStatus();
             } else {
-                alert('❌ 保存失败: ' + res.message);
+                showToast('❌ 保存失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ JSON 格式错误或提交失败: ' + e.message);
+            showToast('❌ JSON 格式错误或提交失败: ' + e.message, 'danger');
         }
     },
 
@@ -874,17 +873,17 @@ var adminSettings = {
             if (res.url) {
                 window.open(res.url, '_blank', 'width=800,height=600');
             } else {
-                alert('无法获取授权URL');
+                showToast('无法获取授权URL', 'danger');
             }
         } catch (e) {
-            alert('获取授权URL失败: ' + e.message);
+            showToast('获取授权URL失败: ' + e.message, 'danger');
         }
     },
 
     submitAuthCode: async function () {
         const code = document.getElementById('baiduAuthCode').value.trim();
         if (!code) {
-            alert('请输入授权码');
+            showToast('请输入授权码', 'warning');
             return;
         }
 
@@ -896,14 +895,14 @@ var adminSettings = {
         try {
             const res = await api.post('/admin/storage/callback', { code });
             if (res.success) {
-                alert('🎉 授权成功！');
+                showToast('🎉 授权成功！', 'success');
                 document.getElementById('baiduAuthCode').value = '';
                 this.checkStorageStatus();
             } else {
-                alert('❌ 授权失败: ' + res.message);
+                showToast('❌ 授权失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ 提交失败: ' + e.message);
+            showToast('❌ 提交失败: ' + e.message, 'danger');
         } finally {
             btn.disabled = false;
             btn.innerText = originalText;
@@ -975,13 +974,13 @@ var adminSettings = {
         try {
             const res = await api.post(`/admin/users/${userId}/bind-wecom`, { wecom_userid: wecomUserid });
             if (res.success) {
-                alert('✅ ' + res.message);
+                showToast('✅ ' + res.message, 'success');
                 this.loadWecomBindList();
             } else {
-                alert('❌ ' + (res.message || '保存失败'));
+                showToast('❌ ' + (res.message || '保存失败'), 'danger');
             }
         } catch (e) {
-            alert('❌ 请求失败: ' + e.message);
+            showToast('❌ 请求失败: ' + e.message, 'danger');
         }
     },
 
@@ -1015,13 +1014,13 @@ var adminSettings = {
         try {
             const res = await api.post('/admin/map-config', config);
             if (res.success) {
-                alert('✅ 地图服务配置已保存');
+                showToast('✅ 地图服务配置已保存', 'success');
                 this.loadMapConfig(); // Reload to see masked values
             } else {
-                alert('❌ 保存失败: ' + res.message);
+                showToast('❌ 保存失败: ' + res.message, 'danger');
             }
         } catch (e) {
-            alert('❌ 请求失败: ' + e.message);
+            showToast('❌ 请求失败: ' + e.message, 'danger');
         }
     }
 };

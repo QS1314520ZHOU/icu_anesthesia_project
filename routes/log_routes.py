@@ -14,13 +14,13 @@ def get_work_logs(project_id):
 
 @log_bp.route('/projects/<int:project_id>/worklogs', methods=['POST'])
 def add_work_log(project_id):
-    data = request.json
+    data = request.json or {}
     log_service.add_work_log(project_id, data)
     return api_response(True)
 
 @log_bp.route('/worklogs/<int:log_id>', methods=['PUT'])
 def update_work_log(log_id):
-    data = request.json
+    data = request.json or {}
     log_service.update_work_log(log_id, data)
     return api_response(True)
 
@@ -42,19 +42,19 @@ def get_project_departures(project_id):
 
 @log_bp.route('/projects/<int:project_id>/departures', methods=['POST'])
 def add_project_departure(project_id):
-    data = request.json
+    data = request.json or {}
     log_service.add_project_departure(project_id, data)
     return api_response(True)
 
 @log_bp.route('/departures/<int:departure_id>', methods=['PUT'])
 def update_project_departure(departure_id):
-    data = request.json
+    data = request.json or {}
     log_service.update_project_departure(departure_id, data)
     return api_response(True)
 
 @log_bp.route('/departures/<int:departure_id>/return', methods=['POST'])
 def record_return(departure_id):
-    data = request.json
+    data = request.json or {}
     log_service.record_return(departure_id, data)
     return api_response(True)
 

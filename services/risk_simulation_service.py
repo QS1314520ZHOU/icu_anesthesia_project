@@ -13,17 +13,17 @@ class RiskSimulationService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 获取所有任务依赖关系
-                all_deps = conn.execute('''
+                all_deps = conn.execute(DatabasePool.format_sql('''
                     SELECT td.task_id, td.depends_on_task_id, t.task_name, t.is_completed, 
                            s.stage_name, s.plan_end_date
                     FROM task_dependencies td
                     JOIN tasks t ON td.task_id = t.id
                     JOIN project_stages s ON t.stage_id = s.id
                     WHERE s.project_id = ?
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 
                 # 2. 获取初始任务信息
-                root_task = conn.execute('SELECT task_name FROM tasks WHERE id = ?', (task_id,)).fetchone()
+                root_task = conn.execute(DatabasePool.format_sql('SELECT task_name FROM tasks WHERE id = ?'), (task_id,)).fetchone()
                 if not root_task: return None
                 
                 # 3. 广度优先搜索 (BFS) 构建影响链
@@ -50,10 +50,10 @@ class RiskSimulationService:
                                 impacted_tasks.append(dict(child_info))
                 
                 # 4. 获取受影响的里程碑
-                milestones = conn.execute('''
+                milestones = conn.execute(DatabasePool.format_sql('''
                     SELECT * FROM milestones 
                     WHERE project_id = ? AND is_completed = ?
-                ''', (project_id, False)).fetchall()
+                '''), (project_id, False)).fetchall()
                 
                 # 5. 调用 AI 生成“蝴蝶效应”描述
                 narration = RiskSimulationService._generate_ai_narration(

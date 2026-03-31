@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file, make_response, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file, make_response, send_from_directory, session
 import logging
 import traceback
 import re
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from threading import Thread
 from werkzeug.utils import secure_filename
 from ai_config import AI_CONFIG, get_model_config, switch_to_backup_api
-from database import DatabasePool, get_db, close_db
+from database import DatabasePool, close_db, DB_INTEGRITY_ERRORS, DB_OPERATIONAL_ERRORS
 from db_init import init_db, reload_notification_config, migrate_to_dynamic_milestones, allowed_file
 from api_utils import api_response, validate_json, cached
 from concurrent.futures import ThreadPoolExecutor
@@ -41,7 +41,7 @@ def list_routes():
 def debug_wecom_logs():
     try:
         with DatabasePool.get_connection() as conn:
-            logs = conn.execute('SELECT * FROM wecom_debug_logs ORDER BY id DESC LIMIT 20').fetchall()
+            logs = conn.execute(DatabasePool.format_sql('SELECT * FROM wecom_debug_logs ORDER BY id DESC LIMIT 20')).fetchall()
             return jsonify([dict(l) for l in logs])
     except Exception as e:
         return str(e), 500
@@ -125,6 +125,7 @@ app.register_blueprint(mobile_bp)
 executor = ThreadPoolExecutor(max_workers=4)
 # in-memory task result store (should use Redis in production)
 task_results = {}
+task_registry = {}
 
 # DATABASE constant moved to database.py
 UPLOAD_FOLDER = 'uploads'
@@ -151,6 +152,203 @@ def allowed_file(filename):
 
 
 # Helper functions migrated to db_init.py or services
+
+def _now_iso():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def persist_task_record(task_data):
+    """将任务记录同步到数据库，便于任务中心持久化。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                INSERT INTO background_tasks (task_id, task_type, title, project_id, payload_summary, source_endpoint, retried_from_task_id, status, result, error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (task_id) DO UPDATE SET
+                    task_type = EXCLUDED.task_type,
+                    title = EXCLUDED.title,
+                    project_id = EXCLUDED.project_id,
+                    payload_summary = EXCLUDED.payload_summary,
+                    source_endpoint = EXCLUDED.source_endpoint,
+                    retried_from_task_id = EXCLUDED.retried_from_task_id,
+                    status = EXCLUDED.status,
+                    result = EXCLUDED.result,
+                    error = EXCLUDED.error,
+                    updated_at = EXCLUDED.updated_at
+            ''')
+            conn.execute(sql, (
+                task_data.get('task_id'),
+                task_data.get('task_type', 'generic'),
+                task_data.get('title', '未命名任务'),
+                task_data.get('project_id'),
+                task_data.get('payload_summary'),
+                task_data.get('source_endpoint'),
+                task_data.get('retried_from_task_id'),
+                task_data.get('status', 'processing'),
+                task_data.get('result'),
+                task_data.get('error'),
+                task_data.get('created_at', _now_iso()),
+                task_data.get('updated_at', _now_iso()),
+            ))
+            conn.commit()
+    except Exception as e:
+        logging.warning("Persist task record failed: %s", e)
+
+def fetch_task_record(task_id):
+    """从数据库读取任务记录。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            row = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM background_tasks WHERE task_id = ?'),
+                (task_id,),
+            ).fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logging.warning("Fetch task record failed: %s", e)
+        return None
+
+def fetch_task_records(status=None, task_type=None, project_id=None, limit=50):
+    """从数据库读取任务列表。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            clauses = []
+            params = []
+            if status:
+                clauses.append('status = ?')
+                params.append(status)
+            if task_type:
+                clauses.append('task_type = ?')
+                params.append(task_type)
+            if project_id:
+                clauses.append('project_id = ?')
+                params.append(project_id)
+            where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ''
+            sql = DatabasePool.format_sql(f'''
+                SELECT * FROM background_tasks
+                {where_sql}
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ?
+            ''')
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        logging.warning("Fetch task records failed: %s", e)
+        return []
+
+def delete_completed_task_records(project_id=None):
+    """清理已完成任务记录。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            clauses = ['status = ?']
+            params = ['completed']
+            if project_id:
+                clauses.append('project_id = ?')
+                params.append(project_id)
+            sql = DatabasePool.format_sql(f'''
+                DELETE FROM background_tasks
+                WHERE {' AND '.join(clauses)}
+            ''')
+            conn.execute(sql, params)
+            conn.commit()
+    except Exception as e:
+        logging.warning("Delete completed task records failed: %s", e)
+        raise
+
+def enrich_task_rows(rows):
+    """给任务记录补充项目展示信息，避免前端只能看到内部ID。"""
+    if not rows:
+        return []
+
+    enriched = [dict(row) for row in rows]
+    project_ids = sorted({row.get('project_id') for row in enriched if row.get('project_id')})
+    if not project_ids:
+        return enriched
+
+    try:
+        with DatabasePool.get_connection() as conn:
+            placeholders = ','.join('?' for _ in project_ids)
+            sql = DatabasePool.format_sql(f'''
+                SELECT id, project_name, hospital_name
+                FROM projects
+                WHERE id IN ({placeholders})
+            ''')
+            projects = conn.execute(sql, project_ids).fetchall()
+            project_map = {row['id']: dict(row) for row in projects}
+    except Exception as e:
+        logging.warning("Enrich task rows failed: %s", e)
+        return enriched
+
+    for row in enriched:
+        project_id = row.get('project_id')
+        project = project_map.get(project_id)
+        if not project:
+            continue
+        row['project_name'] = project.get('project_name')
+        row['hospital_name'] = project.get('hospital_name')
+    return enriched
+
+def register_task(task_id, task_type, title, runner, *runner_args, **runner_kwargs):
+    """统一登记后台任务，便于任务中心查看与重试。"""
+    now = _now_iso()
+    project_id = runner_kwargs.get('project_id')
+    if project_id is None and runner_args and isinstance(runner_args[0], int):
+        project_id = runner_args[0]
+    payload_summary = runner_kwargs.get('payload_summary')
+    if payload_summary is None and runner_args:
+        payload_summary = ', '.join(str(arg) for arg in runner_args[:3])
+    source_endpoint = runner_kwargs.get('source_endpoint')
+    retried_from_task_id = runner_kwargs.get('retried_from_task_id')
+    task_results[task_id] = {
+        "task_id": task_id,
+        "task_type": task_type,
+        "title": title,
+        "project_id": project_id,
+        "payload_summary": payload_summary,
+        "source_endpoint": source_endpoint,
+        "retried_from_task_id": retried_from_task_id,
+        "status": "processing",
+        "created_at": now,
+        "updated_at": now,
+        "result": None,
+        "error": None,
+    }
+    persist_task_record(task_results[task_id])
+    task_registry[task_id] = {
+        "task_type": task_type,
+        "title": title,
+        "runner": runner,
+        "args": runner_args,
+        "kwargs": runner_kwargs,
+    }
+
+def update_task_status(task_id, status, result=None, error=None):
+    """更新后台任务状态。"""
+    current = task_results.get(task_id, {"task_id": task_id})
+    current.update({
+        "status": status,
+        "updated_at": _now_iso(),
+    })
+    if result is not None:
+        current["result"] = result
+    if error is not None or status == "failed":
+        current["error"] = error
+    elif status == "completed":
+        current["error"] = None
+    task_results[task_id] = current
+    persist_task_record(current)
+
+def launch_registered_task(task_id):
+    """按注册信息启动任务。"""
+    task_meta = task_registry.get(task_id)
+    if not task_meta:
+        raise KeyError(f"Task {task_id} is not registered")
+    update_task_status(task_id, "processing", result=None, error=None)
+    safe_submit(task_meta["runner"], task_id, *task_meta["args"], **task_meta["kwargs"])
+
+def warm_task_cache(limit=100):
+    """启动时预热最近任务缓存。"""
+    for row in fetch_task_records(limit=limit):
+        task_results[row['task_id']] = row
 
 def log_operation(operator, op_type, entity_type, entity_id, entity_name, old_val=None, new_val=None):
     """记录操作日志"""
@@ -197,18 +395,14 @@ def handle_500_error(e):
 def get_project_health_dashboard():
     """获取所有项目的健康度指标"""
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
-        # 获取所有活跃项目（排除已完成和已终止）
         sql = DatabasePool.format_sql('''
             SELECT id, project_name, hospital_name, status, progress, 
                    plan_end_date, risk_score, project_manager
             FROM projects 
-            WHERE status NOT IN ('已完成', '已终止')
+            WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
             ORDER BY risk_score DESC, progress ASC
         ''')
-        cursor.execute(sql)
-        projects = [dict(row) for row in cursor.fetchall()]
+        projects = [dict(row) for row in conn.execute(sql).fetchall()]
         
         health_data = []
         today = datetime.now().date()
@@ -230,26 +424,22 @@ def get_project_health_dashboard():
                 progress_deviation = 0
             
             # 2. 问题数量
-            sql = DatabasePool.format_sql("SELECT COUNT(*) FROM issues WHERE project_id = ? AND status != '已解决'")
-            cursor.execute(sql, (project_id,))
-            open_issues = cursor.fetchone()[0]
+            sql = DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE project_id = ? AND status != '已解决'")
+            open_issues = conn.execute(sql, (project_id,)).fetchone()['c']
             
             # 3. 接口完成率
-            sql_total = DatabasePool.format_sql("SELECT COUNT(*) FROM interfaces WHERE project_id = ?")
-            cursor.execute(sql_total, (project_id,))
-            total_interfaces = cursor.fetchone()[0]
-            sql_comp = DatabasePool.format_sql("SELECT COUNT(*) FROM interfaces WHERE project_id = ? AND status = '已完成'")
-            cursor.execute(sql_comp, (project_id,))
-            completed_interfaces = cursor.fetchone()[0]
+            sql_total = DatabasePool.format_sql("SELECT COUNT(*) as c FROM interfaces WHERE project_id = ?")
+            total_interfaces = conn.execute(sql_total, (project_id,)).fetchone()['c']
+            sql_comp = DatabasePool.format_sql("SELECT COUNT(*) as c FROM interfaces WHERE project_id = ? AND status = '已完成'")
+            completed_interfaces = conn.execute(sql_comp, (project_id,)).fetchone()['c']
             interface_rate = (completed_interfaces / total_interfaces * 100) if total_interfaces > 0 else 100
             
             # 4. 里程碑状态
             sql_ms = DatabasePool.format_sql("""
-                SELECT COUNT(*) FROM milestones 
+                SELECT COUNT(*) as c FROM milestones 
                 WHERE project_id = ? AND is_completed = ? AND target_date < ?
             """)
-            cursor.execute(sql_ms, (project_id, False, today.strftime('%Y-%m-%d')))
-            overdue_milestones = cursor.fetchone()[0]
+            overdue_milestones = conn.execute(sql_ms, (project_id, False, today.strftime('%Y-%m-%d'))).fetchone()['c']
             
             # 5. 计算健康度评分 (0-100)
             health_score = 100
@@ -327,39 +517,34 @@ def get_warning_count():
 def get_project_templates():
     """获取所有自定义项目模板"""
     with DatabasePool.get_connection() as conn:
-        templates = conn.execute('SELECT * FROM project_templates_custom ORDER BY created_at DESC').fetchall()
+        templates = conn.execute(DatabasePool.format_sql('SELECT * FROM project_templates_custom ORDER BY created_at DESC')).fetchall()
         return api_response(True, [dict(t) for t in templates])
 
 @app.route('/api/projects/<int:project_id>/save-as-template', methods=['POST'])
 def save_project_as_template(project_id):
     """将项目保存为模板"""
     import json
-    data = request.json
+    data = request.json or {}
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
-        # 获取项目基本信息
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
             return api_response(False, message='项目不存在', code=404)
         
-        # 获取阶段和任务
         sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
-        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        stages = conn.execute(sql_stage, (project_id,)).fetchall()
         stages_data = []
         for stage in stages:
             sql_task = DatabasePool.format_sql('SELECT task_name, is_completed FROM tasks WHERE stage_id = ?')
-            tasks = cursor.execute(sql_task, (stage['id'],)).fetchall()
+            tasks = conn.execute(sql_task, (stage['id'],)).fetchall()
             stages_data.append({
                 'name': stage['stage_name'],
                 'order_num': stage['stage_order'],
                 'tasks': [{'name': t['task_name']} for t in tasks]
             })
         
-        # 获取里程碑模板
         sql_ms = DatabasePool.format_sql('SELECT name FROM milestones WHERE project_id = ?')
-        milestones = cursor.execute(sql_ms, (project_id,)).fetchall()
+        milestones = conn.execute(sql_ms, (project_id,)).fetchall()
         
         # 组装模板数据
         template_data = {
@@ -375,15 +560,17 @@ def save_project_as_template(project_id):
             INSERT INTO project_templates_custom (name, description, source_project_id, template_data, created_by)
             VALUES (?, ?, ?, ?, ?)
         ''')
-        cursor.execute(sql_ins, (
+        if DatabasePool.is_postgres():
+            sql_ins += ' RETURNING id'
+        insert_cursor = conn.execute(sql_ins, (
             data.get('name', f"{project['project_name']}_模板"),
             data.get('description', f"从项目「{project['project_name']}」创建"),
             project_id,
             json.dumps(template_data, ensure_ascii=False),
             session.get('username', 'system')
         ))
+        template_id = DatabasePool.get_inserted_id(insert_cursor)
         conn.commit()
-        template_id = cursor.lastrowid
         
         return api_response(True, {'id': template_id, 'message': '模板保存成功'})
 
@@ -411,15 +598,16 @@ def get_project_communications(project_id):
 @app.route('/api/projects/<int:project_id>/communications', methods=['POST'])
 def add_project_communication(project_id):
     """添加沟通记录"""
-    data = request.json
+    data = request.json or {}
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
         sql = DatabasePool.format_sql('''
             INSERT INTO customer_communications 
             (project_id, contact_date, contact_person, contact_method, summary, related_issue_id, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''')
-        cursor.execute(sql, (
+        if DatabasePool.is_postgres():
+            sql += ' RETURNING id'
+        insert_cursor = conn.execute(sql, (
             project_id,
             data.get('contact_date'),
             data.get('contact_person'),
@@ -428,10 +616,9 @@ def add_project_communication(project_id):
             data.get('related_issue_id'),
             data.get('created_by', 'system')
         ))
+        record_id = DatabasePool.get_inserted_id(insert_cursor)
         conn.commit()
-        record_id = cursor.lastrowid
         return api_response(True, {'id': record_id, 'message': '沟通记录添加成功'})
-    return api_response(True, {'id': record_id})
 
 @app.route('/api/communications/<int:record_id>', methods=['DELETE'])
 def delete_communication(record_id):
@@ -446,10 +633,8 @@ def delete_communication(record_id):
 def analyze_communications(project_id):
     """AI分析客户沟通记录 - 从项目管理/需求分析师视角"""
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
             return jsonify({'error': '项目不存在'}), 404
         
@@ -458,7 +643,7 @@ def analyze_communications(project_id):
             SELECT * FROM customer_communications 
             WHERE project_id = ? ORDER BY contact_date DESC
         ''')
-        records = cursor.execute(sql_comm, (project_id,)).fetchall()
+        records = conn.execute(sql_comm, (project_id,)).fetchall()
         
         if not records:
             return jsonify({'error': '暂无沟通记录，请先添加沟通记录再进行分析'}), 400
@@ -467,13 +652,13 @@ def analyze_communications(project_id):
         sql_stage = DatabasePool.format_sql(
             'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order'
         )
-        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        stages = conn.execute(sql_stage, (project_id,)).fetchall()
         
         # 获取活跃问题
         sql_issue = DatabasePool.format_sql(
             "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"
         )
-        issues = cursor.execute(sql_issue, (project_id,)).fetchall()
+        issues = conn.execute(sql_issue, (project_id,)).fetchall()
     
     # 构建沟通记录汇总
     comm_summary = "\n".join([
@@ -612,20 +797,19 @@ def analyze_communication_file(project_id):
 
     # 获取项目上下文
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
             return jsonify({'error': '项目不存在'}), 404
     
         sql_stage = DatabasePool.format_sql(
             'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order'
         )
-        stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+        stages = conn.execute(sql_stage, (project_id,)).fetchall()
         sql_issue = DatabasePool.format_sql(
             "SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"
         )
-        issues = cursor.execute(sql_issue, (project_id,)).fetchall()
+        issues = conn.execute(sql_issue, (project_id,)).fetchall()
 
     stage_info = "\n".join([f"- {s['stage_name']}: {s['progress']}%" for s in stages]) if stages else "无阶段数据"
     issue_info = "\n".join([f"- [{i['severity']}] {i['description']} ({i['status']})" for i in issues]) if issues else "无待解决问题"
@@ -689,26 +873,24 @@ def ai_project_retrospective(project_id):
         from ai_utils import call_ai
         
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            # 获取项目信息
             sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-            project = cursor.execute(sql_pj, (project_id,)).fetchone()
+            project = conn.execute(sql_pj, (project_id,)).fetchone()
             if not project:
                 return api_response(False, message='项目不存在', code=404)
             
             # 获取项目统计
             sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
-            stages = cursor.execute(sql_stage, (project_id,)).fetchall()
+            stages = conn.execute(sql_stage, (project_id,)).fetchall()
             sql_task = DatabasePool.format_sql('''
                 SELECT t.* FROM tasks t 
                 JOIN project_stages s ON t.stage_id = s.id 
                 WHERE s.project_id = ?
             ''')
-            tasks = cursor.execute(sql_task, (project_id,)).fetchall()
+            tasks = conn.execute(sql_task, (project_id,)).fetchall()
             sql_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?')
-            issues = cursor.execute(sql_issue, (project_id,)).fetchall()
+            issues = conn.execute(sql_issue, (project_id,)).fetchall()
             sql_log = DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 50')
-            logs = cursor.execute(sql_log, (project_id,)).fetchall()
+            logs = conn.execute(sql_log, (project_id,)).fetchall()
         
         # 构建prompt
         completed_tasks = sum(1 for t in tasks if t['status'] == '已完成')
@@ -761,10 +943,8 @@ def ai_task_suggestions(project_id):
         from ai_utils import call_ai
         
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            # 获取项目信息
             sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-            project = cursor.execute(sql_pj, (project_id,)).fetchone()
+            project = conn.execute(sql_pj, (project_id,)).fetchone()
             if not project:
                 return api_response(False, message='项目不存在', code=404)
             
@@ -775,14 +955,14 @@ def ai_task_suggestions(project_id):
                 JOIN project_stages s ON t.stage_id = s.id 
                 WHERE s.project_id = ? AND t.is_completed = ?
             ''')
-            tasks = cursor.execute(sql_task, (project_id, False)).fetchall()
+            tasks = conn.execute(sql_task, (project_id, False)).fetchall()
             
             # 获取团队成员
             sql_member = DatabasePool.format_sql('''
                 SELECT * FROM project_members 
                 WHERE project_id = ? AND status = '在岗'
             ''')
-            members = cursor.execute(sql_member, (project_id,)).fetchall()
+            members = conn.execute(sql_member, (project_id,)).fetchall()
         
         if not tasks:
             return api_response(True, {'suggestions': [], 'message': '暂无未分配任务'})
@@ -844,7 +1024,7 @@ def get_project_dependencies(project_id):
 def add_task_dependency():
     """添加任务依赖"""
     from services.dependency_service import dependency_service
-    data = request.json
+    data = request.json or {}
     result = dependency_service.add_dependency(
         data['task_id'], data['depends_on_task_id'],
         data.get('dependency_type', 'finish_to_start')
@@ -896,29 +1076,22 @@ def get_standup_data(project_id):
 def generate_standup(project_id):
     """AI生成站会纪要"""
     from services.standup_service import standup_service
-    date_str = request.json.get('date') if request.json else None
+    data = request.json or {}
+    date_str = data.get('date')
     result = standup_service.generate_ai_standup(project_id, date_str)
 
     # 保存到数据库
     if result.get('standup'):
         with DatabasePool.get_connection() as conn:
             today = date_str or datetime.now().strftime('%Y-%m-%d')
-            
-            if DatabasePool.is_postgres():
-                sql = DatabasePool.format_sql('''
-                    INSERT INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by, created_at)
-                    VALUES (?, ?, ?, TRUE, 'AI', CURRENT_TIMESTAMP)
-                    ON CONFLICT (project_id, meeting_date) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        created_at = EXCLUDED.created_at
-                ''')
-                conn.execute(sql, (project_id, today, result['standup']))
-            else:
-                sql = DatabasePool.format_sql('''
-                    INSERT OR REPLACE INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by)
-                    VALUES (?, ?, ?, 1, 'AI')
-                ''')
-                conn.execute(sql, (project_id, today, result['standup']))
+            sql = DatabasePool.format_sql('''
+                INSERT INTO standup_minutes (project_id, meeting_date, content, ai_generated, created_by, created_at)
+                VALUES (?, ?, ?, TRUE, 'AI', CURRENT_TIMESTAMP)
+                ON CONFLICT (project_id, meeting_date) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    created_at = EXCLUDED.created_at
+            ''')
+            conn.execute(sql, (project_id, today, result['standup']))
             conn.commit()
     
     return api_response(True, result)
@@ -1048,7 +1221,7 @@ def user_login():
     """用户登录"""
     try:
         from services.auth_service import auth_service
-        data = request.json
+        data = request.json or {}
         username = data.get('username')
         password = data.get('password')
         if not username or not password:
@@ -1072,7 +1245,7 @@ def user_register():
     """用户注册"""
     try:
         from services.auth_service import auth_service
-        data = request.json
+        data = request.json or {}
         result = auth_service.register(
             username=data.get('username'),
             password=data.get('password'),
@@ -1161,7 +1334,7 @@ def update_user_status(user_id):
         if not current_user or current_user['role'] != 'admin':
             return api_response(False, message="仅管理员可操作", code=403)
             
-        data = request.json
+        data = request.json or {}
         is_active = data.get('is_active', True)
         
         # 防止禁用自己
@@ -1187,7 +1360,7 @@ def reset_user_password(user_id):
         if not current_user or current_user['role'] != 'admin':
             return api_response(False, message="仅管理员可操作", code=403)
             
-        data = request.json
+        data = request.json or {}
         new_password = data.get('password')
         if not new_password:
              return api_response(False, message="新密码不能为空", code=400)
@@ -1212,7 +1385,7 @@ def add_project_access(project_id):
     """授权用户访问项目"""
     try:
         from services.auth_service import auth_service
-        data = request.json
+        data = request.json or {}
         user_id = data.get('user_id')
         role = data.get('role', 'member')
         if not user_id:
@@ -1239,7 +1412,7 @@ def compare_projects():
     """项目对比分析"""
     try:
         from services.analytics_service import analytics_service
-        data = request.json
+        data = request.json or {}
         project_ids = data.get('project_ids', [])
         result = analytics_service.compare_projects(project_ids)
         return api_response(True, result)
@@ -1273,7 +1446,7 @@ def get_project_health(project_id):
 def ai_natural_query():
     """AI 自然语言查询"""
     try:
-        data = request.json
+        data = request.json or {}
         query = data.get('query', '')
         if not query:
             return api_response(False, message="查询内容不能为空", code=400)
@@ -1282,7 +1455,7 @@ def ai_natural_query():
         with DatabasePool.get_connection() as conn:
             sql = DatabasePool.format_sql('''
                 SELECT id, project_name, hospital_name, status, progress, project_manager 
-                FROM projects WHERE status NOT IN ('已完成', '已终止')
+                FROM projects WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
             ''')
             projects = conn.execute(sql).fetchall()
             
@@ -1306,7 +1479,7 @@ def ai_natural_query():
 def ai_classify_issue():
     """AI 问题自动分类"""
     try:
-        data = request.json
+        data = request.json or {}
         description = data.get('description', '')
         if not description:
             return api_response(False, message="问题描述不能为空", code=400)
@@ -1360,28 +1533,26 @@ def _run_analysis_task(task_id, project_id):
     """后台运行AI分析任务"""
     try:
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            
             sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-            project = dict(cursor.execute(sql_pj, (project_id,)).fetchone())
+            project = dict(conn.execute(sql_pj, (project_id,)).fetchone())
             
             sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
-            stages = [dict(s) for s in cursor.execute(sql_stage, (project_id,)).fetchall()]
+            stages = [dict(s) for s in conn.execute(sql_stage, (project_id,)).fetchall()]
             
             sql_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND status != ?')
-            issues = [dict(i) for i in cursor.execute(sql_issue, (project_id, '已解决')).fetchall()]
+            issues = [dict(i) for i in conn.execute(sql_issue, (project_id, '已解决')).fetchall()]
             
             sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ? AND status != ?')
-            interfaces = [dict(i) for i in cursor.execute(sql_iface, (project_id, '已完成')).fetchall()]
+            interfaces = [dict(i) for i in conn.execute(sql_iface, (project_id, '已完成')).fetchall()]
             
             sql_dev = DatabasePool.format_sql('SELECT * FROM medical_devices WHERE project_id = ?')
-            devices = [dict(d) for d in cursor.execute(sql_dev, (project_id,)).fetchall()]
+            devices = [dict(d) for d in conn.execute(sql_dev, (project_id,)).fetchall()]
             
             sql_mem = DatabasePool.format_sql('SELECT * FROM project_members WHERE project_id = ? AND status = ?')
-            members = [dict(m) for m in cursor.execute(sql_mem, (project_id, '在岗')).fetchall()]
+            members = [dict(m) for m in conn.execute(sql_mem, (project_id, '在岗')).fetchall()]
             
             sql_dep = DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ? ORDER BY created_at DESC LIMIT 3')
-            departures = [dict(d) for d in cursor.execute(sql_dep, (project_id,)).fetchall()]
+            departures = [dict(d) for d in conn.execute(sql_dep, (project_id,)).fetchall()]
         
         # 扫描潜在风险点
         detected_risks, risk_score = ai_service.analyze_project_risks(project_id)
@@ -1424,17 +1595,319 @@ def _run_analysis_task(task_id, project_id):
         data_hash = analytics_service.calculate_project_hash(project_id)
         analytics_service.save_report_cache(project_id, 'ai_analysis', analysis_result, data_hash)
         
-        task_results[task_id] = {"status": "completed", "result": analysis_result}
+        update_task_status(task_id, "completed", result=analysis_result)
         
     except Exception as e:
-        task_results[task_id] = {"status": "failed", "error": str(e)}
+        update_task_status(task_id, "failed", error=str(e))
+
+@app.route('/api/projects/<int:project_id>/ai-analysis', methods=['POST'])
+def generate_ai_analysis(project_id):
+    """异步生成项目 AI 分析，纳入任务中心。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            project = conn.execute(
+                DatabasePool.format_sql('SELECT id, project_name FROM projects WHERE id = ?'),
+                (project_id,),
+            ).fetchone()
+            if not project:
+                return api_response(False, message='项目不存在', code=404)
+
+        task_id = str(uuid.uuid4())
+        register_task(task_id, 'ai_analysis', f"项目AI分析 #{project_id} {project['project_name']}", _run_analysis_task, project_id, source_endpoint=f'/api/projects/{project_id}/ai-analysis')
+        launch_registered_task(task_id)
+        return api_response(True, {"task_id": task_id, "status": "processing"})
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/dashboard/today-focus', methods=['GET'])
+def get_today_focus_dashboard():
+    """今日待办驾驶舱：聚合提醒、预警、审批与进行中后台任务。"""
+    try:
+        from services.reminder_service import reminder_service
+        from services.warning_service import warning_service
+        from services.auth_service import auth_service
+
+        scope = (request.args.get('scope') or 'global').strip().lower()
+        current_user = None
+        if scope == 'mine':
+            token = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not token:
+                token = request.cookies.get('auth_token')
+            current_user = auth_service.validate_token(token)
+            if not current_user:
+                return api_response(False, message="未登录", code=401)
+
+        digest = reminder_service.get_daily_digest()
+        warning_data = warning_service.get_warning_summary()
+        warnings = warning_data.get('warnings', [])
+
+        if scope == 'mine' and current_user:
+            user_project_ids = auth_service.get_user_projects(current_user['id'])
+            if user_project_ids is None:
+                allowed_project_ids = None
+                allowed_project_names = None
+            else:
+                allowed_project_ids = set(user_project_ids)
+                with DatabasePool.get_connection() as conn:
+                    managed = conn.execute(
+                        DatabasePool.format_sql("SELECT id, project_name FROM projects WHERE project_manager = ?"),
+                        (current_user.get('display_name') or current_user.get('username'),),
+                    ).fetchall()
+                    allowed_project_ids.update(row['id'] for row in managed)
+                    allowed_project_names = {row['project_name'] for row in managed if row.get('project_name')}
+                    if allowed_project_ids:
+                        placeholders = ','.join('?' for _ in allowed_project_ids)
+                        rows = conn.execute(
+                            DatabasePool.format_sql(f"SELECT project_name FROM projects WHERE id IN ({placeholders})"),
+                            list(allowed_project_ids),
+                        ).fetchall()
+                        allowed_project_names.update(row['project_name'] for row in rows if row.get('project_name'))
+
+            if allowed_project_ids is not None:
+                warnings = [w for w in warnings if w.get('project_id') in allowed_project_ids]
+                top_priorities = [
+                    item for item in digest.get('top_priorities', [])
+                    if not item.get('project') or item.get('project') in allowed_project_names
+                ]
+            else:
+                top_priorities = digest.get('top_priorities', [])
+        else:
+            allowed_project_ids = None
+            top_priorities = digest.get('top_priorities', [])
+
+        with DatabasePool.get_connection() as conn:
+            pending_changes = conn.execute(DatabasePool.format_sql('''
+                SELECT c.id, c.change_type, c.change_desc, c.project_id, p.project_name
+                FROM project_changes c
+                JOIN projects p ON c.project_id = p.id
+                WHERE c.status = ?
+                ORDER BY c.created_at DESC
+                LIMIT 5
+            '''), ('待审批',)).fetchall()
+
+            pending_departures = conn.execute(DatabasePool.format_sql('''
+                SELECT d.id, d.departure_type, d.reason, d.project_id, p.project_name
+                FROM project_departures d
+                JOIN projects p ON d.project_id = p.id
+                WHERE d.status = ?
+                ORDER BY d.created_at DESC
+                LIMIT 5
+            '''), ('待审批',)).fetchall()
+
+            pending_expenses = conn.execute(DatabasePool.format_sql('''
+                SELECT e.id, e.expense_type, e.description, e.project_id, p.project_name
+                FROM project_expenses e
+                JOIN projects p ON e.project_id = p.id
+                WHERE e.status = ?
+                ORDER BY e.created_at DESC
+                LIMIT 5
+            '''), ('待报销',)).fetchall()
+
+            if allowed_project_ids is not None:
+                pending_changes = [row for row in pending_changes if row['project_id'] in allowed_project_ids]
+                pending_departures = [row for row in pending_departures if row['project_id'] in allowed_project_ids]
+                pending_expenses = [row for row in pending_expenses if row['project_id'] in allowed_project_ids]
+
+        processing_tasks = fetch_task_records(status='processing', limit=10)
+        if allowed_project_ids is not None:
+            processing_tasks = [row for row in processing_tasks if row.get('project_id') in allowed_project_ids]
+
+        focus_items = []
+        for item in top_priorities[:4]:
+            focus_items.append({
+                'category': 'priority',
+                'severity': item.get('action', 'medium'),
+                'title': item.get('title'),
+                'project': item.get('project'),
+                'desc': item.get('days'),
+                'target_kind': 'project',
+                'project_name': item.get('project'),
+            })
+
+        for item in warnings[:4]:
+            focus_items.append({
+                'category': 'warning',
+                'severity': item.get('severity', 'medium'),
+                'title': item.get('message'),
+                'project': item.get('project_name'),
+                'desc': item.get('type'),
+                'target_kind': 'project',
+                'project_id': item.get('project_id'),
+                'project_name': item.get('project_name'),
+            })
+
+        for item in pending_changes:
+            focus_items.append({
+                'category': 'approval',
+                'severity': 'high',
+                'title': f"[待审批] {item['change_type'] or '变更'}",
+                'project': item['project_name'],
+                'desc': (item['change_desc'] or '')[:60],
+                'target_kind': 'approval',
+                'project_id': item.get('project_id'),
+                'project_name': item.get('project_name'),
+            })
+
+        for item in pending_departures:
+            focus_items.append({
+                'category': 'approval',
+                'severity': 'medium',
+                'title': f"[待审批] {item['departure_type'] or '离场申请'}",
+                'project': item['project_name'],
+                'desc': (item['reason'] or '')[:60],
+                'target_kind': 'approval',
+                'project_id': item.get('project_id'),
+                'project_name': item.get('project_name'),
+            })
+
+        for item in pending_expenses:
+            focus_items.append({
+                'category': 'approval',
+                'severity': 'low',
+                'title': f"[待审批] {item['expense_type'] or '费用报销'}",
+                'project': item['project_name'],
+                'desc': (item['description'] or '')[:60],
+                'target_kind': 'approval',
+                'project_id': item.get('project_id'),
+                'project_name': item.get('project_name'),
+            })
+
+        for item in processing_tasks[:4]:
+            focus_items.append({
+                'category': 'task',
+                'severity': 'low',
+                'title': item.get('title'),
+                'project': item.get('project_id'),
+                'desc': f"后台任务处理中: {item.get('task_type')}",
+                'target_kind': 'task',
+                'task_id': item.get('task_id'),
+                'project_id': item.get('project_id'),
+            })
+
+        severity_order = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3}
+        focus_items.sort(key=lambda x: severity_order.get(x.get('severity'), 9))
+
+        return api_response(True, {
+            'date': digest.get('date'),
+            'scope': scope,
+            'summary': {
+                'active_projects': digest.get('active_projects', 0) if scope == 'global' else len(allowed_project_ids or []),
+                'completed_today': digest.get('completed_today', 0),
+                'overdue_count': len([w for w in warnings if w.get('type') == 'milestone_overdue']),
+                'warning_total': len(warnings),
+                'pending_approvals': len(pending_changes) + len(pending_departures) + len(pending_expenses),
+                'processing_tasks': len(processing_tasks),
+                'health_score': digest.get('health_score', 0),
+            },
+            'focus_items': focus_items[:10],
+        })
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/tasks', methods=['GET'])
+def list_tasks():
+    status = request.args.get('status', '').strip()
+    task_type = request.args.get('task_type', '').strip()
+    project_id = request.args.get('project_id', type=int)
+    limit = request.args.get('limit', 50, type=int)
+    limit = max(1, min(limit or 50, 200))
+
+    db_rows = fetch_task_records(status=status or None, task_type=task_type or None, project_id=project_id, limit=limit)
+    memory_rows = list(task_results.values())
+    rows_by_id = {row['task_id']: dict(row) for row in db_rows if row.get('task_id')}
+    for row in memory_rows:
+        if status and row.get('status') != status:
+            continue
+        if task_type and row.get('task_type') != task_type:
+            continue
+        if project_id and row.get('project_id') != project_id:
+            continue
+        rows_by_id[row['task_id']] = dict(row)
+
+    rows = enrich_task_rows(list(rows_by_id.values()))
+    rows.sort(key=lambda x: (x.get('updated_at') or '', x.get('created_at') or ''), reverse=True)
+
+    items = []
+    for row in rows[:limit]:
+        item = dict(row)
+        result = item.get('result')
+        if isinstance(result, str) and len(result) > 300:
+            item['result_preview'] = result[:300] + '...'
+            item['result'] = None
+        items.append(item)
+
+    summary = {
+        'processing': sum(1 for row in rows if row.get('status') == 'processing'),
+        'completed': sum(1 for row in rows if row.get('status') == 'completed'),
+        'failed': sum(1 for row in rows if row.get('status') == 'failed'),
+        'total': len(rows),
+    }
+    return api_response(True, {'items': items, 'summary': summary})
+
+@app.route('/tasks-center')
+def task_center_page():
+    return render_template('task_center.html')
 
 @app.route('/api/tasks/<task_id>', methods=['GET'])
 def get_task_result(task_id):
-    result = task_results.get(task_id)
+    result = task_results.get(task_id) or fetch_task_record(task_id)
     if result is None:
         return api_response(False, message="任务不存在 (Task not found)", code=404)
-    return api_response(True, result)
+    enriched = enrich_task_rows([result])[0]
+    return api_response(True, enriched)
+
+@app.route('/api/tasks/<task_id>/download', methods=['GET'])
+def download_task_result(task_id):
+    task = task_results.get(task_id) or fetch_task_record(task_id)
+    if task is None:
+        return api_response(False, message="任务不存在 (Task not found)", code=404)
+
+    content = task.get('result') or task.get('error')
+    if not content:
+        return api_response(False, message="任务暂无可下载内容", code=400)
+
+    fmt = (request.args.get('format') or 'txt').strip().lower()
+    if fmt not in ('txt', 'md'):
+        fmt = 'txt'
+
+    title = re.sub(r'[\\\\/:*?"<>|]+', '_', task.get('title') or 'task_result').strip('_') or 'task_result'
+    filename = f"{title}_{task_id[:8]}.{fmt}"
+
+    response = make_response(content)
+    response.headers['Content-Type'] = 'text/markdown; charset=utf-8' if fmt == 'md' else 'text/plain; charset=utf-8'
+    response.headers['Content-Disposition'] = f'attachment; filename=\"{filename}\"; filename*=UTF-8\'\'{filename}'
+    return response
+
+@app.route('/api/tasks/<task_id>/retry', methods=['POST'])
+def retry_task(task_id):
+    task_meta = task_registry.get(task_id)
+    if task_meta is None:
+        return api_response(False, message="任务不存在或不支持重试", code=404)
+    if task_results.get(task_id, {}).get('status') == 'processing':
+        return api_response(False, message="任务仍在处理中，无法重试", code=400)
+
+    new_task_id = str(uuid.uuid4())
+    retry_kwargs = dict(task_meta['kwargs'])
+    retry_kwargs['retried_from_task_id'] = task_id
+    register_task(new_task_id, task_meta['task_type'], task_meta['title'], task_meta['runner'], *task_meta['args'], **retry_kwargs)
+    launch_registered_task(new_task_id)
+    return api_response(True, {"task_id": new_task_id, "status": "processing"})
+
+@app.route('/api/tasks/cleanup-completed', methods=['POST'])
+def cleanup_completed_tasks():
+    project_id = request.args.get('project_id', type=int)
+    try:
+        delete_completed_task_records(project_id=project_id)
+        for task_id, row in list(task_results.items()):
+            if row.get('status') != 'completed':
+                continue
+            if project_id and row.get('project_id') != project_id:
+                continue
+            task_results.pop(task_id, None)
+            task_registry.pop(task_id, None)
+        return api_response(True, {"message": "已完成任务已清理"})
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 
 
@@ -1459,13 +1932,11 @@ def _run_weekly_report_task(task_id, project_id):
     """后台运行周报生成任务"""
     try:
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            
             sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-            project = dict(cursor.execute(sql_pj, (project_id,)).fetchone())
+            project = dict(conn.execute(sql_pj, (project_id,)).fetchone())
             
             sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order')
-            stages = [dict(s) for s in cursor.execute(sql_stage, (project_id,)).fetchall()]
+            stages = [dict(s) for s in conn.execute(sql_stage, (project_id,)).fetchall()]
             
             week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             sql_comp = DatabasePool.format_sql('''
@@ -1473,19 +1944,19 @@ def _run_weekly_report_task(task_id, project_id):
                 FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
                 WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ?
             ''')
-            completed_tasks = cursor.execute(sql_comp, (project_id, True, week_ago)).fetchall()
+            completed_tasks = conn.execute(sql_comp, (project_id, True, week_ago)).fetchall()
             
             sql_new_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?')
-            new_issues = cursor.execute(sql_new_issue, (project_id, week_ago)).fetchall()
+            new_issues = conn.execute(sql_new_issue, (project_id, week_ago)).fetchall()
             
             sql_pen_issue = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != ?")
-            pending_issues = cursor.execute(sql_pen_issue, (project_id, '已解决')).fetchall()
+            pending_issues = conn.execute(sql_pen_issue, (project_id, '已解决')).fetchall()
             
             sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?')
-            interfaces = cursor.execute(sql_iface, (project_id,)).fetchall()
+            interfaces = conn.execute(sql_iface, (project_id,)).fetchall()
             
             sql_log = DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date')
-            work_logs = cursor.execute(sql_log, (project_id, week_ago)).fetchall()
+            work_logs = conn.execute(sql_log, (project_id, week_ago)).fetchall()
         
         system_prompt = """你是一位专业的医疗信息化项目经理，请生成一份正式周报。Markdown格式：
         # 📋 [项目名称] 周报
@@ -1539,10 +2010,10 @@ def _run_weekly_report_task(task_id, project_id):
         data_hash = analytics_service.calculate_project_hash(project_id)
         analytics_service.save_report_cache(project_id, 'weekly_report', report, data_hash)
             
-        task_results[task_id] = {"status": "completed", "result": report}
+        update_task_status(task_id, "completed", result=report)
         
     except Exception as e:
-        task_results[task_id] = {"status": "failed", "error": str(e)}
+        update_task_status(task_id, "failed", error=str(e))
 
 @app.route('/api/projects/<int:project_id>/weekly-report', methods=['POST'])
 def generate_weekly_report(project_id):
@@ -1559,9 +2030,8 @@ def generate_weekly_report(project_id):
         
         # Generate Task ID
         task_id = str(uuid.uuid4())
-        task_results[task_id] = {"status": "processing"}
-        
-        safe_submit(_run_weekly_report_task, task_id, project_id)
+        register_task(task_id, 'weekly_report', f'项目周报生成 #{project_id}', _run_weekly_report_task, project_id, source_endpoint=f'/api/projects/{project_id}/weekly-report')
+        launch_registered_task(task_id)
         
         return api_response(True, {"task_id": task_id, "status": "processing"})
     except Exception as e:
@@ -1574,15 +2044,14 @@ def _run_all_report_task(task_id):
     """后台运行全局周报生成任务"""
     try:
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
             sql_pj = DatabasePool.format_sql("""
-                SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止')
+                SELECT * FROM projects WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
                 ORDER BY priority DESC, progress DESC
             """)
-            projects = cursor.execute(sql_pj).fetchall()
+            projects = conn.execute(sql_pj).fetchall()
         
             if not projects:
-                task_results[task_id] = {"status": "failed", "error": "没有进行中的项目"}
+                update_task_status(task_id, "failed", error="没有进行中的项目")
                 return
     
             week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -1590,22 +2059,22 @@ def _run_all_report_task(task_id):
             for p in projects:
                 pid = p['id']
                 sql_stage = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order')
-                stages = [dict(s) for s in cursor.execute(sql_stage, (pid,)).fetchall()]
+                stages = [dict(s) for s in conn.execute(sql_stage, (pid,)).fetchall()]
                 sql_issue = DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != ?")
-                issues = [dict(i) for i in cursor.execute(sql_issue, (pid, '已解决')).fetchall()]
+                issues = [dict(i) for i in conn.execute(sql_issue, (pid, '已解决')).fetchall()]
                 sql_comp = DatabasePool.format_sql('''
                     SELECT t.task_name, s.stage_name, t.completed_date 
                     FROM tasks t JOIN project_stages s ON t.stage_id = s.id 
                     WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ?
                 ''')
-                completed_tasks = [dict(t) for t in cursor.execute(sql_comp, (pid, True, week_ago)).fetchall()]
+                completed_tasks = [dict(t) for t in conn.execute(sql_comp, (pid, True, week_ago)).fetchall()]
                 sql_new_issue = DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ? AND created_at >= ?')
-                new_issues = [dict(i) for i in cursor.execute(sql_new_issue, (pid, week_ago)).fetchall()]
+                new_issues = [dict(i) for i in conn.execute(sql_new_issue, (pid, week_ago)).fetchall()]
                 sql_iface = DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?')
-                interfaces = [dict(i) for i in cursor.execute(sql_iface, (pid,)).fetchall()]
+                interfaces = [dict(i) for i in conn.execute(sql_iface, (pid,)).fetchall()]
                 interface_completed = len([i for i in interfaces if i['status'] == '已完成'])
                 sql_log = DatabasePool.format_sql('SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = ? AND log_date >= ?')
-                work_hours = cursor.execute(sql_log, (pid, week_ago)).fetchone()['total'] or 0
+                work_hours = conn.execute(sql_log, (pid, week_ago)).fetchone()['total'] or 0
                 
                 # 数据清洗与摘要 (Summarize to save tokens)
                 current_stage = next((s['stage_name'] for s in stages if s.get('status') == '进行中'), "未定")
@@ -1621,7 +2090,6 @@ def _run_all_report_task(task_id):
                     "本周投入工时": work_hours
                 })
         
-        close_db()
         system_prompt = """你是一位资深的高级项目总监，负责监督多个医疗信息化实施项目。请生成一份全局项目群分析周报。
         
         报告必须包含以下结构：
@@ -1661,10 +2129,51 @@ def _run_all_report_task(task_id):
         data_hash = analytics_service.calculate_all_projects_hash()
         analytics_service.save_report_cache(0, 'all_weekly_report', report, data_hash)
             
-        task_results[task_id] = {"status": "completed", "result": report}
+        update_task_status(task_id, "completed", result=report)
     except Exception as e:
-        task_results[task_id] = {"status": "failed", "error": str(e)}
-        close_db(e)
+        update_task_status(task_id, "failed", error=str(e))
+
+def _run_knowledge_extract_task(task_id, issue_id):
+    """后台运行知识提炼任务。"""
+    try:
+        from services.ai_insight_service import ai_insight_service
+        result = ai_insight_service.auto_extract_knowledge(issue_id)
+        if not result.get('success'):
+            raise Exception(result.get('message', '知识提炼失败'))
+        update_task_status(task_id, "completed", result=json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        update_task_status(task_id, "failed", error=str(e))
+
+def _run_report_archive_task(task_id, project_id, report_type, force=False):
+    """后台运行报告归档生成任务。"""
+    try:
+        result = report_scheduler.generate_for_project(project_id, report_type, force)
+        if not result.get('success', True):
+            raise Exception(result.get('message', '报告归档生成失败'))
+        update_task_status(task_id, "completed", result=json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        update_task_status(task_id, "failed", error=str(e))
+
+def _run_global_briefing_task(task_id):
+    """后台运行全局晨会简报生成任务。"""
+    try:
+        from services.standup_service import standup_service
+        result = standup_service.generate_daily_briefing()
+        briefing = result.get('briefing') if isinstance(result, dict) else None
+        if not briefing:
+            raise Exception(result.get('message', '晨会简报生成失败') if isinstance(result, dict) else '晨会简报生成失败')
+        update_task_status(task_id, "completed", result=briefing)
+    except Exception as e:
+        update_task_status(task_id, "failed", error=str(e))
+
+def _run_ai_cruise_task(task_id):
+    """后台运行 AI 巡航体检任务。"""
+    try:
+        from services.cruise_service import cruise_service
+        result = cruise_service.run_daily_cruise()
+        update_task_status(task_id, "completed", result=json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        update_task_status(task_id, "failed", error=str(e))
 
 @app.route('/api/weekly-report/all', methods=['POST'])
 def generate_all_projects_report():
@@ -1678,17 +2187,72 @@ def generate_all_projects_report():
                 'cached_at': cached_data['created_at']
             })
     task_id = str(uuid.uuid4())
-    task_results[task_id] = {"status": "processing"}
-    safe_submit(_run_all_report_task, task_id)
+    register_task(task_id, 'all_weekly_report', '全局周报生成', _run_all_report_task, source_endpoint='/api/weekly-report/all')
+    launch_registered_task(task_id)
     return api_response(True, {"task_id": task_id, "status": "processing"})
+
+@app.route('/api/ai/knowledge/extract/async', methods=['POST'])
+def auto_extract_knowledge_async():
+    """异步触发知识提炼，纳入任务中心。"""
+    data = request.json or {}
+    issue_id = data.get('issue_id')
+    if not issue_id:
+        return api_response(False, message="缺少 issue_id 参数", code=400)
+
+    try:
+        with DatabasePool.get_connection() as conn:
+            issue = conn.execute(
+                DatabasePool.format_sql('SELECT id, description, project_id FROM issues WHERE id = ?'),
+                (issue_id,),
+            ).fetchone()
+            if not issue:
+                return api_response(False, message='问题不存在', code=404)
+
+        task_id = str(uuid.uuid4())
+        summary = str(issue['description'])[:60]
+        register_task(
+            task_id,
+            'knowledge_extract',
+            f"知识提炼 #{issue_id} {summary}",
+            _run_knowledge_extract_task,
+            issue_id,
+            project_id=issue.get('project_id'),
+            payload_summary=summary,
+            source_endpoint='/api/ai/knowledge/extract/async',
+        )
+        launch_registered_task(task_id)
+        return api_response(True, {"task_id": task_id, "status": "processing"})
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/standup/briefing/async', methods=['POST'])
+def generate_daily_briefing_async():
+    """异步生成全局晨会简报，纳入任务中心。"""
+    try:
+        task_id = str(uuid.uuid4())
+        register_task(task_id, 'global_briefing', '全局晨会简报', _run_global_briefing_task, source_endpoint='/api/standup/briefing/async')
+        launch_registered_task(task_id)
+        return api_response(True, {"task_id": task_id, "status": "processing"})
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/ai/cruise/async', methods=['POST'])
+def run_daily_cruise_async():
+    """异步执行 AI 巡航体检，纳入任务中心。"""
+    try:
+        task_id = str(uuid.uuid4())
+        register_task(task_id, 'ai_cruise', 'AI巡航体检', _run_ai_cruise_task, source_endpoint='/api/ai/cruise/async')
+        launch_registered_task(task_id)
+        return api_response(True, {"task_id": task_id, "status": "processing"})
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 # ========== 燃尽图数据 API ==========
 @app.route('/api/projects/<int:project_id>/burndown', methods=['GET'])
 def get_burndown_data(project_id):
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-        project = cursor.execute(sql_pj, (project_id,)).fetchone()
+        project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
             return jsonify({'error': '项目不存在'}), 404
         
@@ -1697,14 +2261,14 @@ def get_burndown_data(project_id):
             SELECT record_date, progress, tasks_total, tasks_completed 
             FROM progress_history WHERE project_id = ? ORDER BY record_date
         ''')
-        history = cursor.execute(sql_history, (project_id,)).fetchall()
+        history = conn.execute(sql_history, (project_id,)).fetchall()
         
         # 获取当前状态
         sql_tasks = DatabasePool.format_sql('''
             SELECT COUNT(*) as total, SUM(CASE WHEN is_completed = ? THEN 1 ELSE 0 END) as completed
             FROM tasks t JOIN project_stages s ON t.stage_id = s.id WHERE s.project_id = ?
         ''')
-        tasks_stats = cursor.execute(sql_tasks, (True, project_id,)).fetchone()
+        tasks_stats = conn.execute(sql_tasks, (True, project_id,)).fetchone()
         total_tasks = tasks_stats['total'] or 0
         completed_tasks = tasks_stats['completed'] or 0
         
@@ -1754,55 +2318,49 @@ def get_burndown_data(project_id):
 @cached(ttl=60)
 def get_dashboard_stats():
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        total_projects = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects")).fetchone()['c']
-        in_progress = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('进行中',)).fetchone()['c']
-        completed = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('已完成',)).fetchone()['c']
+        total_projects = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects")).fetchone()['c']
+        in_progress = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('进行中',)).fetchone()['c']
+        completed = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status = ?"), ('已完成',)).fetchone()['c']
         
-        now_sql = "date('now')"
-        sql_delayed = DatabasePool.format_sql(f"SELECT COUNT(*) as c FROM projects WHERE plan_end_date < {now_sql} AND status NOT IN ('已完成', '已终止', '已验收', '质保期')")
-        delayed = cursor.execute(sql_delayed).fetchone()['c']
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        sql_delayed = DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE plan_end_date < ? AND status NOT IN ('已完成', '已终止', '已验收', '质保期')")
+        delayed = conn.execute(sql_delayed, (today_str,)).fetchone()['c']
         
-        on_departure = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')")).fetchone()['c']
-        total_issues = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ?"), ('已解决',)).fetchone()['c']
-        critical_issues = cursor.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ? AND severity = ?"), ('已解决', '高')).fetchone()['c']
+        on_departure = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM projects WHERE status IN ('暂停', '离场待返')")).fetchone()['c']
+        total_issues = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ?"), ('已解决',)).fetchone()['c']
+        critical_issues = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE status != ? AND severity = ?"), ('已解决', '高')).fetchone()['c']
         
         week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         sql_task_comp = DatabasePool.format_sql("SELECT COUNT(*) as c FROM tasks WHERE is_completed = ? AND completed_date >= ?")
-        tasks_completed_this_week = cursor.execute(sql_task_comp, (True, week_ago,)).fetchone()['c']
+        tasks_completed_this_week = conn.execute(sql_task_comp, (True, week_ago,)).fetchone()['c']
         
         # 统计逾期里程碑总数
-        sql_overdue_m = DatabasePool.format_sql(f'''
+        sql_overdue_m = DatabasePool.format_sql('''
             SELECT COUNT(*) as c FROM milestones 
-            WHERE is_completed = ? AND target_date < {now_sql}
+            WHERE is_completed = ? AND target_date < ?
         ''')
-        overdue_milestones_total = cursor.execute(sql_overdue_m, (False,)).fetchone()['c']
+        overdue_milestones_total = conn.execute(sql_overdue_m, (False, today_str)).fetchone()['c']
 
     
         # 按状态分组统计
-        status_stats = cursor.execute(DatabasePool.format_sql('''
+        status_stats = conn.execute(DatabasePool.format_sql('''
             SELECT status, COUNT(*) as count FROM projects GROUP BY status
         ''')).fetchall()
         
         projects_progress = []
-        sql_proj_prog = DatabasePool.format_sql(f'''
+        sql_proj_prog = DatabasePool.format_sql('''
             SELECT p.id, p.project_name, p.hospital_name, p.progress, p.status, p.plan_end_date,
-            (SELECT COUNT(*) FROM milestones m_ov WHERE m_ov.project_id = p.id AND m_ov.is_completed = ? AND m_ov.target_date < {now_sql}) as overdue_count
-            FROM projects p WHERE p.status NOT IN ('已完成', '已终止') 
+            (SELECT COUNT(*) FROM milestones m_ov WHERE m_ov.project_id = p.id AND m_ov.is_completed = ? AND m_ov.target_date < ?) as overdue_count
+            FROM projects p WHERE p.status NOT IN ('已完成', '已终止', '已验收', '质保期') 
             ORDER BY overdue_count DESC, progress DESC
         ''')
-        rows = cursor.execute(sql_proj_prog, (False,)).fetchall()
+        rows = conn.execute(sql_proj_prog, (False, today_str)).fetchall()
         
-        current_date_str = datetime.now().strftime('%Y-%m-%d')
         for row in rows:
             p_dict = dict(row)
-            # 获取该项目的风险得分
-            risk_score = 0
-            p_dict['risk_score'] = risk_score
-            
             # 判定阶段
             if p_dict['status'] in ['暂停', '离场待返']: p_dict['phase'] = '离场'
-            elif p_dict['plan_end_date'] and str(p_dict['plan_end_date']) < current_date_str: p_dict['phase'] = '延期'
+            elif p_dict['plan_end_date'] and str(p_dict['plan_end_date']) < today_str: p_dict['phase'] = '延期'
             elif p_dict['progress'] < 30: p_dict['phase'] = '启动期'
             elif p_dict['progress'] < 70: p_dict['phase'] = '实施中'
             else: p_dict['phase'] = '收尾期'
@@ -1810,18 +2368,18 @@ def get_dashboard_stats():
             projects_progress.append(p_dict)
 
     
-        sql_notif = DatabasePool.format_sql(f'''
+        sql_notif = DatabasePool.format_sql('''
             SELECT n.*, p.project_name 
             FROM notifications n 
             LEFT JOIN projects p ON n.project_id = p.id
-            WHERE n.is_read = ? AND (n.due_date IS NULL OR n.due_date >= {now_sql})
+            WHERE n.is_read = ? AND (n.due_date IS NULL OR n.due_date >= ?)
             ORDER BY n.due_date ASC LIMIT 10
         ''')
-        upcoming_reminders = cursor.execute(sql_notif, (False,)).fetchall()
+        upcoming_reminders = conn.execute(sql_notif, (False, today_str)).fetchall()
         
         # 本周工时统计
         sql_hours = DatabasePool.format_sql('SELECT SUM(work_hours) as total FROM work_logs WHERE log_date >= ?')
-        week_hours = cursor.execute(sql_hours, (week_ago,)).fetchone()['total'] or 0
+        week_hours = conn.execute(sql_hours, (week_ago,)).fetchone()['total'] or 0
     
     return api_response(True, {
         'stats': {
@@ -1884,7 +2442,6 @@ def get_dashboard_stats():
 @app.route('/api/operation-logs', methods=['GET'])
 def get_operation_logs():
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
         entity_type = request.args.get('entity_type')
         entity_id = request.args.get('entity_id')
         
@@ -1899,7 +2456,7 @@ def get_operation_logs():
             params.append(entity_id)
         
         query_text += ' ORDER BY created_at DESC LIMIT 100'
-        logs = cursor.execute(DatabasePool.format_sql(query_text), params).fetchall()
+        logs = conn.execute(DatabasePool.format_sql(query_text), params).fetchall()
         return jsonify([dict(l) for l in logs])
 
 # ========== 数据导出 API ==========
@@ -1907,36 +2464,34 @@ def get_operation_logs():
 def export_project_data(project_id):
     """导出项目完整数据为JSON"""
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
         sql_p = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
-        project = dict(cursor.execute(sql_p, (project_id,)).fetchone())
+        project = dict(conn.execute(sql_p, (project_id,)).fetchone())
         
         sql_s = DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ?')
-        stages = [dict(s) for s in cursor.execute(sql_s, (project_id,)).fetchall()]
+        stages = [dict(s) for s in conn.execute(sql_s, (project_id,)).fetchall()]
         
         for stage in stages:
             sql_t = DatabasePool.format_sql('SELECT * FROM tasks WHERE stage_id = ?')
-            stage['tasks'] = [dict(t) for t in cursor.execute(sql_t, (stage['id'],)).fetchall()]
+            stage['tasks'] = [dict(t) for t in conn.execute(sql_t, (stage['id'],)).fetchall()]
         
         data = {
             'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'project': project,
             'stages': stages,
-            'interfaces': [dict(i) for i in cursor.execute(DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?'), (project_id,)).fetchall()],
-            'issues': [dict(i) for i in cursor.execute(DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?'), (project_id,)).fetchall()],
-            'milestones': [dict(m) for m in cursor.execute(DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ?'), (project_id,)).fetchall()],
-            'members': [dict(m) for m in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_members WHERE project_id = ?'), (project_id,)).fetchall()],
-            'contacts': [dict(c) for c in cursor.execute(DatabasePool.format_sql('SELECT * FROM customer_contacts WHERE project_id = ?'), (project_id,)).fetchall()],
-             'departures': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ?'), (project_id,)).fetchall()],
-            'work_logs': [dict(w) for w in cursor.execute(DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ?'), (project_id,)).fetchall()],
-            'documents': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_documents WHERE project_id = ?'), (project_id,)).fetchall()],
-            'expenses': [dict(e) for e in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_expenses WHERE project_id = ?'), (project_id,)).fetchall()],
-            'changes': [dict(c) for c in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_changes WHERE project_id = ?'), (project_id,)).fetchall()],
-            'acceptances': [dict(a) for a in cursor.execute(DatabasePool.format_sql('SELECT * FROM project_acceptances WHERE project_id = ?'), (project_id,)).fetchall()],
-            'satisfaction': [dict(s) for s in cursor.execute(DatabasePool.format_sql('SELECT * FROM customer_satisfaction WHERE project_id = ?'), (project_id,)).fetchall()],
-            'follow_ups': [dict(f) for f in cursor.execute(DatabasePool.format_sql('SELECT * FROM follow_up_records WHERE project_id = ?'), (project_id,)).fetchall()],
-            'devices': [dict(d) for d in cursor.execute(DatabasePool.format_sql('SELECT * FROM medical_devices WHERE project_id = ?'), (project_id,)).fetchall()]
+            'interfaces': [dict(i) for i in conn.execute(DatabasePool.format_sql('SELECT * FROM interfaces WHERE project_id = ?'), (project_id,)).fetchall()],
+            'issues': [dict(i) for i in conn.execute(DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?'), (project_id,)).fetchall()],
+            'milestones': [dict(m) for m in conn.execute(DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ?'), (project_id,)).fetchall()],
+            'members': [dict(m) for m in conn.execute(DatabasePool.format_sql('SELECT * FROM project_members WHERE project_id = ?'), (project_id,)).fetchall()],
+            'contacts': [dict(c) for c in conn.execute(DatabasePool.format_sql('SELECT * FROM customer_contacts WHERE project_id = ?'), (project_id,)).fetchall()],
+            'departures': [dict(d) for d in conn.execute(DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ?'), (project_id,)).fetchall()],
+            'work_logs': [dict(w) for w in conn.execute(DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ?'), (project_id,)).fetchall()],
+            'documents': [dict(d) for d in conn.execute(DatabasePool.format_sql('SELECT * FROM project_documents WHERE project_id = ?'), (project_id,)).fetchall()],
+            'expenses': [dict(e) for e in conn.execute(DatabasePool.format_sql('SELECT * FROM project_expenses WHERE project_id = ?'), (project_id,)).fetchall()],
+            'changes': [dict(c) for c in conn.execute(DatabasePool.format_sql('SELECT * FROM project_changes WHERE project_id = ?'), (project_id,)).fetchall()],
+            'acceptances': [dict(a) for a in conn.execute(DatabasePool.format_sql('SELECT * FROM project_acceptances WHERE project_id = ?'), (project_id,)).fetchall()],
+            'satisfaction': [dict(s) for s in conn.execute(DatabasePool.format_sql('SELECT * FROM customer_satisfaction WHERE project_id = ?'), (project_id,)).fetchall()],
+            'follow_ups': [dict(f) for f in conn.execute(DatabasePool.format_sql('SELECT * FROM follow_up_records WHERE project_id = ?'), (project_id,)).fetchall()],
+            'devices': [dict(d) for d in conn.execute(DatabasePool.format_sql('SELECT * FROM medical_devices WHERE project_id = ?'), (project_id,)).fetchall()]
         }
         
     return jsonify(data)
@@ -1949,21 +2504,385 @@ def export_project_data(project_id):
 def get_pending_approvals():
     """获取所有待审批项"""
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
-        # 待审批变更
         sql_changes = DatabasePool.format_sql('''
             SELECT c.*, p.project_name, p.hospital_name 
             FROM project_changes c
             JOIN projects p ON c.project_id = p.id
             WHERE c.status = ?
         ''')
-        changes = cursor.execute(sql_changes, ('待审批',)).fetchall()
+        changes = conn.execute(sql_changes, ('待审批',)).fetchall()
+
+        sql_departures = DatabasePool.format_sql('''
+            SELECT d.*, p.project_name, p.hospital_name
+            FROM project_departures d
+            JOIN projects p ON d.project_id = p.id
+            WHERE d.status = ?
+        ''')
+        departures = conn.execute(sql_departures, ('待审批',)).fetchall()
+
+        sql_expenses = DatabasePool.format_sql('''
+            SELECT e.*, p.project_name, p.hospital_name
+            FROM project_expenses e
+            JOIN projects p ON e.project_id = p.id
+            WHERE e.status = ?
+        ''')
+        expenses = conn.execute(sql_expenses, ('待报销',)).fetchall()
         
         return jsonify({
             'changes': [dict(c) for c in changes],
-            'departures': [] # 预留
+            'departures': [dict(d) for d in departures],
+            'expenses': [dict(e) for e in expenses]
         })
+
+@app.route('/api/approvals/tracking', methods=['GET'])
+def get_approval_tracking():
+    """获取审批追踪列表，统一展示离场 / 变更 / 费用审批。"""
+    limit = request.args.get('limit', 50, type=int)
+    limit = max(1, min(limit or 50, 200))
+
+    with DatabasePool.get_connection() as conn:
+        rows = []
+
+        change_rows = conn.execute(DatabasePool.format_sql('''
+            SELECT
+                'change' as biz_type,
+                c.id as biz_id,
+                c.project_id,
+                p.project_name,
+                p.hospital_name,
+                c.change_title as title,
+                c.change_type as sub_type,
+                c.status,
+                c.requested_by as applicant,
+                c.approval_sp_no,
+                c.approved_date as approved_at,
+                c.created_at
+            FROM project_changes c
+            JOIN projects p ON c.project_id = p.id
+            WHERE c.approval_sp_no IS NOT NULL AND c.approval_sp_no != ''
+            ORDER BY c.created_at DESC
+        ''')).fetchall()
+        rows.extend(dict(r) for r in change_rows)
+
+        expense_rows = conn.execute(DatabasePool.format_sql('''
+            SELECT
+                'expense' as biz_type,
+                e.id as biz_id,
+                e.project_id,
+                p.project_name,
+                p.hospital_name,
+                e.description as title,
+                e.expense_type as sub_type,
+                e.status,
+                e.applicant,
+                e.approval_sp_no,
+                e.approved_at,
+                e.created_at
+            FROM project_expenses e
+            JOIN projects p ON e.project_id = p.id
+            WHERE e.approval_sp_no IS NOT NULL AND e.approval_sp_no != ''
+            ORDER BY e.created_at DESC
+        ''')).fetchall()
+        rows.extend(dict(r) for r in expense_rows)
+
+        departure_rows = conn.execute(DatabasePool.format_sql('''
+            SELECT
+                'departure' as biz_type,
+                d.id as biz_id,
+                d.project_id,
+                p.project_name,
+                p.hospital_name,
+                d.reason as title,
+                d.departure_type as sub_type,
+                d.status,
+                d.handover_person as applicant,
+                d.approval_sp_no,
+                d.approved_at,
+                d.created_at
+            FROM project_departures d
+            JOIN projects p ON d.project_id = p.id
+            WHERE d.approval_sp_no IS NOT NULL AND d.approval_sp_no != ''
+            ORDER BY d.created_at DESC
+        ''')).fetchall()
+        rows.extend(dict(r) for r in departure_rows)
+
+    rows.sort(key=lambda x: str(x.get('created_at') or ''), reverse=True)
+    return api_response(True, rows[:limit])
+
+@app.route('/api/resources/overview', methods=['GET'])
+def get_resource_overview():
+    """资源排班总览：成员、城市、项目占用、待办任务、负载评分。"""
+    try:
+        data = project_service.get_geo_stats()
+        raw_members = data.get('members', [])
+
+        member_map = {}
+        for member in raw_members:
+            name = member.get('name') or '未知成员'
+            entry = member_map.setdefault(name, {
+                'name': name,
+                'role': member.get('role'),
+                'lng': member.get('lng'),
+                'lat': member.get('lat'),
+                'current_city': member.get('current_city'),
+                'project_name': member.get('project_name'),
+                'project_count': member.get('project_count', 0),
+                'task_count': member.get('task_count', 0),
+                'load_score': member.get('load_score', 0),
+                'project_names': set(),
+            })
+            if member.get('project_name'):
+                entry['project_names'].add(member['project_name'])
+                if not entry.get('project_name'):
+                    entry['project_name'] = member['project_name']
+            entry['project_count'] = max(entry.get('project_count', 0), member.get('project_count', 0) or 0)
+            entry['task_count'] = max(entry.get('task_count', 0), member.get('task_count', 0) or 0)
+            entry['load_score'] = max(entry.get('load_score', 0), member.get('load_score', 0) or 0)
+            if not entry.get('current_city') and member.get('current_city'):
+                entry['current_city'] = member.get('current_city')
+            if not entry.get('role') and member.get('role'):
+                entry['role'] = member.get('role')
+
+        members = []
+        for entry in member_map.values():
+            projects = sorted(entry.pop('project_names'))
+            entry['project_name'] = entry.get('project_name') or (projects[0] if projects else '')
+            entry['project_names'] = projects
+            entry['project_summary'] = ' / '.join(projects[:3]) + (' 等' if len(projects) > 3 else '')
+            members.append(entry)
+
+        city_summary = {}
+        for member in members:
+            city = member.get('current_city') or '未定位'
+            city_summary.setdefault(city, {
+                'city': city,
+                'member_count': 0,
+                'onsite_count': 0,
+                'total_tasks': 0,
+                'avg_load_score': 0,
+            })
+            city_summary[city]['member_count'] += 1
+            if member.get('role') and member.get('project_name'):
+                pass
+            if member.get('load_score') is not None:
+                city_summary[city]['avg_load_score'] += member.get('load_score', 0)
+            if member.get('task_count'):
+                city_summary[city]['total_tasks'] += member.get('task_count', 0)
+
+        with DatabasePool.get_connection() as conn:
+            onsite_rows = conn.execute(DatabasePool.format_sql('''
+                SELECT current_city, COUNT(*) as c
+                FROM project_members
+                WHERE status = '在岗' AND is_onsite = ?
+                GROUP BY current_city
+            '''), (True,)).fetchall()
+            onsite_map = {row['current_city'] or '未定位': row['c'] for row in onsite_rows}
+
+        for city, item in city_summary.items():
+            item['onsite_count'] = onsite_map.get(city, 0)
+            item['avg_load_score'] = round(item['avg_load_score'] / max(item['member_count'], 1), 1)
+
+        cities = sorted(city_summary.values(), key=lambda x: (-x['member_count'], x['city']))
+        members.sort(key=lambda x: (-x.get('load_score', 0), x.get('name', '')))
+
+        high_load = [m for m in members if (m.get('load_score') or 0) >= 70][:5]
+        low_load = [m for m in members if (m.get('load_score') or 0) < 40][:5]
+        suggestions = []
+        for busy in high_load:
+            candidate = next((m for m in low_load if m.get('name') != busy.get('name')), None)
+            if not candidate:
+                continue
+            suggestions.append({
+                'from_member': busy.get('name'),
+                'from_city': busy.get('current_city'),
+                'from_project': busy.get('project_name'),
+                'to_member': candidate.get('name'),
+                'to_city': candidate.get('current_city'),
+                'to_project': candidate.get('project_name'),
+                'reason': f"{busy.get('name')} 当前负载 {busy.get('load_score', 0)}，可考虑让 {candidate.get('name')} 分担非核心任务。",
+            })
+
+        return api_response(True, {
+            'summary': {
+                'total_members': len(members),
+                'onsite_members': sum(item['onsite_count'] for item in cities),
+                'busy_members': sum(1 for m in members if (m.get('load_score') or 0) >= 70),
+                'available_members': sum(1 for m in members if (m.get('load_score') or 0) < 40),
+                'covered_cities': len(cities),
+            },
+            'cities': cities,
+            'members': members,
+            'suggestions': suggestions,
+        })
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/resources/member-detail', methods=['GET'])
+def get_resource_member_detail():
+    """资源成员详情：关联项目与未完成任务。"""
+    name = (request.args.get('name') or '').strip()
+    if not name:
+        return api_response(False, message='缺少成员姓名', code=400)
+
+    try:
+        with DatabasePool.get_connection() as conn:
+            projects = conn.execute(DatabasePool.format_sql('''
+                SELECT DISTINCT p.id, p.project_name, p.hospital_name, p.status, pm.role, pm.current_city, pm.is_onsite
+                FROM project_members pm
+                JOIN projects p ON pm.project_id = p.id
+                WHERE pm.name = ? AND pm.status = '在岗'
+                ORDER BY p.updated_at DESC
+            '''), (name,)).fetchall()
+
+            tasks = conn.execute(DatabasePool.format_sql('''
+                SELECT t.id, t.task_name, s.stage_name, p.id as project_id, p.project_name
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                JOIN projects p ON s.project_id = p.id
+                WHERE s.responsible_person = ? AND t.is_completed = ?
+                ORDER BY p.project_name, s.stage_order
+            '''), (name, False)).fetchall()
+
+            logs = conn.execute(DatabasePool.format_sql('''
+                SELECT project_id, log_date, work_content, issues_encountered, tomorrow_plan
+                FROM work_logs
+                WHERE member_name = ?
+                ORDER BY log_date DESC
+                LIMIT 8
+            '''), (name,)).fetchall()
+
+        return api_response(True, {
+            'name': name,
+            'projects': [dict(row) for row in projects],
+            'tasks': [dict(row) for row in tasks],
+            'logs': [dict(row) for row in logs],
+        })
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/financial/overview', methods=['GET'])
+def get_financial_overview():
+    """经营看板：合同、回款、报销、人力成本、毛利。"""
+    try:
+        with DatabasePool.get_connection() as conn:
+            summary = conn.execute(DatabasePool.format_sql('''
+                SELECT
+                    COALESCE(SUM(contract_amount), 0) as contract_total,
+                    COUNT(*) as project_count
+                FROM projects
+            ''')).fetchone()
+
+            revenue = conn.execute(DatabasePool.format_sql('''
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM project_revenue
+            ''')).fetchone()['total'] or 0
+
+            expenses = conn.execute(DatabasePool.format_sql('''
+                SELECT COALESCE(SUM(amount), 0) as total
+                FROM project_expenses
+                WHERE status = '已报销'
+            ''')).fetchone()['total'] or 0
+
+            labor = conn.execute(DatabasePool.format_sql('''
+                SELECT COALESCE(SUM(wl.work_hours / 8.0 * pm.daily_rate), 0) as total
+                FROM work_logs wl
+                JOIN project_members pm ON wl.member_id = pm.id
+            ''')).fetchone()['total'] or 0
+
+            project_rows = conn.execute(DatabasePool.format_sql('''
+                SELECT
+                    p.id,
+                    p.project_name,
+                    p.hospital_name,
+                    p.contract_amount,
+                    COALESCE((SELECT SUM(r.amount) FROM project_revenue r WHERE r.project_id = p.id), 0) as collected_amount,
+                    COALESCE((SELECT SUM(e.amount) FROM project_expenses e WHERE e.project_id = p.id AND e.status = '已报销'), 0) as reimbursed_amount,
+                    COALESCE((
+                        SELECT SUM(wl.work_hours / 8.0 * pm.daily_rate)
+                        FROM work_logs wl
+                        JOIN project_members pm ON wl.member_id = pm.id
+                        WHERE wl.project_id = p.id
+                    ), 0) as labor_cost
+                FROM projects p
+                ORDER BY collected_amount DESC, contract_amount DESC
+            ''')).fetchall()
+
+            revenue_rows = conn.execute(DatabasePool.format_sql('''
+                SELECT SUBSTR(CAST(revenue_date AS TEXT), 1, 7) as month, COALESCE(SUM(amount), 0) as total
+                FROM project_revenue
+                WHERE revenue_date IS NOT NULL
+                GROUP BY SUBSTR(CAST(revenue_date AS TEXT), 1, 7)
+                ORDER BY month DESC
+                LIMIT 12
+            ''')).fetchall()
+
+            expense_rows = conn.execute(DatabasePool.format_sql('''
+                SELECT SUBSTR(CAST(expense_date AS TEXT), 1, 7) as month, COALESCE(SUM(amount), 0) as total
+                FROM project_expenses
+                WHERE expense_date IS NOT NULL AND status = '已报销'
+                GROUP BY SUBSTR(CAST(expense_date AS TEXT), 1, 7)
+                ORDER BY month DESC
+                LIMIT 12
+            ''')).fetchall()
+
+            labor_rows = conn.execute(DatabasePool.format_sql('''
+                SELECT SUBSTR(CAST(wl.log_date AS TEXT), 1, 7) as month,
+                       COALESCE(SUM(wl.work_hours / 8.0 * pm.daily_rate), 0) as total
+                FROM work_logs wl
+                JOIN project_members pm ON wl.member_id = pm.id
+                WHERE wl.log_date IS NOT NULL
+                GROUP BY SUBSTR(CAST(wl.log_date AS TEXT), 1, 7)
+                ORDER BY month DESC
+                LIMIT 12
+            ''')).fetchall()
+
+        projects = []
+        loss_projects = 0
+        for row in project_rows:
+            item = dict(row)
+            gross_profit = (item.get('collected_amount') or 0) - (item.get('reimbursed_amount') or 0) - (item.get('labor_cost') or 0)
+            item['gross_profit'] = round(gross_profit, 2)
+            item['margin'] = round((gross_profit / item['collected_amount'] * 100), 2) if item.get('collected_amount') else 0
+            if gross_profit < 0:
+                loss_projects += 1
+            projects.append(item)
+
+        revenue_map = {row['month']: float(row['total'] or 0) for row in revenue_rows if row.get('month')}
+        expense_map = {row['month']: float(row['total'] or 0) for row in expense_rows if row.get('month')}
+        labor_map = {row['month']: float(row['total'] or 0) for row in labor_rows if row.get('month')}
+        months = sorted(set(revenue_map) | set(expense_map) | set(labor_map))
+        months = months[-6:]
+        monthly_trend = []
+        for month in months:
+            collected = revenue_map.get(month, 0)
+            reimbursed = expense_map.get(month, 0)
+            labor_cost = labor_map.get(month, 0)
+            monthly_trend.append({
+                'month': month,
+                'collected': round(collected, 2),
+                'reimbursed': round(reimbursed, 2),
+                'labor_cost': round(labor_cost, 2),
+                'gross_profit': round(collected - reimbursed - labor_cost, 2),
+            })
+
+        gross_profit_total = revenue - expenses - labor
+        return api_response(True, {
+            'summary': {
+                'project_count': summary['project_count'] or 0,
+                'contract_total': round(summary['contract_total'] or 0, 2),
+                'collected_total': round(revenue, 2),
+                'uncollected_total': round((summary['contract_total'] or 0) - revenue, 2),
+                'reimbursed_total': round(expenses, 2),
+                'labor_total': round(labor, 2),
+                'gross_profit_total': round(gross_profit_total, 2),
+                'gross_margin': round((gross_profit_total / revenue * 100), 2) if revenue else 0,
+                'loss_projects': loss_projects,
+            },
+            'projects': projects,
+            'monthly_trend': monthly_trend,
+        })
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 # ========== 知识库 (KB) API ==========
 @app.route('/api/kb', methods=['GET'])
@@ -1971,7 +2890,6 @@ def get_kb_list():
     category = request.args.get('category')
     search = request.args.get('search')
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
         query_text = 'SELECT * FROM knowledge_base WHERE 1=1'
         params = []
         if category:
@@ -1981,14 +2899,13 @@ def get_kb_list():
             query_text += ' AND (title LIKE ? OR content LIKE ? OR tags LIKE ?)'
             params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
         query_text += ' ORDER BY created_at DESC'
-        items = cursor.execute(DatabasePool.format_sql(query_text), params).fetchall()
+        items = conn.execute(DatabasePool.format_sql(query_text), params).fetchall()
         return jsonify([dict(i) for i in items])
 
 @app.route('/api/kb/<int:kid>', methods=['GET'])
 def get_kb_item(kid):
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        item = cursor.execute(DatabasePool.format_sql('SELECT * FROM knowledge_base WHERE id = ?'), (kid,)).fetchone()
+        item = conn.execute(DatabasePool.format_sql('SELECT * FROM knowledge_base WHERE id = ?'), (kid,)).fetchone()
         if item:
             return jsonify(dict(item))
         return jsonify({'error': 'Item not found'}), 404
@@ -1997,14 +2914,12 @@ def get_kb_item(kid):
 def add_kb_item():
     try:
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            
             # 支持 multipart/form-data 或 JSON
             if request.content_type and 'multipart/form-data' in request.content_type:
                 data = request.form.to_dict()
                 file = request.files.get('attachment')
             else:
-                data = request.json
+                data = request.json or {}
                 file = None
     
             attachment_path = None
@@ -2018,7 +2933,7 @@ def add_kb_item():
                     traceback.print_exc()
                     return jsonify({'success': False, 'message': f'上传失败: {str(e)}'}), 500
     
-            cursor.execute(DatabasePool.format_sql('''
+            conn.execute(DatabasePool.format_sql('''
                 INSERT INTO knowledge_base (category, title, content, tags, assoc_stage, project_id, author, attachment_path, external_link)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             '''), (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
@@ -2035,19 +2950,17 @@ def add_kb_item():
 def update_kb_item(kid):
     try:
         with DatabasePool.get_connection() as conn:
-            cursor = conn.cursor()
-            
             # 支持 multipart/form-data 或 JSON
             if request.content_type and 'multipart/form-data' in request.content_type:
                 data = request.form.to_dict()
                 file = request.files.get('attachment')
             else:
-                data = request.json
+                data = request.json or {}
                 file = None
                 
             # 获取旧数据
             sql_old = DatabasePool.format_sql('SELECT attachment_path FROM knowledge_base WHERE id = ?')
-            old_item = cursor.execute(sql_old, (kid,)).fetchone()
+            old_item = conn.execute(sql_old, (kid,)).fetchone()
             attachment_path = old_item['attachment_path'] if old_item else None
     
             if file and file.filename != '':
@@ -2075,8 +2988,23 @@ def update_kb_item(kid):
                 attachment_path=?, external_link=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
             ''')
-            cursor.execute(sql_update, (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
-                  data.get('assoc_stage'), attachment_path, data.get('external_link'), kid))
+            existing = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM knowledge_base WHERE id = ?'),
+                (kid,)
+            ).fetchone()
+            if not existing:
+                return jsonify({'success': False, 'message': '知识库条目不存在'}), 404
+            existing = dict(existing)
+            conn.execute(sql_update, (
+                data.get('category', existing.get('category')),
+                data.get('title', existing.get('title')),
+                data.get('content', existing.get('content')),
+                data.get('tags', existing.get('tags')),
+                data.get('assoc_stage', existing.get('assoc_stage')),
+                attachment_path,
+                data.get('external_link', existing.get('external_link')),
+                kid
+            ))
             conn.commit()
             return jsonify({'success': True})
     except Exception as e:
@@ -2086,9 +3014,11 @@ def update_kb_item(kid):
 
 @app.route('/api/kb/<int:kid>/download', methods=['GET'])
 def download_kb_attachment(kid):
-    conn = get_db()
-    item = conn.execute('SELECT title, attachment_path FROM knowledge_base WHERE id = ?', (kid,)).fetchone()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        item = conn.execute(
+            DatabasePool.format_sql('SELECT title, attachment_path FROM knowledge_base WHERE id = ?'),
+            (kid,),
+        ).fetchone()
     
     if item and item['attachment_path']:
         try:
@@ -2126,64 +3056,72 @@ def download_kb_attachment(kid):
 
 @app.route('/api/kb/<int:kid>', methods=['DELETE'])
 def delete_kb_item(kid):
-    conn = get_db()
-    # 先获取附件路径
-    item = conn.execute('SELECT attachment_path FROM knowledge_base WHERE id = ?', (kid,)).fetchone()
-    if item and item['attachment_path']:
-        # 尝试删除网盘文件
-        if not os.path.exists(item['attachment_path']): # 简单判断非本地文件
-             storage_service.delete_file(item['attachment_path'])
-             
-    conn.execute('DELETE FROM knowledge_base WHERE id = ?', (kid,))
-    conn.commit()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        item = conn.execute(
+            DatabasePool.format_sql('SELECT attachment_path FROM knowledge_base WHERE id = ?'),
+            (kid,),
+        ).fetchone()
+        if item and item['attachment_path']:
+            if not os.path.exists(item['attachment_path']):
+                storage_service.delete_file(item['attachment_path'])
+        conn.execute(DatabasePool.format_sql('DELETE FROM knowledge_base WHERE id = ?'), (kid,))
+        conn.commit()
     return jsonify({'success': True})
 
 # ========== 硬件资产管理 API ==========
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
     status = request.args.get('status')
-    conn = get_db()
-    query = 'SELECT a.*, p.project_name FROM hardware_assets a LEFT JOIN projects p ON a.current_project_id = p.id'
-    if status:
-        query += ' WHERE a.status = ?'
-        items = conn.execute(query, (status,)).fetchall()
-    else:
-        items = conn.execute(query).fetchall()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        query = 'SELECT a.*, p.project_name FROM hardware_assets a LEFT JOIN projects p ON a.current_project_id = p.id'
+        if status:
+            query += ' WHERE a.status = ?'
+            items = conn.execute(DatabasePool.format_sql(query), (status,)).fetchall()
+        else:
+            items = conn.execute(DatabasePool.format_sql(query)).fetchall()
     return jsonify([dict(i) for i in items])
 
 @app.route('/api/assets', methods=['POST'])
 def add_asset():
-    data = request.json
-    conn = get_db()
-    conn.execute('''
-        INSERT INTO hardware_assets (asset_name, sn, model, status, current_project_id, location, operator)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (data['asset_name'], data.get('sn'), data.get('model'), data.get('status', '在库'),
-          data.get('current_project_id'), data.get('location'), data.get('operator')))
-    conn.commit()
-    close_db()
+    data = request.json or {}
+    with DatabasePool.get_connection() as conn:
+        conn.execute(DatabasePool.format_sql('''
+            INSERT INTO hardware_assets (asset_name, sn, model, status, current_project_id, location, operator)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        '''), (data['asset_name'], data.get('sn'), data.get('model'), data.get('status', '在库'),
+              data.get('current_project_id'), data.get('location'), data.get('operator')))
+        conn.commit()
     return jsonify({'success': True})
 
 @app.route('/api/assets/<int:aid>/status', methods=['PUT'])
 def update_asset_status(aid):
-    data = request.json
-    conn = get_db()
-    conn.execute('''
-        UPDATE hardware_assets SET status=?, current_project_id=?, location=?, operator=?, updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-    ''', (data['status'], data.get('current_project_id'), data.get('location'), data.get('operator'), aid))
-    conn.commit()
-    close_db()
+    data = request.json or {}
+    with DatabasePool.get_connection() as conn:
+        existing = conn.execute(
+            DatabasePool.format_sql('SELECT * FROM hardware_assets WHERE id = ?'),
+            (aid,)
+        ).fetchone()
+        if not existing:
+            return jsonify({'success': False, 'message': '资产不存在'}), 404
+        existing = dict(existing)
+        conn.execute(DatabasePool.format_sql('''
+            UPDATE hardware_assets SET status=?, current_project_id=?, location=?, operator=?, updated_at=CURRENT_TIMESTAMP
+            WHERE id=?
+        '''), (
+            data.get('status', existing.get('status')),
+            data.get('current_project_id', existing.get('current_project_id')),
+            data.get('location', existing.get('location')),
+            data.get('operator', existing.get('operator')),
+            aid
+        ))
+        conn.commit()
     return jsonify({'success': True})
 
 @app.route('/api/assets/<int:aid>', methods=['DELETE'])
 def delete_asset(aid):
-    conn = get_db()
-    conn.execute('DELETE FROM hardware_assets WHERE id = ?', (aid,))
-    conn.commit()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        conn.execute(DatabasePool.format_sql('DELETE FROM hardware_assets WHERE id = ?'), (aid,))
+        conn.commit()
     return jsonify({'success': True})
 
 # ========== Workload Analytics - Handled by analytics_bp
@@ -2197,30 +3135,27 @@ def ai_risk_analysis():
     """
     项目风险预警分析
     """
-    data = request.json
+    data = request.json or {}
     project_id = data.get('project_id')
     if not project_id:
         return jsonify({'error': '项目ID不能为空'}), 400
 
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 1. 采集项目深度数据
-    # 基本信息
-    row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
-    if not row:
-        return jsonify({'error': '项目不存在'}), 404
-        
-    project = dict(row)
-    
-    # 最近 5 条日志
-    cursor.execute("SELECT work_content, issues_encountered FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5", (project_id,))
-    logs = [f"内容: {r[0]}, 问题: {r[1]}" for r in cursor.fetchall()]
-    
-    # 未解决的问题
-    # schema correction: issues table has description, severity, status (no title, priority)
-    cursor.execute("SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'", (project_id,))
-    issues = [f"[{r[1]}] {r[0]} ({r[2]})" for r in cursor.fetchall()]
+    with DatabasePool.get_connection() as conn:
+        row = conn.execute(DatabasePool.format_sql("SELECT * FROM projects WHERE id = ?"), (project_id,)).fetchone()
+        if not row:
+            return jsonify({'error': '项目不存在'}), 404
+            
+        project = dict(row)
+        logs_raw = conn.execute(
+            DatabasePool.format_sql("SELECT work_content, issues_encountered FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5"),
+            (project_id,),
+        ).fetchall()
+        logs = [f"内容: {r['work_content']}, 问题: {r['issues_encountered']}" for r in logs_raw]
+        issues_raw = conn.execute(
+            DatabasePool.format_sql("SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"),
+            (project_id,),
+        ).fetchall()
+        issues = [f"[{r['severity']}] {r['description']} ({r['status']})" for r in issues_raw]
 
     # 2. 构建 Prompt
     prompt = f"""
@@ -2266,42 +3201,38 @@ def ai_ask_kb():
     """
     知识库 AI 问答 (RAG)
     """
-    data = request.json
+    data = request.json or {}
     question = data.get('question', '')
     if not question:
         return jsonify({'error': '问题不能为空'}), 400
 
     try:
-        conn = get_db()
-        cursor = conn.cursor()
-        
-        try:
-            # 第一阶段：关键词粗筛
-            cursor.execute("""
-                SELECT id, title, content, category, tags 
-                FROM knowledge_base 
-                WHERE title LIKE ? OR content LIKE ? OR tags LIKE ? 
-                LIMIT 100
-            """, (f'%{question}%', f'%{question}%', f'%{question}%'))
-            
-            candidates = cursor.fetchall()
-            columns_basic = [column[0] for column in cursor.description]
-            
-            if len(candidates) < 5:
-                # 兜底：如果关键词没中，加载一部分最新数据
-                cursor.execute("SELECT id, title, content, category, tags, embedding FROM knowledge_base ORDER BY id DESC LIMIT 200")
-                columns = [column[0] for column in cursor.description]
-                kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
-            else:
-                # 第二阶段：根据候选集拉取 embedding
-                ids = [dict(zip(columns_basic, r))['id'] for r in candidates]
-                placeholders = ','.join('?' * len(ids))
-                cursor.execute(f"SELECT id, title, content, category, tags, embedding FROM knowledge_base WHERE id IN ({placeholders})", ids)
-                columns = [column[0] for column in cursor.description]
-                kb_items = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        except sqlite3.OperationalError:
-            # 表不存在时的降级处理
-            kb_items = []
+        with DatabasePool.get_connection() as conn:
+            try:
+                candidates = conn.execute(DatabasePool.format_sql("""
+                    SELECT id, title, content, category, tags 
+                    FROM knowledge_base 
+                    WHERE title LIKE ? OR content LIKE ? OR tags LIKE ? 
+                    LIMIT 100
+                """), (f'%{question}%', f'%{question}%', f'%{question}%')).fetchall()
+                
+                if len(candidates) < 5:
+                    kb_items = [
+                        dict(row) for row in conn.execute(
+                            DatabasePool.format_sql("SELECT id, title, content, category, tags, embedding FROM knowledge_base ORDER BY id DESC LIMIT 200")
+                        ).fetchall()
+                    ]
+                else:
+                    ids = [dict(r)['id'] for r in candidates]
+                    placeholders = ','.join('?' * len(ids))
+                    kb_items = [
+                        dict(row) for row in conn.execute(
+                            DatabasePool.format_sql(f"SELECT id, title, content, category, tags, embedding FROM knowledge_base WHERE id IN ({placeholders})"),
+                            ids,
+                        ).fetchall()
+                    ]
+            except DB_OPERATIONAL_ERRORS:
+                kb_items = []
         
         # 2. 检索相关上下文
         from rag_service import rag_service
@@ -2338,17 +3269,22 @@ def ai_ask_kb():
 @app.route('/api/ai/summarize-weekly', methods=['POST'])
 def ai_summarize_weekly():
     try:
-        data = request.json
+        data = request.json or {}
         project_id = data.get('project_id')
-        conn = get_db()
-        project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-        
-        if not project:
-            return jsonify({'summary': 'Project not found'}), 404
+        with DatabasePool.get_connection() as conn:
+            project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
+            
+            if not project:
+                return jsonify({'summary': 'Project not found'}), 404
 
-        # 获取此项目的近期动态 (日志、问题、里程碑)
-        logs = conn.execute('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 10', (project_id,)).fetchall()
-        issues = conn.execute("SELECT * FROM issues WHERE project_id = ? AND status != '已解决' LIMIT 10", (project_id,)).fetchall()
+            logs = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 10'),
+                (project_id,),
+            ).fetchall()
+            issues = conn.execute(
+                DatabasePool.format_sql("SELECT * FROM issues WHERE project_id = ? AND status != '已解决' LIMIT 10"),
+                (project_id,),
+            ).fetchall()
         
         context = f"""
         【项目信息】
@@ -2378,31 +3314,27 @@ def ai_summarize_weekly():
     except Exception as e:
         print(f"Weekly Report Error: {e}")
         return jsonify({'summary': f"生成周报失败: {str(e)}"}), 500
-    finally:
-        close_db()
 
 @app.route('/api/projects/<int:project_id>/share/toggle', methods=['POST'])
 def toggle_project_share(project_id):
     """
     启用/禁用项目分享
     """
-    data = request.json
+    data = request.json or {}
     enabled = 1 if data.get('enabled') else 0
     
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    if enabled:
-        # 如果启用，确保有 token
-        import uuid
-        share_token = str(uuid.uuid4()).replace('-', '')[:16]
-        cursor.execute("UPDATE projects SET share_enabled = 1, share_token = ? WHERE id = ?", (share_token, project_id))
-    else:
-        cursor.execute("UPDATE projects SET share_enabled = 0 WHERE id = ?", (project_id,))
-        share_token = None
-        
-    conn.commit()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        if enabled:
+            import uuid
+            share_token = str(uuid.uuid4()).replace('-', '')[:16]
+            conn.execute(
+                DatabasePool.format_sql("UPDATE projects SET share_enabled = 1, share_token = ? WHERE id = ?"),
+                (share_token, project_id),
+            )
+        else:
+            conn.execute(DatabasePool.format_sql("UPDATE projects SET share_enabled = 0 WHERE id = ?"), (project_id,))
+            share_token = None
+        conn.commit()
     return jsonify({'success': True, 'share_token': share_token})
 
 @app.route('/share/<string:token>')
@@ -2410,54 +3342,51 @@ def public_share_page(token):
     """
     公共预览页面 (无需登录)
     """
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    # 1. 查找开启了分享的对应项目
-    cursor.execute("SELECT * FROM projects WHERE share_token = ? AND share_enabled = 1", (token,))
-    row = cursor.fetchone()
-    if not row:
-        return "该分享链接不存在或已过期", 404
+    with DatabasePool.get_connection() as conn:
+        row = conn.execute(
+            DatabasePool.format_sql("SELECT * FROM projects WHERE share_token = ? AND share_enabled = 1"),
+            (token,),
+        ).fetchone()
+        if not row:
+            return "该分享链接不存在或已过期", 404
         
-    columns = [column[0] for column in cursor.description]
-    project = dict(zip(columns, row))
-    project_id = project['id']
-    
-    # 2. 加载里程碑
-    cursor.execute("SELECT * FROM milestones WHERE project_id = ? ORDER BY target_date ASC", (project_id,))
-    project['milestones'] = [dict(zip([c[0] for c in cursor.description], r)) for r in cursor.fetchall()]
-    
-    # 3. 加载进度阶段（动态计算进度，与主系统一致）
-    cursor.execute("SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order ASC", (project_id,))
-    stages_raw = [dict(zip([c[0] for c in cursor.description], r)) for r in cursor.fetchall()]
-    
-    # 性能优化：一次性获取所有阶段的任务，避免N+1查询
-    stage_ids = [s['id'] for s in stages_raw]
-    if stage_ids:
-        placeholders = ','.join('?' * len(stage_ids))
-        cursor.execute(f"SELECT * FROM tasks WHERE stage_id IN ({placeholders})", stage_ids)
-        all_tasks = cursor.fetchall()
-        # 按stage_id分组
+        project = dict(row)
+        project_id = project['id']
+        project['milestones'] = [
+            dict(r) for r in conn.execute(
+                DatabasePool.format_sql("SELECT * FROM milestones WHERE project_id = ? ORDER BY target_date ASC"),
+                (project_id,),
+            ).fetchall()
+        ]
+        stages_raw = [
+            dict(r) for r in conn.execute(
+                DatabasePool.format_sql("SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order ASC"),
+                (project_id,),
+            ).fetchall()
+        ]
+        
+        stage_ids = [s['id'] for s in stages_raw]
         tasks_by_stage = {}
-        for t in all_tasks:
-            sid = t[1]  # stage_id是第2列
-            if sid not in tasks_by_stage:
-                tasks_by_stage[sid] = []
-            tasks_by_stage[sid].append(t)
-    else:
-        tasks_by_stage = {}
-    
-    stages_list = []
-    for stage in stages_raw:
-        tasks = tasks_by_stage.get(stage['id'], [])
-        if tasks:
-            completed = sum(1 for t in tasks if t[3])  # is_completed是第4列(0-indexed: id, stage_id, task_name, is_completed)
-            stage['progress'] = int(completed / len(tasks) * 100)
-        stages_list.append(stage)
-    
-    project['stages'] = stages_list
+        if stage_ids:
+            placeholders = ','.join('?' * len(stage_ids))
+            all_tasks = conn.execute(
+                DatabasePool.format_sql(f"SELECT * FROM tasks WHERE stage_id IN ({placeholders})"),
+                stage_ids,
+            ).fetchall()
+            for t in all_tasks:
+                task = dict(t)
+                tasks_by_stage.setdefault(task['stage_id'], []).append(task)
+        
+        stages_list = []
+        for stage in stages_raw:
+            tasks = tasks_by_stage.get(stage['id'], [])
+            if tasks:
+                completed = sum(1 for t in tasks if t['is_completed'])
+                stage['progress'] = int(completed / len(tasks) * 100)
+            stages_list.append(stage)
+        
+        project['stages'] = stages_list
 
-    close_db()
     return render_template('share_project.html', project=project)
 
 @app.route('/api/ai/health', methods=['GET'])
@@ -2483,19 +3412,18 @@ def trigger_ai_health_check():
 @app.route('/api/projects/<int:project_id>/ai-analyze', methods=['POST'])
 def ai_analyze_project(project_id):
     try:
-        conn = get_db()
-        project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-        
-        if not project:
-            return jsonify({'error': '项目不存在'}), 404
+        with DatabasePool.get_connection() as conn:
+            project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
+            
+            if not project:
+                return jsonify({'error': '项目不存在'}), 404
 
-        # 获取更多项目上下文
-        issues = conn.execute('SELECT * FROM issues WHERE project_id = ?', (project_id,)).fetchall()
-        tasks = conn.execute('''
-            SELECT t.* FROM tasks t
-            JOIN project_stages s ON t.stage_id = s.id
-            WHERE s.project_id = ?
-        ''', (project_id,)).fetchall()
+            issues = conn.execute(DatabasePool.format_sql('SELECT * FROM issues WHERE project_id = ?'), (project_id,)).fetchall()
+            tasks = conn.execute(DatabasePool.format_sql('''
+                SELECT t.* FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+            '''), (project_id,)).fetchall()
         
         # 安全处理可能不存在的字段
         risk_score = project['risk_score'] if 'risk_score' in project.keys() else 0
@@ -2539,7 +3467,6 @@ def ai_analyze_project(project_id):
         from ai_utils import call_ai
         analysis = call_ai(prompt, task_type='analysis')
         
-        close_db()
         return jsonify({'analysis': analysis})
         
     except Exception as e:
@@ -2548,32 +3475,25 @@ def ai_analyze_project(project_id):
 
 @app.route('/api/ai/generate-daily-report', methods=['POST'])
 def ai_generate_daily_report():
-    data = request.json
+    data = request.json or {}
     project_id = data.get('project_id')
     report_date = data.get('date', datetime.now().strftime('%Y-%m-%d'))
-    
-    conn = get_db()
-    project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-    
-    # 1. 今日日志
-    daily_logs = conn.execute('''
-        SELECT * FROM work_logs 
-        WHERE project_id = ? AND log_date = ?
-    ''', (project_id, report_date)).fetchall()
-    
-    # 2. 今日完成任务
-    completed_tasks = conn.execute('''
-        SELECT t.* FROM tasks t
-        JOIN project_stages s ON t.stage_id = s.id
-        WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date = ?
-    ''', (project_id, True, report_date)).fetchall()
-    
-    # 3. 活跃问题 (高风险或待处理)
-    active_issues = conn.execute('''
-        SELECT * FROM issues 
-        WHERE project_id = ? AND status != '已解决'
-        ORDER BY severity DESC LIMIT 5
-    ''', (project_id,)).fetchall()
+    with DatabasePool.get_connection() as conn:
+        project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
+        daily_logs = conn.execute(DatabasePool.format_sql('''
+            SELECT * FROM work_logs 
+            WHERE project_id = ? AND log_date = ?
+        '''), (project_id, report_date)).fetchall()
+        completed_tasks = conn.execute(DatabasePool.format_sql('''
+            SELECT t.* FROM tasks t
+            JOIN project_stages s ON t.stage_id = s.id
+            WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date = ?
+        '''), (project_id, True, report_date)).fetchall()
+        active_issues = conn.execute(DatabasePool.format_sql('''
+            SELECT * FROM issues 
+            WHERE project_id = ? AND status != '已解决'
+            ORDER BY severity DESC LIMIT 5
+        '''), (project_id,)).fetchall()
     
     # 4. 明日计划 (从今日日志提取)
     tmr_plans = [l['tomorrow_plan'] for l in daily_logs if l['tomorrow_plan']]
@@ -2616,8 +3536,6 @@ def ai_generate_daily_report():
     
     from ai_utils import call_ai
     report_content = call_ai(prompt, task_type='report')
-    
-    close_db()
     return jsonify({'report': report_content})
 
 # ========== 管理员：AI配置管理 API ==========
@@ -2629,15 +3547,13 @@ import json
 def get_ai_configs():
     """获取所有AI配置（仅管理员）"""
     print("DEBUG: Accessing get_ai_configs...")
-    conn = get_db()
     try:
-        configs = conn.execute('SELECT * FROM ai_configs ORDER BY priority').fetchall()
-        print(f"DEBUG: Found {len(configs)} configs.")
+        with DatabasePool.get_connection() as conn:
+            configs = conn.execute(DatabasePool.format_sql('SELECT * FROM ai_configs ORDER BY priority')).fetchall()
+            print(f"DEBUG: Found {len(configs)} configs.")
     except Exception as e:
         print(f"DEBUG: Error querying ai_configs: {e}")
-        close_db()
         return jsonify({'success': False, 'message': str(e)}), 500
-    close_db()
     
     result = []
     for c in configs:
@@ -2665,7 +3581,7 @@ def get_ai_configs():
 @require_auth('*')
 def add_ai_config():
     """新增AI配置（仅管理员）"""
-    data = request.json
+    data = request.json or {}
     
     if not data.get('name') or not data.get('api_key') or not data.get('base_url'):
         return jsonify({'success': False, 'message': '名称、API密钥和URL为必填项'}), 400
@@ -2677,76 +3593,66 @@ def add_ai_config():
     else:
         models_json = models
     
-    conn = get_db()
     try:
-        conn.execute('''
-            INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ''', (data['name'], data['api_key'], data['base_url'], models_json, 
-              data.get('priority', 1), 1 if data.get('is_active', True) else 0))
-        conn.commit()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            conn.execute(DatabasePool.format_sql('''
+                INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            '''), (data['name'], data['api_key'], data['base_url'], models_json, 
+                  data.get('priority', 1), 1 if data.get('is_active', True) else 0))
+            conn.commit()
         return jsonify({'success': True, 'message': '配置已添加'})
-    except sqlite3.IntegrityError:
-        close_db()
+    except DB_INTEGRITY_ERRORS:
         return jsonify({'success': False, 'message': '配置名称已存在'}), 400
     except Exception as e:
-        close_db()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/admin/ai-configs/<int:config_id>', methods=['PUT'])
 @require_auth('*')
 def update_ai_config(config_id):
     """更新AI配置（仅管理员）"""
-    data = request.json
-    conn = get_db()
-    
-    # 检查配置是否存在
-    existing = conn.execute('SELECT api_key FROM ai_configs WHERE id = ?', (config_id,)).fetchone()
-    if not existing:
-        close_db()
-        return jsonify({'success': False, 'message': '配置不存在'}), 404
-    
-    # 如果没有提供新密钥，保留原密钥
-    api_key = data.get('api_key') if data.get('api_key') else existing['api_key']
-    
-    # models转为JSON字符串
-    models = data.get('models', [])
-    if isinstance(models, list):
-        models_json = json.dumps(models)
-    else:
-        models_json = models
-    
+    data = request.json or {}
     try:
-        conn.execute('''
-            UPDATE ai_configs SET name=?, api_key=?, base_url=?, models=?, priority=?, is_active=?, updated_at=CURRENT_TIMESTAMP
-            WHERE id=?
-        ''', (data.get('name'), api_key, data.get('base_url'), models_json,
-              data.get('priority', 1), 1 if data.get('is_active', True) else 0, config_id))
-        conn.commit()
-        close_db()
+        with DatabasePool.get_connection() as conn:
+            existing = conn.execute(
+                DatabasePool.format_sql('SELECT api_key FROM ai_configs WHERE id = ?'),
+                (config_id,),
+            ).fetchone()
+            if not existing:
+                return jsonify({'success': False, 'message': '配置不存在'}), 404
+
+            api_key = data.get('api_key') if data.get('api_key') else existing['api_key']
+            models = data.get('models', [])
+            if isinstance(models, list):
+                models_json = json.dumps(models)
+            else:
+                models_json = models
+
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE ai_configs SET name=?, api_key=?, base_url=?, models=?, priority=?, is_active=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            '''), (data.get('name'), api_key, data.get('base_url'), models_json,
+                  data.get('priority', 1), 1 if data.get('is_active', True) else 0, config_id))
+            conn.commit()
         return jsonify({'success': True, 'message': '配置已更新'})
     except Exception as e:
-        close_db()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/admin/ai-configs/<int:config_id>', methods=['DELETE'])
 @require_auth('*')
 def delete_ai_config(config_id):
     """删除AI配置（仅管理员）"""
-    conn = get_db()
-    conn.execute('DELETE FROM ai_configs WHERE id = ?', (config_id,))
-    conn.commit()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        conn.execute(DatabasePool.format_sql('DELETE FROM ai_configs WHERE id = ?'), (config_id,))
+        conn.commit()
     return jsonify({'success': True, 'message': '配置已删除'})
 
 @app.route('/api/admin/ai-configs/<int:config_id>/test', methods=['POST'])
 @require_auth('*')
 def test_ai_config(config_id):
     """测试AI配置连通性（仅管理员）"""
-    conn = get_db()
-    config = conn.execute('SELECT * FROM ai_configs WHERE id = ?', (config_id,)).fetchone()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        config = conn.execute(DatabasePool.format_sql('SELECT * FROM ai_configs WHERE id = ?'), (config_id,)).fetchone()
     
     if not config:
         return jsonify({'success': False, 'message': '配置不存在'}), 404
@@ -2821,35 +3727,30 @@ def migrate_ai_configs():
     """将环境变量中的配置迁移到数据库（仅管理员）"""
     import os
     
-    conn = get_db()
     migrated = []
-    
-    # TAPI-DeepSeek
-    tapi_key = os.environ.get('TAPI_API_KEY')
-    if tapi_key:
-        existing = conn.execute('SELECT id FROM ai_configs WHERE name = ?', ('TAPI-DeepSeek',)).fetchone()
-        if not existing:
-            models = json.dumps(["deepseek-v3.2-speciale", "deepseek-v3-2-251201", "deepseek-v3-1-terminus", "deepseek-v3"])
-            conn.execute('''
-                INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active)
-                VALUES (?, ?, ?, ?, ?, 1)
-            ''', ('TAPI-DeepSeek', tapi_key, 'https://tapi.nyc.mn/v1/chat/completions', models, 1))
-            migrated.append('TAPI-DeepSeek')
-    
-    # ChatAnywhere
-    chatanywhere_key = os.environ.get('CHATANYWHERE_API_KEY')
-    if chatanywhere_key:
-        existing = conn.execute('SELECT id FROM ai_configs WHERE name = ?', ('ChatAnywhere',)).fetchone()
-        if not existing:
-            models = json.dumps(["deepseek-v3", "deepseek-chat", "gpt-4o-mini", "gpt-3.5-turbo"])
-            conn.execute('''
-                INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active)
-                VALUES (?, ?, ?, ?, ?, 1)
-            ''', ('ChatAnywhere', chatanywhere_key, 'https://api.chatanywhere.org/v1/chat/completions', models, 2))
-            migrated.append('ChatAnywhere')
-    
-    conn.commit()
-    close_db()
+    with DatabasePool.get_connection() as conn:
+        tapi_key = os.environ.get('TAPI_API_KEY')
+        if tapi_key:
+            existing = conn.execute(DatabasePool.format_sql('SELECT id FROM ai_configs WHERE name = ?'), ('TAPI-DeepSeek',)).fetchone()
+            if not existing:
+                models = json.dumps(["deepseek-v3.2-speciale", "deepseek-v3-2-251201", "deepseek-v3-1-terminus", "deepseek-v3"])
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                '''), ('TAPI-DeepSeek', tapi_key, 'https://tapi.nyc.mn/v1/chat/completions', models, 1))
+                migrated.append('TAPI-DeepSeek')
+
+        chatanywhere_key = os.environ.get('CHATANYWHERE_API_KEY')
+        if chatanywhere_key:
+            existing = conn.execute(DatabasePool.format_sql('SELECT id FROM ai_configs WHERE name = ?'), ('ChatAnywhere',)).fetchone()
+            if not existing:
+                models = json.dumps(["deepseek-v3", "deepseek-chat", "gpt-4o-mini", "gpt-3.5-turbo"])
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                '''), ('ChatAnywhere', chatanywhere_key, 'https://api.chatanywhere.org/v1/chat/completions', models, 2))
+                migrated.append('ChatAnywhere')
+        conn.commit()
     
     if migrated:
         return jsonify({'success': True, 'message': f'已导入配置: {", ".join(migrated)}'})
@@ -2864,22 +3765,22 @@ def get_report_archive(project_id):
     """获取项目的历史归档报告列表"""
     report_type = request.args.get('type')  # daily / weekly
     limit = request.args.get('limit', 50, type=int)
-    conn = get_db()
-    query = 'SELECT id, project_id, report_type, report_date, generated_by, created_at FROM report_archive WHERE project_id = ?'
-    params = [project_id]
-    if report_type:
-        query += ' AND report_type = ?'
-        params.append(report_type)
-    query += ' ORDER BY report_date DESC LIMIT ?'
-    params.append(limit)
-    rows = conn.execute(query, params).fetchall()
+    with DatabasePool.get_connection() as conn:
+        query = 'SELECT id, project_id, report_type, report_date, generated_by, created_at FROM report_archive WHERE project_id = ?'
+        params = [project_id]
+        if report_type:
+            query += ' AND report_type = ?'
+            params.append(report_type)
+        query += ' ORDER BY report_date DESC LIMIT ?'
+        params.append(limit)
+        rows = conn.execute(DatabasePool.format_sql(query), params).fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route('/api/report-archive/<int:archive_id>', methods=['GET'])
 def get_report_archive_detail(archive_id):
     """获取某份归档报告的详细内容"""
-    conn = get_db()
-    row = conn.execute('SELECT * FROM report_archive WHERE id = ?', (archive_id,)).fetchone()
+    with DatabasePool.get_connection() as conn:
+        row = conn.execute(DatabasePool.format_sql('SELECT * FROM report_archive WHERE id = ?'), (archive_id,)).fetchone()
     if not row:
         return jsonify({'error': '报告不存在'}), 404
     return jsonify(dict(row))
@@ -2891,8 +3792,29 @@ def generate_report_archive(project_id):
     report_type = data.get('report_type', 'daily')
     force = data.get('force', False)
     try:
-        result = report_scheduler.generate_for_project(project_id, report_type, force)
-        return jsonify(result)
+        with DatabasePool.get_connection() as conn:
+            project = conn.execute(
+                DatabasePool.format_sql('SELECT id, project_name FROM projects WHERE id = ?'),
+                (project_id,),
+            ).fetchone()
+            if not project:
+                return jsonify({'success': False, 'message': '项目不存在'}), 404
+
+        task_id = str(uuid.uuid4())
+        register_task(
+            task_id,
+            'report_archive',
+            f"报告归档 #{project_id} {report_type}",
+            _run_report_archive_task,
+            project_id,
+            report_type,
+            force,
+            project_id=project_id,
+            payload_summary=f"type={report_type}, force={int(bool(force))}",
+            source_endpoint=f'/api/projects/{project_id}/report-archive/generate',
+        )
+        launch_registered_task(task_id)
+        return jsonify({'success': True, 'task_id': task_id, 'status': 'processing'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -2904,12 +3826,12 @@ from services.wecom_service import wecom_service
 @require_auth('admin')
 def get_wecom_config():
     """获取企业微信配置"""
-    conn = get_db()
-    cursor = conn.cursor()
     try:
-        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
-        configs = cursor.fetchall()
-        result = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs}
+        with DatabasePool.get_connection() as conn:
+            configs = conn.execute(
+                DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
+            ).fetchall()
+            result = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs}
         
         # 脱敏
         if result.get('secret'):
@@ -2920,50 +3842,43 @@ def get_wecom_config():
         return jsonify({'success': True, 'message': 'Success', 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
 
 @app.route('/api/admin/wecom-config', methods=['POST'])
 @require_auth('admin')
 def save_wecom_config():
     """保存企业微信配置"""
     data = request.json or {}
-    conn = get_db()
-    cursor = conn.cursor()
-    
     try:
-        # 预加载现有配置以处理脱敏数据字段
-        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
-        configs_raw = cursor.fetchall()
-        existing = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs_raw}
-        
-        updates = []
-        for key, val in data.items():
-            db_key = f"wecom_{key}"
+        with DatabasePool.get_connection() as conn:
+            configs_raw = conn.execute(
+                DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
+            ).fetchall()
+            existing = {row['config_key'].replace('wecom_', ''): row['value'] for row in configs_raw}
             
-            # 如果是脱敏过的且没改，则保留原值
-            final_val = val
-            is_masked = False
-            
-            if key == 'secret':
-                # 检查是否包含星号，且长度与脱敏后的特征匹配
-                if val and '****' in val:
+            updates = []
+            for key, val in data.items():
+                db_key = f"wecom_{key}"
+                final_val = val
+                is_masked = False
+                
+                if key == 'secret':
+                    if val and '****' in val:
+                        is_masked = True
+                elif key == 'callback_aes_key' and val == '******':
                     is_masked = True
-            elif key == 'callback_aes_key' and val == '******':
-                is_masked = True
+                    
+                if is_masked:
+                    final_val = existing.get(key)
+                    
+                updates.append((db_key, str(final_val) if final_val is not None else ""))
                 
-            if is_masked:
-                final_val = existing.get(key)
+            for k, v in updates:
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO system_config (config_key, value) VALUES (?, ?)
+                    ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+                '''), (k, v))
                 
-            updates.append((db_key, str(final_val) if final_val is not None else ""))
-            
-        for k, v in updates:
-            cursor.execute('''
-                INSERT INTO system_config (config_key, value) VALUES (?, ?)
-                ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
-            ''', (k, v))
-            
-        conn.commit()
+            conn.commit()
         
         # 立即重载服务配置
         wecom_service.reload_config()
@@ -2971,8 +3886,6 @@ def save_wecom_config():
         return jsonify({'success': True, 'message': '企业微信配置已保存'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
 
 
 # ========== 管理员：用户企微绑定 API ==========
@@ -2981,12 +3894,12 @@ def save_wecom_config():
 @require_auth('admin')
 def get_wecom_bindlist():
     """获取所有用户及其企微绑定状态"""
-    conn = get_db()
     try:
-        users = conn.execute('''
-            SELECT id, username, display_name, role, wecom_userid, is_active
-            FROM users ORDER BY id
-        ''').fetchall()
+        with DatabasePool.get_connection() as conn:
+            users = conn.execute(DatabasePool.format_sql('''
+                SELECT id, username, display_name, role, wecom_userid, is_active
+                FROM users ORDER BY id
+            ''')).fetchall()
         result = []
         for u in users:
             result.append({
@@ -3001,8 +3914,6 @@ def get_wecom_bindlist():
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
 
 @app.route('/api/admin/users/<int:user_id>/bind-wecom', methods=['POST'])
 @require_auth('admin')
@@ -3010,30 +3921,27 @@ def bind_wecom_userid(user_id):
     """手动绑定/更新用户的企微 userid"""
     data = request.json or {}
     wecom_userid = data.get('wecom_userid', '').strip()
-    
-    conn = get_db()
     try:
-        user = conn.execute('SELECT id, display_name FROM users WHERE id = ?', (user_id,)).fetchone()
-        if not user:
-            return jsonify({'success': False, 'message': '用户不存在'}), 404
-        
-        if wecom_userid:
-            existing = conn.execute(
-                'SELECT id, display_name FROM users WHERE wecom_userid = ? AND id != ?',
-                (wecom_userid, user_id)
-            ).fetchone()
-            if existing:
-                return jsonify({'success': False, 'message': f'该企微ID已被用户 [{existing["display_name"]}] 绑定'}), 400
-            conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (wecom_userid, user_id))
-        else:
-            conn.execute('UPDATE users SET wecom_userid = NULL WHERE id = ?', (user_id,))
-        
-        conn.commit()
+        with DatabasePool.get_connection() as conn:
+            user = conn.execute(DatabasePool.format_sql('SELECT id, display_name FROM users WHERE id = ?'), (user_id,)).fetchone()
+            if not user:
+                return jsonify({'success': False, 'message': '用户不存在'}), 404
+            
+            if wecom_userid:
+                existing = conn.execute(
+                    DatabasePool.format_sql('SELECT id, display_name FROM users WHERE wecom_userid = ? AND id != ?'),
+                    (wecom_userid, user_id)
+                ).fetchone()
+                if existing:
+                    return jsonify({'success': False, 'message': f'该企微ID已被用户 [{existing["display_name"]}] 绑定'}), 400
+                conn.execute(DatabasePool.format_sql('UPDATE users SET wecom_userid = ? WHERE id = ?'), (wecom_userid, user_id))
+            else:
+                conn.execute(DatabasePool.format_sql('UPDATE users SET wecom_userid = NULL WHERE id = ?'), (user_id,))
+            
+            conn.commit()
         return jsonify({'success': True, 'message': f'用户 [{user["display_name"]}] 的企微绑定已更新'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
 
 # ========== 存储配置 API (Baidu Netdisk) ==========
 from storage_service import storage_service
@@ -3138,12 +4046,12 @@ def test_r2_connection():
 @require_auth('admin')
 def get_map_config():
     """获取地图服务配置"""
-    conn = get_db()
-    cursor = conn.cursor()
     try:
-        cursor.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
-        configs = cursor.fetchall()
-        result = {row['config_key'].replace('map_', ''): row['value'] for row in configs}
+        with DatabasePool.get_connection() as conn:
+            configs = conn.execute(
+                DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
+            ).fetchall()
+            result = {row['config_key'].replace('map_', ''): row['value'] for row in configs}
         
         # 脱敏
         for key in ['baidu_ak', 'amap_key', 'tianditu_key', 'google_ak']:
@@ -3154,8 +4062,6 @@ def get_map_config():
         return jsonify({'success': True, 'data': result})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        close_db()
 
 @app.route('/api/admin/map-config', methods=['POST'])
 @require_auth('admin')
@@ -3163,13 +4069,10 @@ def save_map_config():
     """保存地图服务配置"""
     data = request.json or {}
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        
         try:
             # 预加载现有配置以处理脱敏
             sql_load = DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'map_%'")
-            cursor.execute(sql_load)
-            existing = {row['config_key'].replace('map_', ''): row['value'] for row in cursor.fetchall()}
+            existing = {row['config_key'].replace('map_', ''): row['value'] for row in conn.execute(sql_load).fetchall()}
             
             for key, val in data.items():
                 db_key = f"map_{key}"
@@ -3183,7 +4086,7 @@ def save_map_config():
                     INSERT INTO system_config (config_key, value) VALUES (?, ?)
                     ON CONFLICT(config_key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
                 ''')
-                cursor.execute(sql_ins, (db_key, str(final_val) if final_val is not None else ""))
+                conn.execute(sql_ins, (db_key, str(final_val) if final_val is not None else ""))
                 
             conn.commit()
             
@@ -3201,6 +4104,7 @@ if __name__ == '__main__':
         from app_config import NOTIFICATION_CONFIG
         init_db()
         reload_notification_config(NOTIFICATION_CONFIG)
+        warm_task_cache()
     # 启动报告自动归档调度器（含晨会简报、项目哨兵等定时任务）
     # 注意：debug 模式下 Flask reloader 会 fork 子进程，
     # 必须在子进程中启动调度器（或关闭 reloader），否则 Timer 线程会丢失

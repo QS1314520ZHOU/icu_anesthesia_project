@@ -76,7 +76,7 @@ def parse_template(raw_text):
 @form_generator_bp.route('/generate', methods=['POST'])
 def generate():
     try:
-        data = request.json
+        data = request.json or {}
         template_text = data.get('template_text')
         
         is_array = True

@@ -3,7 +3,7 @@
  */
 async function exportProjectPDF(projectId) {
     if (!currentProject) {
-        alert('请先加载项目详情');
+        showToast('请先加载项目详情', 'warning');
         return;
     }
 
@@ -51,7 +51,7 @@ async function exportProjectPDF(projectId) {
 
     } catch (err) {
         console.error('PDF Export Error:', err);
-        alert('导出失败: ' + err.message);
+        showToast('导出失败: ' + err.message, 'danger');
     } finally {
         // 清理
         const container = document.getElementById('pdf-report-container');

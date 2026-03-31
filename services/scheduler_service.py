@@ -222,7 +222,7 @@ class ReportScheduler:
         with DatabasePool.get_connection() as conn:
             sql = DatabasePool.format_sql("""
                 SELECT * FROM projects 
-                WHERE status NOT IN ('已完成', '已终止')
+                WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
             """)
             return conn.execute(sql).fetchall()
 

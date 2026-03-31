@@ -6,7 +6,7 @@ task_bp = Blueprint('task', __name__, url_prefix='/api')
 
 @task_bp.route('/stages/<int:stage_id>', methods=['PUT'])
 def update_stage(stage_id):
-    data = request.json
+    data = request.json or {}
     project_service.update_stage(stage_id, data)
     return api_response(True)
 
@@ -17,7 +17,7 @@ def toggle_task(task_id):
 
 @task_bp.route('/stages/<int:stage_id>/tasks', methods=['POST'])
 def add_task(stage_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_task(stage_id, data)
     return api_response(True)
 
@@ -31,7 +31,7 @@ def update_issue(issue_id):
     if request.method == 'DELETE':
         project_service.delete_issue(issue_id)
         return api_response(True)
-    data = request.json
+    data = request.json or {}
     project_service.update_issue(issue_id, data)
     return api_response(True)
 
@@ -40,6 +40,6 @@ def update_device(device_id):
     if request.method == 'DELETE':
         project_service.delete_device(device_id)
         return api_response(True)
-    data = request.json
+    data = request.json or {}
     project_service.update_device(device_id, data)
     return api_response(True)

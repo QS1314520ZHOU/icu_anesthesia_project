@@ -260,7 +260,7 @@ async function generateAiStandup(projectId) {
         const res = await api.post(`/standup/${projectId}/ai-generate`, { date: dateStr });
 
         if (res.standup) {
-            const htmlContent = typeof marked !== 'undefined' ? marked.parse(res.standup) : res.standup.replace(/\n/g, '<br>');
+            const htmlContent = renderAiMarkdown(res.standup);
             aiResult.innerHTML = `
                 <div style="background:white;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.08);overflow:hidden;">
                     <div style="background:linear-gradient(135deg,#8b5cf6,#6366f1);padding:20px 24px;color:white;">
@@ -310,9 +310,9 @@ function copyStandupContent() {
     const el = document.getElementById('standupMarkdownContent');
     if (!el) return;
     navigator.clipboard.writeText(el.innerText).then(() => {
-        showToast ? showToast('✅ 纪要内容已复制到剪贴板') : alert('已复制到剪贴板');
+        showToast('✅ 纪要内容已复制到剪贴板', 'success');
     }).catch(() => {
-        alert('复制失败，请手动复制');
+        showToast('复制失败，请手动复制', 'danger');
     });
 }
 
@@ -329,9 +329,9 @@ async function saveStandupArchive(projectId, dateStr) {
             content: el.innerText,
             date: dateStr || new Date().toISOString().slice(0, 10)
         });
-        showToast ? showToast('✅ 纪要已保存到归档') : alert('已保存');
+        showToast('✅ 纪要已保存到归档', 'success');
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'danger');
     }
 }
 
@@ -343,12 +343,12 @@ async function pushStandupToWecom(projectId, dateStr) {
     try {
         const res = await api.post(`/standup/${projectId}/push-wecom`, { date: dateStr });
         if (res.success) {
-            showToast ? showToast('✅ 已推送到企业微信！') : alert('已推送');
+            showToast('✅ 已推送到企业微信！', 'success');
         } else {
-            alert('推送失败: ' + (res.message || '未知错误'));
+            showToast('推送失败: ' + (res.message || '未知错误'), 'danger');
         }
     } catch (e) {
-        alert('推送失败: ' + e.message);
+        showToast('推送失败: ' + e.message, 'danger');
     }
 }
 
@@ -449,7 +449,7 @@ async function showGlobalBriefingPanel() {
         const result = await api.get('/standup/daily-briefing');
 
         if (result.briefing) {
-            const htmlContent = typeof marked !== 'undefined' ? marked.parse(result.briefing) : result.briefing.replace(/\n/g, '<br>');
+            const htmlContent = renderAiMarkdown(result.briefing);
 
             container.innerHTML = `
                 <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;">
@@ -488,8 +488,8 @@ function copyBriefingContent() {
     const el = document.getElementById('briefingContent');
     if (!el) return;
     navigator.clipboard.writeText(el.innerText).then(() => {
-        showToast ? showToast('✅ 简报内容已复制') : alert('已复制');
-    }).catch(() => alert('复制失败'));
+        showToast('✅ 简报内容已复制', 'success');
+    }).catch(() => showToast('复制失败', 'danger'));
 }
 
 
@@ -506,21 +506,17 @@ async function pushGlobalBriefingToWecom() {
         const res = await api.post('/standup/push-wecom');
 
         if (res.success) {
-            if (typeof showToast !== 'undefined') {
-                showToast('✅ 简报已推送到企业微信！');
-            } else {
-                alert('简报已推送到企业微信！');
-            }
+            showToast('✅ 简报已推送到企业微信！', 'success');
         } else {
             console.error("Push failed:", res);
-            alert('推送失败: ' + (res.message || '未知错误'));
+            showToast('推送失败: ' + (res.message || '未知错误'), 'danger');
         }
 
         btn.disabled = false;
         btn.textContent = originalText;
     } catch (e) {
         console.error("Push error:", e);
-        alert('推送请求失败: ' + e.message + '\n请检查网络连接或后端日志。');
+        showToast('推送请求失败: ' + e.message, 'danger', 5000);
         if (event.target) {
             event.target.disabled = false;
             event.target.textContent = '📤 推送到企业微信';
@@ -590,12 +586,12 @@ async function saveWecomConfig() {
             if (typeof showToast !== 'undefined') {
                 showToast('✅ ' + res.message);
             } else {
-                alert(res.message);
+                showToast(res.message, 'success');
             }
             closeModal('wecomConfigModal');
         }
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'danger');
     }
 }
 
@@ -610,16 +606,12 @@ async function testWecomPush() {
 
         const res = await api.post('/standup/push-wecom');
         if (res.success) {
-            if (typeof showToast !== 'undefined') {
-                showToast('✅ 测试推送成功！请查看企业微信群');
-            } else {
-                alert('测试推送成功！');
-            }
+            showToast('✅ 测试推送成功！请查看企业微信群', 'success');
         } else {
-            alert('测试推送失败: ' + (res.message || '未知错误'));
+            showToast('测试推送失败: ' + (res.message || '未知错误'), 'danger');
         }
     } catch (e) {
-        alert('推送失败: ' + e.message);
+        showToast('推送失败: ' + e.message, 'danger');
     }
 }
 
@@ -641,6 +633,6 @@ async function exportFormalReport(projectId) {
         link.click();
         document.body.removeChild(link);
     } catch (e) {
-        alert('导出失败: ' + e.message);
+        showToast('导出失败: ' + e.message, 'danger');
     }
 }

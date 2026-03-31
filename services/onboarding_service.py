@@ -13,17 +13,17 @@ class OnboardingService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 获取项目基本资料
-                project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project: return None
                 
                 # 2. 获取核心团队
-                members = conn.execute("SELECT name, role FROM project_members WHERE project_id = ? AND status = '在岗'", (project_id,)).fetchall()
+                members = conn.execute(DatabasePool.format_sql("SELECT name, role FROM project_members WHERE project_id = ? AND status = '在岗'"), (project_id,)).fetchall()
                 
                 # 3. 获取最近动态 (最近5条日志)
-                logs = conn.execute('SELECT member_name, log_date, work_content FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5', (project_id,)).fetchall()
+                logs = conn.execute(DatabasePool.format_sql('SELECT member_name, log_date, work_content FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5'), (project_id,)).fetchall()
                 
                 # 4. 获取未解决的问题
-                issues = conn.execute("SELECT issue_type, description, severity FROM issues WHERE project_id = ? AND status != '已解决' LIMIT 5", (project_id,)).fetchall()
+                issues = conn.execute(DatabasePool.format_sql("SELECT issue_type, description, severity FROM issues WHERE project_id = ? AND status != '已解决' LIMIT 5"), (project_id,)).fetchall()
                 
                 # 5. 调用 AI 生成 Snapshot
                 system_prompt = """你是一位资深的项目经理。

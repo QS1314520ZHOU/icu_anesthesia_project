@@ -222,7 +222,7 @@
                             </div>
                         </div>
                         <div class="markdown-body">
-                            ${marked.parse(res.data.briefing)}
+                            ${marked.parse(cleanAiMarkdown(res.data.briefing))}
                         </div>
                     `;
                     document.getElementById('actionRow').style.display = 'flex';
@@ -234,6 +234,17 @@
                 console.error(e);
                 document.getElementById('briefingCard').innerHTML = `<div class="loading-state" style="color: #ef4444;">❌ 系统连接异常</div>`;
             }
+        }
+
+        function cleanAiMarkdown(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/【[^】\n]{0,120}†[^】\n]{0,120}】/g, '')
+                .replace(/\[\^\{\{thread-[^\]\n]{0,80}\]?/g, '')
+                .replace(/\[\^[^\]\n]{0,120}\]/g, '')
+                .replace(/\[\^[^\n]{0,120}$/gm, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
         }
 
         // Initialize on Load

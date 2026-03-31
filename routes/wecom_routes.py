@@ -64,7 +64,7 @@ def receive_callback():
         from database import DatabasePool
         import json
         with DatabasePool.get_connection() as conn:
-            conn.execute('INSERT INTO wecom_debug_logs (msg_type, raw_xml) VALUES (?, ?)', 
+            conn.execute(DatabasePool.format_sql('INSERT INTO wecom_debug_logs (msg_type, raw_xml) VALUES (?, ?)'), 
                          ('RAW_POST', f"Signature: {msg_signature}, Data: {post_data[:200]}..."))
             conn.commit()
     except Exception as e:
@@ -85,10 +85,10 @@ def receive_callback():
             from database import DatabasePool
             import json
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO wecom_debug_logs (msg_type, raw_xml, parsed_json)
                     VALUES (?, ?, ?)
-                ''', (msg.get('MsgType'), plain_xml, json.dumps(msg, ensure_ascii=False)))
+                '''), (msg.get('MsgType'), plain_xml, json.dumps(msg, ensure_ascii=False)))
                 conn.commit()
         except Exception as db_err:
             logger.error("Failed to save wecom debug log: %s", db_err)
@@ -352,7 +352,7 @@ def submit_departure(departure_id):
         if user:
             from database import DatabasePool
             with DatabasePool.get_connection() as conn:
-                u = conn.execute('SELECT wecom_userid FROM users WHERE id = ?', (user['id'],)).fetchone()
+                u = conn.execute(DatabasePool.format_sql('SELECT wecom_userid FROM users WHERE id = ?'), (user['id'],)).fetchone()
                 userid = u['wecom_userid'] if u else ''
     
     if not userid:
@@ -370,6 +370,15 @@ def submit_change(change_id):
     
     data = request.json or {}
     userid = data.get('wecom_userid', '')
+    if not userid:
+        user = getattr(request, 'current_user', None)
+        if user:
+            from database import DatabasePool
+            with DatabasePool.get_connection() as conn:
+                u = conn.execute(DatabasePool.format_sql('SELECT wecom_userid FROM users WHERE id = ?'), (user['id'],)).fetchone()
+                userid = u['wecom_userid'] if u else ''
+    if not userid:
+        return api_response(False, message="未提供企业微信用户ID", code=400)
     result = wecom_approval_service.submit_change_approval(change_id, userid)
     return api_response(result.get('success', False), data=result,
                        message=result.get('message', ''))
@@ -382,6 +391,15 @@ def submit_expense(expense_id):
     
     data = request.json or {}
     userid = data.get('wecom_userid', '')
+    if not userid:
+        user = getattr(request, 'current_user', None)
+        if user:
+            from database import DatabasePool
+            with DatabasePool.get_connection() as conn:
+                u = conn.execute(DatabasePool.format_sql('SELECT wecom_userid FROM users WHERE id = ?'), (user['id'],)).fetchone()
+                userid = u['wecom_userid'] if u else ''
+    if not userid:
+        return api_response(False, message="未提供企业微信用户ID", code=400)
     result = wecom_approval_service.submit_expense_approval(expense_id, userid)
     return api_response(result.get('success', False), data=result,
                        message=result.get('message', ''))

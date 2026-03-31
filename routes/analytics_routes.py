@@ -39,7 +39,7 @@ def get_analytics_overview():
 @analytics_bp.route('/api/analytics/compare', methods=['POST'])
 def compare_projects():
     try:
-        data = request.json
+        data = request.json or {}
         project_ids = data.get('project_ids', [])
         return jsonify(_json_safe(analytics_service.compare_projects(project_ids)))
     except Exception as e:

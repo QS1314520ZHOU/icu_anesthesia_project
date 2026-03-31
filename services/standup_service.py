@@ -203,7 +203,7 @@ class StandupService:
             sql = DatabasePool.format_sql('''
                 SELECT id, project_name, hospital_name, status, progress, project_manager
                 FROM projects
-                WHERE status NOT IN ('已完成', '已终止')
+                WHERE status NOT IN ('已完成', '已终止', '已验收', '质保期')
                 ORDER BY progress ASC
             ''')
             projects = conn.execute(sql).fetchall()

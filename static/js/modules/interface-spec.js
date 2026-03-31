@@ -544,7 +544,7 @@ const InterfaceSpec = {
         if (body) body.innerHTML = '<div style="text-align:center;padding:60px;"><div class="spinner" style="margin:0 auto 16px;"></div><div style="color:var(--gray-500);">AI 正在生成报告...</div></div>';
         try {
             const res = await api.get(`/projects/${this._currentProjectId}/interface-comparison/report`);
-            if (body) body.innerHTML = `<div class="report-content" style="padding:10px;">${marked.parse(res.report || '报告为空')}</div>`;
+            if (body) body.innerHTML = `<div class="report-content" style="padding:10px;">${typeof renderAiMarkdown === 'function' ? renderAiMarkdown(res.report || '报告为空') : marked.parse(res.report || '报告为空')}</div>`;
         } catch (e) {
             if (body) body.innerHTML = `<div style="text-align:center;padding:40px;color:var(--danger);">报告生成失败: ${e.message}</div>`;
         }
@@ -673,7 +673,7 @@ const InterfaceSpec = {
             if (msg.role === 'user') {
                 mc.innerHTML += '<div style="display:flex;justify-content:flex-end;"><div style="background:var(--primary);color:white;padding:10px 16px;border-radius:16px 16px 4px 16px;max-width:75%;font-size:14px;">' + this._escapeHtml(msg.content) + '</div></div>';
             } else {
-                mc.innerHTML += '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;"><div class="report-content">' + marked.parse(msg.content) + '</div></div></div>';
+                mc.innerHTML += '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;"><div class="report-content">' + (typeof renderAiMarkdown === 'function' ? renderAiMarkdown(msg.content) : marked.parse(msg.content)) + '</div></div></div>';
             }
         }
         mc.scrollTop = mc.scrollHeight;
@@ -749,7 +749,7 @@ const InterfaceSpec = {
             var res = await api.post('/projects/' + this._currentProjectId + '/interface-specs/chat', { message: text, category: cat });
             var answer = res.answer || JSON.stringify(res);
             var el = document.getElementById(lid);
-            if (el) el.outerHTML = '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;"><div class="report-content">' + marked.parse(answer) + '</div></div></div>';
+            if (el) el.outerHTML = '<div style="display:flex;justify-content:flex-start;"><div style="background:var(--gray-50);border:1px solid var(--gray-200);padding:12px 16px;border-radius:16px 16px 16px 4px;max-width:85%;font-size:14px;line-height:1.7;"><div class="report-content">' + (typeof renderAiMarkdown === 'function' ? renderAiMarkdown(answer) : marked.parse(answer)) + '</div></div></div>';
             this._chatHistory.push({ role: 'user', content: text });
             this._chatHistory.push({ role: 'assistant', content: answer });
             this._saveChatHistory();

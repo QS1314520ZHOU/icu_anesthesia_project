@@ -23,7 +23,7 @@ def get_member_costs(project_id):
 def add_revenue(project_id):
     """录入项目收入"""
     from flask import request
-    data = request.json
+    data = request.json or {}
     amount = data.get('amount')
     revenue_date = data.get('revenue_date')
     revenue_type = data.get('revenue_type', '合同款')

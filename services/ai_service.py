@@ -163,21 +163,23 @@ class AIService:
         """基于项目进度、逾期情况、工作日志及语义知识库综合评估风险"""
         try:
             with DatabasePool.get_connection() as conn:
-                # cursor = conn.cursor()  <-- Remove redundant cursor creation since we use conn.execute
                 risk_score = 0
                 detected_risks = []
+                today = datetime.now().strftime('%Y-%m-%d')
                 
                 # 1. 结构化风险扫描 (里程碑、整体进度)
-                overdue_milestones = conn.execute('''
+                overdue_milestones = conn.execute(DatabasePool.format_sql('''
                     SELECT name, target_date FROM milestones 
-                    WHERE project_id = ? AND is_completed = ? AND target_date < date('now')
-                ''', (project_id, False)).fetchall()
+                    WHERE project_id = ? AND is_completed = ? AND target_date < ?
+                '''),
+                    (project_id, False, today)
+                ).fetchall()
                 
                 for m in overdue_milestones:
                     risk_score += 20
                     detected_risks.append({"type": "进度逾期", "keyword": "里程碑逾期", "content": f"里程碑【{m['name']}】已逾期", "date": m['target_date']})
 
-                project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if project and project['plan_end_date'] and str(project['plan_end_date']) < datetime.now().strftime('%Y-%m-%d'):
                     if project['status'] not in ['已完成', '已验收', '质保期']:
                         risk_score += 30
@@ -187,13 +189,13 @@ class AIService:
                 # 获取最近一周的日志
                 week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
                 try:
-                    logs = conn.execute('SELECT work_content, issues_encountered FROM work_logs WHERE project_id = ? AND log_date >= ?', (project_id, week_ago)).fetchall()
+                    logs = conn.execute(DatabasePool.format_sql('SELECT work_content, issues_encountered FROM work_logs WHERE project_id = ? AND log_date >= ?'), (project_id, week_ago)).fetchall()
                     
                     log_text = " ".join([(l['work_content'] or "") + " " + (l['issues_encountered'] or "") for l in logs])
                     
                     if log_text:
                         # 获取全库知识项用于 RAG
-                        rows = conn.execute('SELECT title, content, category, tags, embedding FROM knowledge_base').fetchall()
+                        rows = conn.execute(DatabasePool.format_sql('SELECT title, content, category, tags, embedding FROM knowledge_base')).fetchall()
                         kb_items = [dict(row) for row in rows]
                         
                         # 获取日志的向量表示
@@ -215,11 +217,11 @@ class AIService:
 
                 # 3. 持久化风险评估结果到数据库 (性能关键点)
                 analysis_json = json.dumps(detected_risks, ensure_ascii=False)
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     UPDATE projects 
                     SET risk_score = ?, risk_analysis = ?, updated_at = CURRENT_TIMESTAMP 
                     WHERE id = ?
-                ''', (risk_score, analysis_json, project_id))
+                '''), (risk_score, analysis_json, project_id))
                 conn.commit()
 
                 return detected_risks, risk_score

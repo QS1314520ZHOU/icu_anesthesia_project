@@ -45,15 +45,10 @@ class WeComService:
         try:
             from database import DatabasePool
             with DatabasePool.get_connection() as conn:
-                cursor = conn.cursor()
-                # 检查表是否存在
-                if DatabasePool.is_postgres():
-                    cursor.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'system_config'")
-                else:
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='system_config'")
-                
-                if cursor.fetchone():
-                    configs = conn.execute("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'").fetchall()
+                if DatabasePool.table_exists(conn, 'system_config'):
+                    configs = conn.execute(
+                        DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'wecom_%'")
+                    ).fetchall()
                     for row in configs:
                         key = row['config_key'].upper()
                         val = row['value']

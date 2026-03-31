@@ -125,7 +125,7 @@ async function editKBItem(id) {
 
         showModal('kbModal');
     } catch (e) {
-        alert('加载案例详情失败: ' + e.message);
+        showToast('加载案例详情失败: ' + e.message, 'danger');
     }
 }
 
@@ -134,8 +134,9 @@ async function deleteKBItem(id) {
     try {
         await api.delete(`/kb/${id}`);
         loadKBList();
+        showToast('案例已删除', 'success');
     } catch (e) {
-        alert('删除失败: ' + e.message);
+        showToast('删除失败: ' + e.message, 'danger');
     }
 }
 
@@ -156,22 +157,22 @@ async function saveKBItem() {
     }
 
     if (!formData.get('title') || !formData.get('content')) {
-        alert('请填写标题和详细内容');
+        showToast('请填写标题和详细内容', 'warning');
         return;
     }
 
     try {
         if (currentEditingKBId) {
             await api.put(`/kb/${currentEditingKBId}`, formData);
-            alert('案例已更新');
+            showToast('案例已更新', 'success');
         } else {
             await api.post('/kb', formData);
-            alert('案例已创建');
+            showToast('案例已创建', 'success');
         }
         closeModal('kbModal');
         loadKBList();
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showToast('保存失败: ' + e.message, 'danger');
     }
 }
 
@@ -184,7 +185,9 @@ async function viewKBItem(id) {
         document.getElementById('kbDetailDate').textContent = item.updated_at || item.created_at;
 
         // 使用 marked 渲染 Markdown
-        const contentHtml = typeof marked !== 'undefined' ? marked.parse(item.content) : item.content;
+        const contentHtml = typeof renderAiMarkdown === 'function'
+            ? renderAiMarkdown(item.content)
+            : (typeof marked !== 'undefined' ? marked.parse(item.content) : item.content);
         document.getElementById('kbDetailContent').innerHTML = contentHtml;
 
         // 渲染资源区 (附件与外链)
@@ -221,7 +224,7 @@ async function viewKBItem(id) {
 
         showModal('kbDetailModal');
     } catch (e) {
-        alert('获取详情失败: ' + e.message);
+        showToast('获取详情失败: ' + e.message, 'danger');
     }
 }
 
@@ -298,7 +301,9 @@ async function askKbAi() {
         aiMsgDiv.style.margin = '12px 0';
 
         // 使用 marked 渲染（如果可用）
-        const renderedAnswer = typeof marked !== 'undefined' ? marked.parse(response.answer) : response.answer;
+        const renderedAnswer = typeof renderAiMarkdown === 'function'
+            ? renderAiMarkdown(response.answer)
+            : (typeof marked !== 'undefined' ? marked.parse(response.answer) : response.answer);
 
         aiMsgDiv.innerHTML = `<div style="display: flex; gap: 8px; align-items: flex-start;">
             <span style="font-size: 18px;">🧠</span>
@@ -310,7 +315,7 @@ async function askKbAi() {
         chatMessages.appendChild(aiMsgDiv);
     } catch (e) {
         loadingDiv.remove();
-        alert('咨询失败: ' + e.message);
+        showToast('咨询失败: ' + e.message, 'danger');
     }
 
     chatMessages.scrollTop = chatMessages.scrollHeight;

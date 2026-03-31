@@ -15,6 +15,13 @@ try:
 except ImportError:
     psycopg2 = None
 
+if psycopg2 is not None:
+    DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg2.IntegrityError)
+    DB_OPERATIONAL_ERRORS = (sqlite3.OperationalError, psycopg2.OperationalError)
+else:
+    DB_INTEGRITY_ERRORS = (sqlite3.IntegrityError,)
+    DB_OPERATIONAL_ERRORS = (sqlite3.OperationalError,)
+
 
 class PGCursorWrapper:
     _id_column_cache = {}
@@ -184,6 +191,24 @@ class DatabasePool:
         
         sql = re.sub(r"strftime\s*\(\s*['\"](.*?)['\"]\s*,\s*(.*?)\s*\)", replace_strftime, sql, flags=re.IGNORECASE)
 
+        # 3.1 处理 julianday 差值
+        # SQLite: julianday(end) - julianday(start)
+        # Postgres: EXTRACT(EPOCH FROM ((end)::timestamp - (start)::timestamp)) / 86400.0
+        sql = re.sub(
+            r"julianday\s*\(\s*(.*?)\s*\)\s*-\s*julianday\s*\(\s*(.*?)\s*\)",
+            r"(EXTRACT(EPOCH FROM ((\1)::timestamp - (\2)::timestamp)) / 86400.0)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
+        # 3.2 处理单独的 julianday(field)
+        sql = re.sub(
+            r"julianday\s*\(\s*(.*?)\s*\)",
+            r"(EXTRACT(EPOCH FROM ((\1)::timestamp)) / 86400.0)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+
         # 4. 处理 LIKE -> ILIKE (Postgres 强制区分大小写，SQLite 默认不区分)
         # 大部分业务场景下，LIKE 用于搜索，期望不区分大小写
         sql = re.sub(r"\bLIKE\b", "ILIKE", sql, flags=re.IGNORECASE)
@@ -220,6 +245,48 @@ class DatabasePool:
     def is_postgres():
         db_type = DB_CONFIG.get('TYPE', 'sqlite')
         return db_type == 'postgres'
+
+    @classmethod
+    def table_exists(cls, conn, table_name, schema='public'):
+        if cls.is_postgres():
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = %s AND table_name = %s
+                """,
+                (schema, table_name),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table_name,),
+            ).fetchone()
+        return row is not None
+
+    @classmethod
+    def get_table_columns(cls, conn, table_name, schema='public'):
+        if cls.is_postgres():
+            rows = conn.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = %s AND table_name = %s
+                """,
+                (schema, table_name),
+            ).fetchall()
+            return {r['column_name'] for r in rows}
+
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {r['name'] if not isinstance(r, tuple) else r[1] for r in rows}
+
+    @classmethod
+    def get_inserted_id(cls, cursor):
+        """兼容 PostgreSQL RETURNING id 与 SQLite lastrowid。"""
+        if cls.is_postgres():
+            row = cursor.fetchone()
+            return row[0] if row else None
+        return cursor.lastrowid
 
     @classmethod
     def _init_pg_pool(cls):

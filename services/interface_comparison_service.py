@@ -24,20 +24,20 @@ class InterfaceComparisonService:
             query = '''
                 SELECT id, interface_name, transcode, system_type, description, action_name, view_name
                 FROM interface_specs
-                WHERE (project_id = ? OR project_id IS NULL) AND spec_source = 'our_standard'
+                WHERE (project_id = ? OR project_id IS NULL) AND spec_source IN ('our_standard', 'our', 'standard')
             '''
             params = [project_id]
             if category:
                 query += ' AND category = ?'
                 params.append(category)
             
-            our_specs = [dict(s) for s in conn.execute(query, params).fetchall()]
+            our_specs = [dict(s) for s in conn.execute(DatabasePool.format_sql(query), params).fetchall()]
 
-            vendor_specs = [dict(s) for s in conn.execute('''
+            vendor_specs = [dict(s) for s in conn.execute(DatabasePool.format_sql('''
                 SELECT id, interface_name, transcode, system_type, description, action_name, view_name
                 FROM interface_specs
                 WHERE project_id = ? AND spec_source = 'vendor'
-            ''', (project_id,)).fetchall()]
+            '''), (project_id,)).fetchall()]
 
         if not our_specs or not vendor_specs:
             return []
@@ -197,12 +197,12 @@ class InterfaceComparisonService:
     def compare_fields(self, our_spec_id: int, vendor_spec_id: int) -> dict:
         """逐字段对照两个接口"""
         with DatabasePool.get_connection() as conn:
-            our_spec = dict(conn.execute('SELECT * FROM interface_specs WHERE id = ?', (our_spec_id,)).fetchone())
-            vendor_spec = dict(conn.execute('SELECT * FROM interface_specs WHERE id = ?', (vendor_spec_id,)).fetchone())
+            our_spec = dict(conn.execute(DatabasePool.format_sql('SELECT * FROM interface_specs WHERE id = ?'), (our_spec_id,)).fetchone())
+            vendor_spec = dict(conn.execute(DatabasePool.format_sql('SELECT * FROM interface_specs WHERE id = ?'), (vendor_spec_id,)).fetchone())
             our_fields = [dict(f) for f in conn.execute(
-                'SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order', (our_spec_id,)).fetchall()]
+                DatabasePool.format_sql('SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order'), (our_spec_id,)).fetchall()]
             vendor_fields = [dict(f) for f in conn.execute(
-                'SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order', (vendor_spec_id,)).fetchall()]
+                DatabasePool.format_sql('SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order'), (vendor_spec_id,)).fetchall()]
 
         # 构建对方字段的多维索引
         vendor_index = {}
@@ -356,14 +356,14 @@ class InterfaceComparisonService:
                 query_old += ' AND category = ?'
                 params_old.append(category)
             
-            old_comps = conn.execute(query_old, params_old).fetchall()
+            old_comps = conn.execute(DatabasePool.format_sql(query_old), params_old).fetchall()
             for oc in old_comps:
-                conn.execute('DELETE FROM field_mappings WHERE comparison_id = ?', (oc['id'],))
+                conn.execute(DatabasePool.format_sql('DELETE FROM field_mappings WHERE comparison_id = ?'), (oc['id'],))
             
             if category:
-                conn.execute('DELETE FROM interface_comparisons WHERE project_id = ? AND category = ?', (project_id, category))
+                conn.execute(DatabasePool.format_sql('DELETE FROM interface_comparisons WHERE project_id = ? AND category = ?'), (project_id, category))
             else:
-                conn.execute('DELETE FROM interface_comparisons WHERE project_id = ? AND category IS NULL', (project_id,))
+                conn.execute(DatabasePool.format_sql('DELETE FROM interface_comparisons WHERE project_id = ? AND category IS NULL'), (project_id,))
 
             for match in matches:
                 our_id = match['our_spec_id']
@@ -375,13 +375,13 @@ class InterfaceComparisonService:
 
                 if vendor_id is None:
                     # 我方有、对方无
-                    our_spec = conn.execute('SELECT interface_name FROM interface_specs WHERE id = ?', (our_id,)).fetchone()
-                    conn.execute('''
+                    our_spec = conn.execute(DatabasePool.format_sql('SELECT interface_name FROM interface_specs WHERE id = ?'), (our_id,)).fetchone()
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO interface_comparisons
                         (project_id, our_spec_id, vendor_spec_id, match_type, match_confidence,
                          comparison_result, summary, gap_count, status, category)
                         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'pending', ?)
-                    ''', (project_id, our_id, match['match_type'], match['match_confidence'],
+                    '''), (project_id, our_id, match['match_type'], match['match_confidence'],
                           '{}', match['match_reason'], 1, category))
                     summary_stats['missing_interface'] += 1
                     results.append({
@@ -396,27 +396,30 @@ class InterfaceComparisonService:
                 comp = self.compare_fields(our_id, vendor_id)
                 stats = comp['stats']
 
-                cursor = conn.execute('''
+                comp_sql = '''
                     INSERT INTO interface_comparisons
                     (project_id, our_spec_id, vendor_spec_id, match_type, match_confidence,
                      comparison_result, gap_count, transform_count, status, category)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-                ''', (project_id, our_id, vendor_id, match['match_type'],
+                '''
+                if DatabasePool.is_postgres():
+                    comp_sql += ' RETURNING id'
+                cursor = conn.execute(DatabasePool.format_sql(comp_sql), (project_id, our_id, vendor_id, match['match_type'],
                       match['match_confidence'],
                       json.dumps({'stats': stats, 'protocol_match': comp['protocol_match']}, ensure_ascii=False),
                       stats['missing_in_vendor'] + stats['type_mismatch'],
                       stats['needs_transform'] + stats['name_different'],
                       category))
-                comp_id = cursor.lastrowid
+                comp_id = DatabasePool.get_inserted_id(cursor)
 
                 # 保存字段映射
                 for m in comp['mappings']:
-                    conn.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO field_mappings
                         (comparison_id, our_field_id, vendor_field_id, our_field_name,
                          vendor_field_name, mapping_status, transform_rule)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ''', (comp_id, m.get('our_field_id'), m.get('vendor_field_id'),
+                    '''), (comp_id, m.get('our_field_id'), m.get('vendor_field_id'),
                           m.get('our_field_name'), m.get('vendor_field_name'),
                           m['mapping_status'], m.get('transform_rule')))
 
@@ -460,10 +463,10 @@ class InterfaceComparisonService:
                     new_status = '待开发'
                     remark = f"需协调: 缺少{s['missing_in_vendor']}个字段, 类型不匹配{s['type_mismatch']}个"
 
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     UPDATE interfaces SET status = ?, remark = ?
                     WHERE project_id = ? AND (interface_name LIKE ? OR system_name LIKE ?)
-                ''', (new_status, remark, project_id, f'%{our_name}%', f'%{our_name}%'))
+                '''), (new_status, remark, project_id, f'%{our_name}%', f'%{our_name}%'))
             conn.commit()
 
     # ========== AI 报告生成 ==========
@@ -471,8 +474,8 @@ class InterfaceComparisonService:
     def generate_ai_report(self, project_id: int) -> str:
         """生成整个项目的接口对照分析报告"""
         with DatabasePool.get_connection() as conn:
-            project = dict(conn.execute('SELECT project_name, hospital_name FROM projects WHERE id = ?', (project_id,)).fetchone())
-            comps = [dict(c) for c in conn.execute('''
+            project = dict(conn.execute(DatabasePool.format_sql('SELECT project_name, hospital_name FROM projects WHERE id = ?'), (project_id,)).fetchone())
+            comps = [dict(c) for c in conn.execute(DatabasePool.format_sql('''
                 SELECT ic.*, os.interface_name as our_name, os.system_type,
                        vs.interface_name as vendor_name, vs.vendor_name as vendor_company
                 FROM interface_comparisons ic
@@ -480,7 +483,7 @@ class InterfaceComparisonService:
                 LEFT JOIN interface_specs vs ON ic.vendor_spec_id = vs.id
                 WHERE ic.project_id = ?
                 ORDER BY ic.gap_count DESC
-            ''', (project_id,)).fetchall()]
+            '''), (project_id,)).fetchall()]
 
         if not comps:
             return "暂无对照数据，请先上传接口文档并执行对照。"

@@ -123,11 +123,11 @@ class WeComMsgHandler:
             parsed = self._ai_parse_log(content)
             
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO work_logs (project_id, member_name, log_date, work_content, 
                                           issues_encountered, tomorrow_plan, work_type, work_hours)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                '''), (
                     project_id,
                     member_name,
                     datetime.now().strftime('%Y-%m-%d'),
@@ -163,12 +163,12 @@ class WeComMsgHandler:
             image_path = self._get_pending_image(userid)
             
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO issues (project_id, issue_type, description, severity, status)
                     VALUES (?, ?, ?, ?, '待处理')
-                ''', (project_id, '现场问题', description, severity))
+                '''), (project_id, '现场问题', description, severity))
                 
-                project = conn.execute('SELECT project_name FROM projects WHERE id = ?', 
+                project = conn.execute(DatabasePool.format_sql('SELECT project_name FROM projects WHERE id = ?'), 
                                       (project_id,)).fetchone()
             
             # 如果是高危问题，额外通知项目经理
@@ -201,31 +201,31 @@ class WeComMsgHandler:
         try:
             with DatabasePool.get_connection() as conn:
                 user = conn.execute(
-                    'SELECT id FROM users WHERE wecom_userid = ?', (userid,)
+                    DatabasePool.format_sql('SELECT id FROM users WHERE wecom_userid = ?'), (userid,)
                 ).fetchone()
                 
                 if not user:
                     return "❌ 账号未绑定，请先通过Web端登录绑定企业微信。"
                 
                 # 获取用户的所有项目
-                projects = conn.execute('''
+                projects = conn.execute(DatabasePool.format_sql('''
                     SELECT p.project_name, p.hospital_name, p.status, p.progress, p.risk_score
                     FROM project_user_access pa
                     JOIN projects p ON pa.project_id = p.id
-                    WHERE pa.user_id = ? AND p.status NOT IN ('已完成', '已终止')
+                    WHERE pa.user_id = ? AND p.status NOT IN ('已完成', '已终止', '已验收', '质保期')
                     ORDER BY p.risk_score DESC
-                ''', (user['id'],)).fetchall()
+                '''), (user['id'],)).fetchall()
                 
                 if not projects:
                     # fallback: 按 project_manager 匹配
-                    display_name = conn.execute('SELECT display_name FROM users WHERE id = ?', 
+                    display_name = conn.execute(DatabasePool.format_sql('SELECT display_name FROM users WHERE id = ?'), 
                                                (user['id'],)).fetchone()
                     if display_name:
-                        projects = conn.execute('''
+                        projects = conn.execute(DatabasePool.format_sql('''
                             SELECT project_name, hospital_name, status, progress, risk_score
                             FROM projects WHERE project_manager = ? 
-                            AND status NOT IN ('已完成', '已终止')
-                        ''', (display_name['display_name'],)).fetchall()
+                            AND status NOT IN ('已完成', '已终止', '已验收', '质保期')
+                        '''), (display_name['display_name'],)).fetchall()
                 
                 if not projects:
                     return "你目前没有进行中的项目。"
@@ -249,7 +249,7 @@ class WeComMsgHandler:
             with DatabasePool.get_connection() as conn:
                 # 1. 检查是否已绑定
                 user = conn.execute(
-                    'SELECT id, display_name FROM users WHERE wecom_userid = ?', (userid,)
+                    DatabasePool.format_sql('SELECT id, display_name FROM users WHERE wecom_userid = ?'), (userid,)
                 ).fetchone()
                 
                 if user:
@@ -262,12 +262,12 @@ class WeComMsgHandler:
                 
                 if name:
                     name_match = conn.execute(
-                        'SELECT id, display_name FROM users WHERE display_name = ? AND wecom_userid IS NULL',
+                        DatabasePool.format_sql('SELECT id, display_name FROM users WHERE display_name = ? AND wecom_userid IS NULL'),
                         (name,)
                     ).fetchone()
                     
                     if name_match:
-                        conn.execute('UPDATE users SET wecom_userid = ? WHERE id = ?', (userid, name_match['id']))
+                        conn.execute(DatabasePool.format_sql('UPDATE users SET wecom_userid = ? WHERE id = ?'), (userid, name_match['id']))
                         conn.commit()
                         return f"✅ 自动绑定成功！\n系统已根据姓名识别出你的账户: **{name_match['display_name']}**。\n现在你可以接收项目预警消息了。"
                 
@@ -320,36 +320,36 @@ class WeComMsgHandler:
         """获取用户的主项目ID（取最近活跃的）"""
         with DatabasePool.get_connection() as conn:
             user = conn.execute(
-                'SELECT id, display_name FROM users WHERE wecom_userid = ?', (wecom_userid,)
+                DatabasePool.format_sql('SELECT id, display_name FROM users WHERE wecom_userid = ?'), (wecom_userid,)
             ).fetchone()
             
             if not user:
                 return None
             
             # 优先从 project_user_access 找
-            project = conn.execute('''
+            project = conn.execute(DatabasePool.format_sql('''
                 SELECT pa.project_id FROM project_user_access pa
                 JOIN projects p ON pa.project_id = p.id
-                WHERE pa.user_id = ? AND p.status NOT IN ('已完成', '已终止')
+                WHERE pa.user_id = ? AND p.status NOT IN ('已完成', '已终止', '已验收', '质保期')
                 ORDER BY p.updated_at DESC LIMIT 1
-            ''', (user['id'],)).fetchone()
+            '''), (user['id'],)).fetchone()
             
             if project:
                 return project['project_id']
             
             # fallback: 按 project_manager 匹配
-            project = conn.execute('''
+            project = conn.execute(DatabasePool.format_sql('''
                 SELECT id FROM projects 
-                WHERE project_manager = ? AND status NOT IN ('已完成', '已终止')
+                WHERE project_manager = ? AND status NOT IN ('已完成', '已终止', '已验收', '质保期')
                 ORDER BY updated_at DESC LIMIT 1
-            ''', (user['display_name'],)).fetchone()
+            '''), (user['display_name'],)).fetchone()
             
             return project['id'] if project else None
     
     def _get_user_display_name(self, wecom_userid: str) -> str:
         with DatabasePool.get_connection() as conn:
             user = conn.execute(
-                'SELECT display_name FROM users WHERE wecom_userid = ?', (wecom_userid,)
+                DatabasePool.format_sql('SELECT display_name FROM users WHERE wecom_userid = ?'), (wecom_userid,)
             ).fetchone()
             return user['display_name'] if user else wecom_userid
     

@@ -15,7 +15,7 @@ def get_project_snapshot(project_id):
 
 @collab_bp.route('/parse-multi-logs', methods=['POST'])
 def parse_multi_logs():
-    data = request.json
+    data = request.json or {}
     raw_text = data.get('raw_text')
     if not raw_text:
         return api_response(False, error="Missing raw_text")
@@ -25,7 +25,7 @@ def parse_multi_logs():
 
 @collab_bp.route('/meeting-actions', methods=['POST'])
 def extract_meeting_actions():
-    data = request.json
+    data = request.json or {}
     transcript = data.get('transcript')
     if not transcript:
         return api_response(False, error="Missing transcript")

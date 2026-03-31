@@ -13,36 +13,28 @@ class LogService:
     @staticmethod
     def get_work_logs(project_id, start_date=None, end_date=None):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            query = f'SELECT * FROM work_logs WHERE project_id = {placeholder}'
+            query = 'SELECT * FROM work_logs WHERE project_id = ?'
             params = [project_id]
             
             if start_date:
-                query += f' AND log_date >= {placeholder}'
+                query += ' AND log_date >= ?'
                 params.append(start_date)
             if end_date:
-                query += f' AND log_date <= {placeholder}'
+                query += ' AND log_date <= ?'
                 params.append(end_date)
             
             query += ' ORDER BY log_date DESC, created_at DESC'
-            logs = conn.execute(query, params).fetchall()
+            logs = conn.execute(DatabasePool.format_sql(query), params).fetchall()
             return [dict(l) for l in logs]
 
     @staticmethod
     def add_work_log(project_id, data):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            conn.execute(f'''
+            conn.execute(DatabasePool.format_sql('''
                 INSERT INTO work_logs (project_id, member_id, member_name, log_date, work_hours, work_type, 
                     work_content, issues_encountered, tomorrow_plan)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            ''', (project_id, data.get('member_id'), data.get('member_name'), 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''), (project_id, data.get('member_id'), data.get('member_name'), 
                   data.get('log_date', datetime.now().strftime('%Y-%m-%d')),
                   data.get('work_hours', 8), data.get('work_type', '现场'),
                   data.get('work_content'), data.get('issues_encountered'), data.get('tomorrow_plan')))
@@ -52,61 +44,59 @@ class LogService:
     @staticmethod
     def update_work_log(log_id, data):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            conn.execute(f'''
-                UPDATE work_logs SET member_id={placeholder}, member_name={placeholder}, log_date={placeholder}, 
-                    work_hours={placeholder}, work_type={placeholder}, work_content={placeholder}, 
-                    issues_encountered={placeholder}, tomorrow_plan={placeholder} WHERE id={placeholder}
-            ''', (data.get('member_id'), data.get('member_name'), data.get('log_date'),
-                  data.get('work_hours'), data.get('work_type'), data.get('work_content'),
-                  data.get('issues_encountered'), data.get('tomorrow_plan'), log_id))
+            existing = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM work_logs WHERE id = ?'),
+                (log_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            existing = dict(existing)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE work_logs SET member_id=?, member_name=?, log_date=?, 
+                    work_hours=?, work_type=?, work_content=?, 
+                    issues_encountered=?, tomorrow_plan=? WHERE id=?
+            '''), (
+                data.get('member_id', existing.get('member_id')),
+                data.get('member_name', existing.get('member_name')),
+                data.get('log_date', existing.get('log_date')),
+                data.get('work_hours', existing.get('work_hours')),
+                data.get('work_type', existing.get('work_type')),
+                data.get('work_content', existing.get('work_content')),
+                data.get('issues_encountered', existing.get('issues_encountered')),
+                data.get('tomorrow_plan', existing.get('tomorrow_plan')),
+                log_id
+            ))
             conn.commit()
             return True
 
     @staticmethod
     def delete_work_log(log_id):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            conn.execute(f'DELETE FROM work_logs WHERE id = {placeholder}', (log_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM work_logs WHERE id = ?'), (log_id,))
             conn.commit()
             return True
 
     @staticmethod
     def get_work_log_stats(project_id):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            total = conn.execute(f'SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = {placeholder}', 
+            total = conn.execute(DatabasePool.format_sql('SELECT SUM(work_hours) as total FROM work_logs WHERE project_id = ?'), 
                                 (project_id,)).fetchone()['total'] or 0
             
-            by_member = conn.execute(f'''
+            by_member = conn.execute(DatabasePool.format_sql('''
                 SELECT member_name, SUM(work_hours) as hours, COUNT(*) as days
-                FROM work_logs WHERE project_id = {placeholder} GROUP BY member_name ORDER BY hours DESC
-            ''', (project_id,)).fetchall()
+                FROM work_logs WHERE project_id = ? GROUP BY member_name ORDER BY hours DESC
+            '''), (project_id,)).fetchall()
             
-            if db_type == 'postgres':
-                by_month_sql = f'''
-                    SELECT TO_CHAR(log_date, 'YYYY-MM') as month, SUM(work_hours) as hours
-                    FROM work_logs WHERE project_id = {placeholder} GROUP BY month ORDER BY month
-                '''
-            else:
-                by_month_sql = f'''
-                    SELECT strftime('%Y-%m', log_date) as month, SUM(work_hours) as hours
-                    FROM work_logs WHERE project_id = ? GROUP BY month ORDER BY month
-                '''
-            by_month = conn.execute(by_month_sql, (project_id,)).fetchall()
+            by_month_sql = '''
+                SELECT SUBSTR(CAST(log_date AS TEXT), 1, 7) as month, SUM(work_hours) as hours
+                FROM work_logs WHERE project_id = ? GROUP BY month ORDER BY month
+            '''
+            by_month = conn.execute(DatabasePool.format_sql(by_month_sql), (project_id,)).fetchall()
             
-            by_type = conn.execute(f'''
+            by_type = conn.execute(DatabasePool.format_sql('''
                 SELECT work_type, SUM(work_hours) as hours
-                FROM work_logs WHERE project_id = {placeholder} GROUP BY work_type
-            ''', (project_id,)).fetchall()
+                FROM work_logs WHERE project_id = ? GROUP BY work_type
+            '''), (project_id,)).fetchall()
             
             return {
                 'total_hours': round(total, 1),
@@ -119,25 +109,18 @@ class LogService:
     @staticmethod
     def get_project_departures(project_id):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            departures = conn.execute(f'SELECT * FROM project_departures WHERE project_id = {placeholder} ORDER BY created_at DESC', (project_id,)).fetchall()
+            departures = conn.execute(DatabasePool.format_sql('SELECT * FROM project_departures WHERE project_id = ? ORDER BY created_at DESC'), (project_id,)).fetchall()
             return [dict(d) for d in departures]
 
     @staticmethod
     def add_project_departure(project_id, data):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            conn.execute(f'''
+            conn.execute(DatabasePool.format_sql('''
                 INSERT INTO project_departures (project_id, departure_type, departure_date, expected_return_date,
                     reason, handover_person, our_persons, doc_handover, account_handover, training_handover,
                     issue_handover, contact_handover, pending_issues, remote_support_info, remark)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            ''', (project_id, data['departure_type'], data['departure_date'], data.get('expected_return_date'),
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''), (project_id, data['departure_type'], data['departure_date'], data.get('expected_return_date'),
                   data.get('reason'), data.get('handover_person'), data.get('our_persons'),
                   True if data.get('doc_handover') else False, True if data.get('account_handover') else False,
                   True if data.get('training_handover') else False, True if data.get('issue_handover') else False,
@@ -152,11 +135,11 @@ class LogService:
             elif data['departure_type'] == '验收离场':
                 new_status = '已验收'
             
-            conn.execute(f'UPDATE projects SET status = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}', 
+            conn.execute(DatabasePool.format_sql('UPDATE projects SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'), 
                          (new_status, project_id))
             conn.commit()
             
-            project = conn.execute(f'SELECT project_name FROM projects WHERE id = {placeholder}', (project_id,)).fetchone()
+            project = conn.execute(DatabasePool.format_sql('SELECT project_name FROM projects WHERE id = ?'), (project_id,)).fetchone()
             
             audit_service.log_operation('用户', '离场申请', 'project', project_id, project['project_name'],
                                      None, {'departure_type': data['departure_type'], 'status': new_status})
@@ -171,21 +154,36 @@ class LogService:
     @staticmethod
     def update_project_departure(departure_id, data):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            
-            conn.execute(f'''
-                UPDATE project_departures SET departure_type={placeholder}, departure_date={placeholder}, expected_return_date={placeholder},
-                    reason={placeholder}, handover_person={placeholder}, our_persons={placeholder}, doc_handover={placeholder}, account_handover={placeholder}, 
-                    training_handover={placeholder}, issue_handover={placeholder}, contact_handover={placeholder}, pending_issues={placeholder},
-                    remote_support_info={placeholder}, status={placeholder}, remark={placeholder} WHERE id={placeholder}
-            ''', (data.get('departure_type'), data.get('departure_date'), data.get('expected_return_date'),
-                  data.get('reason'), data.get('handover_person'), data.get('our_persons'),
-                  True if data.get('doc_handover') else False, True if data.get('account_handover') else False, 
-                  True if data.get('training_handover') else False, True if data.get('issue_handover') else False, 
-                  True if data.get('contact_handover') else False, data.get('pending_issues'),
-                  data.get('remote_support_info'), data.get('status'), data.get('remark'), departure_id))
+            existing = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM project_departures WHERE id = ?'),
+                (departure_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            existing = dict(existing)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE project_departures SET departure_type=?, departure_date=?, expected_return_date=?,
+                    reason=?, handover_person=?, our_persons=?, doc_handover=?, account_handover=?, 
+                    training_handover=?, issue_handover=?, contact_handover=?, pending_issues=?,
+                    remote_support_info=?, status=?, remark=? WHERE id=?
+            '''), (
+                data.get('departure_type', existing.get('departure_type')),
+                data.get('departure_date', existing.get('departure_date')),
+                data.get('expected_return_date', existing.get('expected_return_date')),
+                data.get('reason', existing.get('reason')),
+                data.get('handover_person', existing.get('handover_person')),
+                data.get('our_persons', existing.get('our_persons')),
+                data.get('doc_handover', existing.get('doc_handover')),
+                data.get('account_handover', existing.get('account_handover')),
+                data.get('training_handover', existing.get('training_handover')),
+                data.get('issue_handover', existing.get('issue_handover')),
+                data.get('contact_handover', existing.get('contact_handover')),
+                data.get('pending_issues', existing.get('pending_issues')),
+                data.get('remote_support_info', existing.get('remote_support_info')),
+                data.get('status', existing.get('status')),
+                data.get('remark', existing.get('remark')),
+                departure_id
+            ))
             conn.commit()
             return True
 
@@ -193,19 +191,15 @@ class LogService:
     def record_return(departure_id, data):
         with DatabasePool.get_connection() as conn:
             return_date = data.get('return_date', datetime.now().strftime('%Y-%m-%d'))
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE project_departures SET actual_return_date = ?, status = '已返场' WHERE id = ?
+            '''), (return_date, departure_id))
             
-            conn.execute(f'''
-                UPDATE project_departures SET actual_return_date = {placeholder}, status = '已返场' WHERE id = {placeholder}
-            ''', (return_date, departure_id))
-            
-            departure = conn.execute(f'SELECT project_id FROM project_departures WHERE id = {placeholder}', (departure_id,)).fetchone()
-            conn.execute(f'UPDATE projects SET status = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}', 
+            departure = conn.execute(DatabasePool.format_sql('SELECT project_id FROM project_departures WHERE id = ?'), (departure_id,)).fetchone()
+            conn.execute(DatabasePool.format_sql('UPDATE projects SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'), 
                          ('进行中', departure['project_id']))
             
-            project = conn.execute(f'SELECT project_name FROM projects WHERE id = {placeholder}', (departure['project_id'],)).fetchone()
+            project = conn.execute(DatabasePool.format_sql('SELECT project_name FROM projects WHERE id = ?'), (departure['project_id'],)).fetchone()
             conn.commit()
             
             audit_service.log_operation('用户', '返场', 'project', departure['project_id'], project['project_name'])
@@ -220,10 +214,7 @@ class LogService:
     @staticmethod
     def delete_departure(departure_id):
         with DatabasePool.get_connection() as conn:
-            from app_config import DB_CONFIG
-            db_type = DB_CONFIG.get('TYPE', 'sqlite')
-            placeholder = '%s' if db_type == 'postgres' else '?'
-            conn.execute(f'DELETE FROM project_departures WHERE id = {placeholder}', (departure_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM project_departures WHERE id = ?'), (departure_id,))
             conn.commit()
             return True
 

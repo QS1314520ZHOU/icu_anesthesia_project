@@ -12,13 +12,13 @@ def get_project_changes(project_id):
 
 @lifecycle_bp.route('/projects/<int:project_id>/changes', methods=['POST'])
 def add_project_change(project_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.add_project_change(project_id, data)
     return api_response(True)
 
 @lifecycle_bp.route('/changes/<int:change_id>', methods=['PUT'])
 def update_change(change_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.update_change(change_id, data)
     return api_response(True)
 
@@ -35,13 +35,13 @@ def get_project_acceptances(project_id):
 
 @lifecycle_bp.route('/projects/<int:project_id>/acceptances', methods=['POST'])
 def add_project_acceptance(project_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.add_project_acceptance(project_id, data)
     return api_response(True)
 
 @lifecycle_bp.route('/acceptances/<int:acceptance_id>', methods=['PUT'])
 def update_acceptance(acceptance_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.update_acceptance(acceptance_id, data)
     return api_response(True)
 
@@ -58,13 +58,19 @@ def get_customer_satisfaction(project_id):
 
 @lifecycle_bp.route('/projects/<int:project_id>/satisfaction', methods=['POST'])
 def add_customer_satisfaction(project_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.add_customer_satisfaction(project_id, data)
     return api_response(True)
 
 @lifecycle_bp.route('/satisfaction/<int:satisfaction_id>', methods=['DELETE'])
 def delete_satisfaction(satisfaction_id):
     lifecycle_service.delete_satisfaction(satisfaction_id)
+    return api_response(True)
+
+@lifecycle_bp.route('/satisfaction/<int:satisfaction_id>', methods=['PUT'])
+def update_customer_satisfaction(satisfaction_id):
+    data = request.json or {}
+    lifecycle_service.update_customer_satisfaction(satisfaction_id, data)
     return api_response(True)
 
 @lifecycle_bp.route('/projects/<int:project_id>/satisfaction/stats', methods=['GET'])
@@ -80,11 +86,17 @@ def get_follow_ups(project_id):
 
 @lifecycle_bp.route('/projects/<int:project_id>/followups', methods=['POST'])
 def add_follow_up(project_id):
-    data = request.json
+    data = request.json or {}
     lifecycle_service.add_follow_up(project_id, data)
     return api_response(True)
 
 @lifecycle_bp.route('/followups/<int:followup_id>', methods=['DELETE'])
 def delete_follow_up(followup_id):
     lifecycle_service.delete_follow_up(followup_id)
+    return api_response(True)
+
+@lifecycle_bp.route('/followups/<int:followup_id>', methods=['PUT'])
+def update_follow_up(followup_id):
+    data = request.json or {}
+    lifecycle_service.update_follow_up(followup_id, data)
     return api_response(True)

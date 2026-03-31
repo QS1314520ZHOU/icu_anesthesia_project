@@ -121,22 +121,22 @@ class ReportGenerationService:
     def _get_project_data(project_id):
         try:
             with DatabasePool.get_connection() as conn:
-                project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project:
                     return None
                 
-                stages = conn.execute('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order', (project_id,)).fetchall()
-                milestones = conn.execute('SELECT * FROM milestones WHERE project_id = ? ORDER BY target_date', (project_id,)).fetchall()
+                stages = conn.execute(DatabasePool.format_sql('SELECT * FROM project_stages WHERE project_id = ? ORDER BY stage_order'), (project_id,)).fetchall()
+                milestones = conn.execute(DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ? ORDER BY target_date'), (project_id,)).fetchall()
                 
                 # 获取所有任务
                 stage_ids = [s['id'] for s in stages]
                 tasks = []
                 if stage_ids:
                     placeholders = ', '.join(['?'] * len(stage_ids))
-                    tasks = conn.execute(f'SELECT * FROM tasks WHERE stage_id IN ({placeholders})', stage_ids).fetchall()
+                    tasks = conn.execute(DatabasePool.format_sql(f'SELECT * FROM tasks WHERE stage_id IN ({placeholders})'), stage_ids).fetchall()
                 
                 # 获取最近日志
-                logs = conn.execute('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 20', (project_id,)).fetchall()
+                logs = conn.execute(DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 20'), (project_id,)).fetchall()
                 
                 return {
                     'project': dict(project),
@@ -181,7 +181,7 @@ class ReportGenerationService:
         """
         try:
             with DatabasePool.get_connection() as conn:
-                project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project:
                     return None
                 
@@ -210,27 +210,28 @@ class ReportGenerationService:
                 
                 # 获取该期间的日志
                 logs = conn.execute(
-                    'SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? AND log_date < ? ORDER BY log_date',
+                    DatabasePool.format_sql('SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? AND log_date < ? ORDER BY log_date'),
                     (project_id, start_date, end_date)
                 ).fetchall()
                 
                 # 获取该期间完成的任务
                 tasks = conn.execute(
-                    '''SELECT t.*, s.stage_name FROM tasks t 
+                    DatabasePool.format_sql('''SELECT t.*, s.stage_name FROM tasks t 
                        JOIN project_stages s ON t.stage_id = s.id 
                        WHERE s.project_id = ? AND t.is_completed = ? AND t.completed_date >= ? AND t.completed_date < ?''',
+                    ),
                     (project_id, True, start_date, end_date)
                 ).fetchall()
                 
                 # 获取该期间完成的里程碑
                 milestones = conn.execute(
-                    'SELECT * FROM milestones WHERE project_id = ? AND is_completed = ? AND completed_date >= ? AND completed_date < ?',
+                    DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ? AND is_completed = ? AND completed_date >= ? AND completed_date < ?'),
                     (project_id, True, start_date, end_date)
                 ).fetchall()
                 
                 # 获取财务数据 (汇总回款金额)
                 revenue_res = conn.execute(
-                    'SELECT SUM(amount) as collected_total FROM project_revenues WHERE project_id = ?', (project_id,)
+                    DatabasePool.format_sql('SELECT SUM(amount) as collected_total FROM project_revenue WHERE project_id = ?'), (project_id,)
                 ).fetchone()
                 collected_amount = revenue_res['collected_total'] if revenue_res['collected_total'] else 0
                 

@@ -13,32 +13,33 @@ class AIInsightService:
         """聚合日报、任务和进度，生成AI每日建议（支持当日缓存）"""
         try:
             today_date = datetime.now().strftime('%Y-%m-%d')
+            tomorrow_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
             
             # 1. 检查缓存
             if not force_refresh:
                 with DatabasePool.get_connection() as conn:
-                    cache = conn.execute('''
+                    cache = conn.execute(DatabasePool.format_sql('''
                         SELECT content FROM ai_report_cache 
                         WHERE project_id = ? AND report_type = 'daily_advice'
-                        AND date(created_at) = ?
-                    ''', (project_id, today_date)).fetchone()
+                        AND created_at >= ? AND created_at < ?
+                    '''), (project_id, today_date, tomorrow_date)).fetchone()
                     if cache:
                         return cache['content']
 
             with DatabasePool.get_connection() as conn:
                 # 2. 获取项目基本信息
-                project = conn.execute('SELECT id, project_name, progress, status FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT id, project_name, progress, status FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project:
                     return "项目不存在"
 
                 # 3. 获取最近 3 天的日报
                 three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
-                reports = conn.execute('''
+                reports = conn.execute(DatabasePool.format_sql('''
                     SELECT log_date, work_content, issues_encountered 
                     FROM work_logs 
                     WHERE project_id = ? AND log_date >= ?
                     ORDER BY log_date DESC
-                ''', (project_id, three_days_ago)).fetchall()
+                '''), (project_id, three_days_ago)).fetchall()
                 
                 report_text = "\n".join([
                     f"[{r['log_date']}] 工作: {r['work_content']} | 问题: {r['issues_encountered']}" 
@@ -46,13 +47,13 @@ class AIInsightService:
                 ]) if reports else "最近无日报记录"
 
                 # 4. 获取近期未完成的高优先级任务
-                tasks = conn.execute('''
+                tasks = conn.execute(DatabasePool.format_sql('''
                     SELECT t.task_name, s.stage_name 
                     FROM tasks t
                     JOIN project_stages s ON t.stage_id = s.id
                     WHERE s.project_id = ? AND t.is_completed = ?
                     LIMIT 10
-                ''', (project_id, False)).fetchall()
+                '''), (project_id, False)).fetchall()
                 
                 task_text = "\n".join([f"- {t['stage_name']}: {t['task_name']}" for t in tasks]) if tasks else "当前无待办任务"
 
@@ -93,16 +94,16 @@ class AIInsightService:
                     # 7. 更新缓存
                     with DatabasePool.get_connection() as conn:
                         # 先删除今日旧缓存
-                        conn.execute('''
+                        conn.execute(DatabasePool.format_sql('''
                             DELETE FROM ai_report_cache 
                             WHERE project_id = ? AND report_type = 'daily_advice'
-                            AND date(created_at) = ?
-                        ''', (project_id, today_date))
+                            AND created_at >= ? AND created_at < ?
+                        '''), (project_id, today_date, tomorrow_date))
                         
-                        res = conn.execute('''
+                        res = conn.execute(DatabasePool.format_sql('''
                             INSERT INTO ai_report_cache (project_id, report_type, content, created_at)
                             VALUES (?, ?, ?, ?)
-                        ''', (project_id, 'daily_advice', advice, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                        '''), (project_id, 'daily_advice', advice, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                         conn.commit()
                         print(f"[DEBUG] Cache saved for project {project_id}, rowcount: {res.rowcount}")
                 
@@ -118,13 +119,13 @@ class AIInsightService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 获取近30天的风险评分历史
-                history = conn.execute('''
+                history = conn.execute(DatabasePool.format_sql('''
                     SELECT record_date, risk_score, sentiment_score 
                     FROM project_risk_history 
                     WHERE project_id = ? 
                     ORDER BY record_date ASC
                     LIMIT 30
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 
                 dates = [h['record_date'] for h in history]
                 risk_scores = [h['risk_score'] for h in history]
@@ -135,13 +136,13 @@ class AIInsightService:
                 for i in range(4):
                     start_date = (datetime.now() - timedelta(weeks=i+1)).strftime('%Y-%m-%d')
                     end_date = (datetime.now() - timedelta(weeks=i)).strftime('%Y-%m-%d')
-                    count = conn.execute('''
+                    count = conn.execute(DatabasePool.format_sql('''
                         SELECT COUNT(*) as completed_count
                         FROM tasks t
                         JOIN project_stages s ON t.stage_id = s.id
                         WHERE s.project_id = ? AND t.is_completed = ? 
                         AND t.completed_date >= ? AND t.completed_date < ?
-                    ''', (project_id, True, start_date, end_date)).fetchone()['completed_count']
+                    '''), (project_id, True, start_date, end_date)).fetchone()['completed_count']
                     velocity_data.append({'week_start': start_date, 'count': count})
                 velocity_data.reverse() # 按时间正序
 
@@ -152,8 +153,8 @@ class AIInsightService:
                 for i in range(4):
                     start_date = (datetime.now() - timedelta(weeks=i+1)).strftime('%Y-%m-%d')
                     end_date = (datetime.now() - timedelta(weeks=i)).strftime('%Y-%m-%d')
-                    created = conn.execute('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ? AND created_at < ?', (project_id, start_date, end_date)).fetchone()['c']
-                    resolved = conn.execute('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND resolved_at >= ? AND resolved_at < ?', (project_id, start_date, end_date)).fetchone()['c']
+                    created = conn.execute(DatabasePool.format_sql('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ? AND created_at < ?'), (project_id, start_date, end_date)).fetchone()['c']
+                    resolved = conn.execute(DatabasePool.format_sql('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND resolved_at >= ? AND resolved_at < ?'), (project_id, start_date, end_date)).fetchone()['c']
                     issue_trend.append({'week_start': start_date, 'created': created, 'resolved': resolved})
                 issue_trend.reverse()
 
@@ -176,9 +177,9 @@ class AIInsightService:
             with DatabasePool.get_connection() as conn:
                 # 获取近7天日报与未解决的高优先级问题
                 seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
-                logs = conn.execute("SELECT work_content, issues_encountered FROM work_logs WHERE project_id=? AND log_date >= ?", (project_id, seven_days_ago)).fetchall()
+                logs = conn.execute(DatabasePool.format_sql("SELECT work_content, issues_encountered FROM work_logs WHERE project_id=? AND log_date >= ?"), (project_id, seven_days_ago)).fetchall()
                 # issues表没有 title/priority, 使用 issue_type/description/severity
-                issues = conn.execute("SELECT issue_type, description, severity FROM issues WHERE project_id=? AND status != '已解决'", (project_id,)).fetchall()
+                issues = conn.execute(DatabasePool.format_sql("SELECT issue_type, description, severity FROM issues WHERE project_id=? AND status != '已解决'"), (project_id,)).fetchall()
                 
                 text_corpus = "\n".join([f"Log: {l['work_content']} {l['issues_encountered']}" for l in logs])
                 text_corpus += "\n".join([f"Issue: [{i['issue_type']}] {i['description']} (Severity: {i['severity']})" for i in issues])
@@ -242,17 +243,23 @@ class AIInsightService:
             if 'error' in sentiment: return False
 
             # 计算平均情感分 (0-1归一化，用于存入 sentiment_score)
-            avg_sentiment = (sentiment['client'] + sentiment['team'] + sentiment['tech'] + sentiment['progress']) / 40.0
+            scores = sentiment.get('scores', {})
+            avg_sentiment = (
+                (scores.get('client', 8) or 0) +
+                (scores.get('team', 8) or 0) +
+                (scores.get('tech', 8) or 0) +
+                (scores.get('progress', 8) or 0)
+            ) / 40.0
             
             # 简易计算风险分 (这里复用 analyze_trends 里的逻辑或调用 risk_service，为简化直接模拟)
             # 实际应调用 RiskService.assess_project_risk(project_id)
             current_risk_score = 30 + (1.0 - avg_sentiment) * 40 # 情感越低风险越高
 
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO project_risk_history (project_id, record_date, risk_score, sentiment_score, trend_direction, key_risk_factors)
                     VALUES (?, ?, ?, ?, ?, ?)
-                ''', (
+                '''), (
                     project_id, 
                     datetime.now().strftime('%Y-%m-%d'), 
                     current_risk_score, 
@@ -310,11 +317,11 @@ class AIInsightService:
                 three_days_later = now + timedelta(days=3)
 
                 # 1. 滞后问题 (未解决且创建超过7天)
-                issues = conn.execute('''
+                issues = conn.execute(DatabasePool.format_sql('''
                     SELECT id, description, severity, status, created_at, 'issue' as type
                     FROM issues 
                     WHERE project_id = ? AND status != '已解决'
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 
                 for i in issues:
                     try:
@@ -332,11 +339,11 @@ class AIInsightService:
                         pass # Ignore parse errors
 
                 # 2. 未完成接口 (简单逻辑：所有未完成的)
-                interfaces = conn.execute('''
+                interfaces = conn.execute(DatabasePool.format_sql('''
                     SELECT id, system_name, interface_name, status, 'interface' as type
                     FROM interfaces 
                     WHERE project_id = ? AND status != '已完成'
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 
                 for i in interfaces:
                     item = dict(i)
@@ -345,11 +352,11 @@ class AIInsightService:
                     stale_items.append(item)
 
                 # 3. 临近或过期里程碑 (未完成且 target_date < now + 3 days)
-                milestones = conn.execute('''
+                milestones = conn.execute(DatabasePool.format_sql('''
                     SELECT id, name, target_date, is_completed, 'milestone' as type
                     FROM milestones 
                     WHERE project_id = ? AND is_completed = ?
-                ''', (project_id, False)).fetchall()
+                '''), (project_id, False)).fetchall()
                 
                 for m in milestones:
                     try:
@@ -495,7 +502,7 @@ class AIInsightService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 获取问题详情
-                issue = conn.execute('SELECT * FROM issues WHERE id = ?', (issue_id,)).fetchone()
+                issue = conn.execute(DatabasePool.format_sql('SELECT * FROM issues WHERE id = ?'), (issue_id,)).fetchone()
                 if not issue:
                     return {"success": False, "message": "Issue not found"}
                 
@@ -528,21 +535,24 @@ class AIInsightService:
                 
                 # 4. 存入 Knowledge Base
                 # 检查是否已存在类似标题 (简单去重)
-                existing = conn.execute('SELECT id FROM knowledge_base WHERE title = ?', (kb_data['title'],)).fetchone()
+                existing = conn.execute(DatabasePool.format_sql('SELECT id FROM knowledge_base WHERE title = ?'), (kb_data['title'],)).fetchone()
                 if existing:
                     return {"success": True, "message": "Knowledge item already exists", "id": existing['id']}
                 
-                cursor = conn.execute('''
+                kb_sql = '''
                     INSERT INTO knowledge_base (title, content, category, tags, created_at)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (
+                '''
+                if DatabasePool.is_postgres():
+                    kb_sql += ' RETURNING id'
+                cursor = conn.execute(DatabasePool.format_sql(kb_sql), (
                     kb_data['title'], 
                     kb_data['content'], 
                     'AI 提炼', 
                     kb_data.get('tags', '自动提取'), 
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 ))
-                new_id = cursor.lastrowid
+                new_id = DatabasePool.get_inserted_id(cursor)
                 return {"success": True, "message": "Extracted successfully", "id": new_id, "data": kb_data}
                 
         except Exception as e:
@@ -554,12 +564,12 @@ class AIInsightService:
         """查找相似项目 (规则初筛 + AI 排序)"""
         try:
             with DatabasePool.get_connection() as conn:
-                target = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
+                target = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not target:
                     return []
                 
                 # 1. 粗筛 (获取所有其他项目)
-                all_projects = conn.execute('SELECT id, project_name, hospital_name, status, risk_score FROM projects WHERE id != ?', (project_id,)).fetchall()
+                all_projects = conn.execute(DatabasePool.format_sql('SELECT id, project_name, hospital_name, status, risk_score FROM projects WHERE id != ?'), (project_id,)).fetchall()
                 
                 candidates = []
                 common_terms = ['ICU', '重症', '麻醉', '手术', '急诊', '护理', '集成']
@@ -658,7 +668,7 @@ class AIInsightService:
         try:
             with DatabasePool.get_connection() as conn:
                 # 1. 静默检测 (Silence): 超过3个工作日(简单按4天)无日报
-                last_log = conn.execute('SELECT MAX(log_date) as last_date FROM work_logs WHERE project_id = ?', (project_id,)).fetchone()
+                last_log = conn.execute(DatabasePool.format_sql('SELECT MAX(log_date) as last_date FROM work_logs WHERE project_id = ?'), (project_id,)).fetchone()
                 if not last_log['last_date']:
                     # 从未写过日志?
                     pass
@@ -676,14 +686,14 @@ class AIInsightService:
                         })
 
                 # 2. 停滞检测 (Stagnation): 进度连续14天无变化 (且状态为进行中)
-                project = conn.execute('SELECT status, progress FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT status, progress FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if project and project['status'] == '进行中':
                     # 获取最近的一条进度记录
-                    last_history = conn.execute('''
+                    last_history = conn.execute(DatabasePool.format_sql('''
                         SELECT progress, record_date FROM progress_history 
                         WHERE project_id = ? 
                         ORDER BY record_date DESC LIMIT 1
-                    ''', (project_id,)).fetchone()
+                    '''), (project_id,)).fetchone()
                     
                     if last_history:
                         last_date = datetime.strptime(str(last_history['record_date'])[:10], '%Y-%m-%d')
@@ -705,8 +715,8 @@ class AIInsightService:
                 three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
                 thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
                 
-                recent_count = conn.execute('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ?', (project_id, three_days_ago)).fetchone()['c']
-                past_count = conn.execute('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ? AND created_at < ?', (project_id, thirty_days_ago, three_days_ago)).fetchone()['c']
+                recent_count = conn.execute(DatabasePool.format_sql('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ?'), (project_id, three_days_ago)).fetchone()['c']
+                past_count = conn.execute(DatabasePool.format_sql('SELECT COUNT(*) as c FROM issues WHERE project_id=? AND created_at >= ? AND created_at < ?'), (project_id, thirty_days_ago, three_days_ago)).fetchone()['c']
                 
                 if past_count > 0:
                     avg_3days = (past_count / 27.0) * 3 # 过去27天的每3天平均
@@ -722,11 +732,11 @@ class AIInsightService:
                         })
 
                 # 4. 状态倒退 (Status Reversal): 这里演示检测已解决问题被重新打开
-                reopened_issues = conn.execute('''
+                reopened_issues = conn.execute(DatabasePool.format_sql('''
                     SELECT COUNT(*) as c FROM issues 
                     WHERE project_id = ? AND status != '已解决' 
                     AND description LIKE '%被重新打开%' 
-                ''', (project_id,)).fetchone()['c']
+                '''), (project_id,)).fetchone()['c']
                 
                 if reopened_issues > 0:
                     anomalies.append({
@@ -749,7 +759,7 @@ class AIInsightService:
         """预测性风险分析：预测延期概率和完成日期 (1-2周预判)"""
         try:
             with DatabasePool.get_connection() as conn:
-                project = conn.execute('SELECT id, project_name, progress, plan_end_date, plan_start_date FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT id, project_name, progress, plan_end_date, plan_start_date FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project: 
                     logger.warning(f"Project {project_id} not found for prediction")
                     return None
@@ -757,11 +767,11 @@ class AIInsightService:
                 # 1. 计算交付速度 (Velocity)
                 # 获取过去 14 天的进度变化
                 fourteen_days_ago = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
-                history = conn.execute('''
+                history = conn.execute(DatabasePool.format_sql('''
                     SELECT progress, record_date FROM progress_history 
                     WHERE project_id = ? AND record_date >= ? 
                     ORDER BY record_date ASC
-                ''', (project_id, fourteen_days_ago)).fetchall()
+                '''), (project_id, fourteen_days_ago)).fetchall()
                 
                 velocity = 0 # 每天平均增长百分比
                 if len(history) >= 2:
@@ -775,11 +785,11 @@ class AIInsightService:
                         logger.error(f"Error calculating velocity days: {ex}")
                 
                 # 2. 获取情绪评分趋势 (Sentiment Trend)
-                risk_history = conn.execute('''
+                risk_history = conn.execute(DatabasePool.format_sql('''
                     SELECT sentiment_score FROM project_risk_history 
                     WHERE project_id = ? 
                     ORDER BY record_date DESC LIMIT 5
-                ''', (project_id,)).fetchall()
+                '''), (project_id,)).fetchall()
                 
                 # 过滤 None 值
                 sentiment_scores = [r['sentiment_score'] for r in risk_history if r['sentiment_score'] is not None]
@@ -838,15 +848,16 @@ class AIInsightService:
         """基于风险、滞后项、异动和进度生成决策建议（支持缓存）"""
         try:
             today_date = datetime.now().strftime('%Y-%m-%d')
+            tomorrow_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
             
             # 1. 检查缓存
             if not force_refresh:
                 with DatabasePool.get_connection() as conn:
-                    cache = conn.execute('''
+                    cache = conn.execute(DatabasePool.format_sql('''
                         SELECT content FROM ai_report_cache 
                         WHERE project_id = ? AND report_type = 'recommended_actions'
-                        AND date(created_at) = ?
-                    ''', (project_id, today_date)).fetchone()
+                        AND created_at >= ? AND created_at < ?
+                    '''), (project_id, today_date, tomorrow_date)).fetchone()
                     if cache:
                         return json.loads(cache['content'])
 
@@ -860,15 +871,15 @@ class AIInsightService:
             
             with DatabasePool.get_connection() as conn:
                 # 获取最新风险评分
-                risk_record = conn.execute('''
+                risk_record = conn.execute(DatabasePool.format_sql('''
                     SELECT risk_score, sentiment_score, key_risk_factors 
                     FROM project_risk_history 
                     WHERE project_id = ? 
                     ORDER BY record_date DESC LIMIT 1
-                ''', (project_id,)).fetchone()
+                '''), (project_id,)).fetchone()
                 
                 # 获取项目基本信息
-                project = conn.execute('SELECT project_name, status, progress FROM projects WHERE id = ?', (project_id,)).fetchone()
+                project = conn.execute(DatabasePool.format_sql('SELECT project_name, status, progress FROM projects WHERE id = ?'), (project_id,)).fetchone()
 
             # 2. 规则引擎生成建议
             
@@ -960,16 +971,16 @@ class AIInsightService:
 
             # 4. 更新缓存
             with DatabasePool.get_connection() as conn:
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     DELETE FROM ai_report_cache 
                     WHERE project_id = ? AND report_type = 'recommended_actions'
-                    AND date(created_at) = ?
-                ''', (project_id, today_date))
+                    AND created_at >= ? AND created_at < ?
+                '''), (project_id, today_date, tomorrow_date))
                 
-                conn.execute('''
+                conn.execute(DatabasePool.format_sql('''
                     INSERT INTO ai_report_cache (project_id, report_type, content, created_at)
                     VALUES (?, ?, ?, ?)
-                ''', (project_id, 'recommended_actions', json.dumps(actions, ensure_ascii=False), datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                '''), (project_id, 'recommended_actions', json.dumps(actions, ensure_ascii=False), datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
 
             return actions
@@ -986,14 +997,14 @@ class AIInsightService:
         try:
             # 1. 获取项目基本快照
             with DatabasePool.get_connection() as conn:
-                project = conn.execute('SELECT * FROM projects WHERE id = ?', (project_id,)).fetchone()
-                tasks = conn.execute('''
+                project = conn.execute(DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?'), (project_id,)).fetchone()
+                tasks = conn.execute(DatabasePool.format_sql('''
                     SELECT t.* FROM tasks t
                     JOIN project_stages s ON t.stage_id = s.id
                     WHERE s.project_id = ? AND t.is_completed = ?
-                ''', (project_id, False)).fetchall()
+                '''), (project_id, False)).fetchall()
 
-                milestones = conn.execute('SELECT * FROM milestones WHERE project_id = ? AND is_completed = ?', (project_id, False)).fetchall()
+                milestones = conn.execute(DatabasePool.format_sql('SELECT * FROM milestones WHERE project_id = ? AND is_completed = ?'), (project_id, False)).fetchall()
 
             # 2. 调用 AI 进行多维评估
             prompt = f"""

@@ -333,7 +333,7 @@
                 if (hasRag) {
                     html += '<span class="rag-badge">🎯 基于知识库</span>';
                 }
-                html += `<div class="message-content">${marked.parse(content)}</div>`;
+                html += `<div class="message-content">${marked.parse(cleanAiMarkdown(content))}</div>`;
 
                 // Add the save to kb button
                 const btnContent = encodeURIComponent(content);
@@ -347,6 +347,17 @@
             msgDiv.innerHTML = html;
             container.appendChild(msgDiv);
             container.scrollTop = container.scrollHeight;
+        }
+
+        function cleanAiMarkdown(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/【[^】\n]{0,120}†[^】\n]{0,120}】/g, '')
+                .replace(/\[\^\{\{thread-[^\]\n]{0,80}\]?/g, '')
+                .replace(/\[\^[^\]\n]{0,120}\]/g, '')
+                .replace(/\[\^[^\n]{0,120}$/gm, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
         }
 
         // Handle Enter key

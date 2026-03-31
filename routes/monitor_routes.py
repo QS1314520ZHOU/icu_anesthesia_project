@@ -14,7 +14,7 @@ def get_notifications():
 @monitor_bp.route('/api/notifications', methods=['POST'])
 def create_notification():
     """人工创建通知"""
-    data = request.json
+    data = request.json or {}
     monitor_service.create_notification(data)
     return jsonify({'success': True})
 

@@ -254,8 +254,8 @@ def get_comparisons(project_id):
             query += ' AND ic.category = ?'
             params.append(category)
 
-        query += ' ORDER BY ic.gap_count DESC, os.system_type'
-        rows = conn.execute(query, params).fetchall()
+    query += ' ORDER BY ic.gap_count DESC, os.system_type'
+    rows = conn.execute(DatabasePool.format_sql(query), params).fetchall()
     return api_response(True, [dict(r) for r in rows])
 
 
@@ -263,12 +263,12 @@ def get_comparisons(project_id):
 def get_comparison_detail(comp_id):
     """获取单个对照的字段级映射详情"""
     with DatabasePool.get_connection() as conn:
-        comp = conn.execute('SELECT * FROM interface_comparisons WHERE id = ?', (comp_id,)).fetchone()
+        comp = conn.execute(DatabasePool.format_sql('SELECT * FROM interface_comparisons WHERE id = ?'), (comp_id,)).fetchone()
         if not comp:
             return api_response(False, message='对照记录不存在', code=404)
         comp = dict(comp)
         mappings = [dict(m) for m in conn.execute(
-            'SELECT * FROM field_mappings WHERE comparison_id = ? ORDER BY mapping_status, our_field_name',
+            DatabasePool.format_sql('SELECT * FROM field_mappings WHERE comparison_id = ? ORDER BY mapping_status, our_field_name'),
             (comp_id,)
         ).fetchall()]
     comp['mappings'] = mappings
@@ -305,7 +305,7 @@ def confirm_mapping(mapping_id):
         updates.append('is_confirmed = 1')
         params.append(mapping_id)
 
-        conn.execute(f"UPDATE field_mappings SET {', '.join(updates)} WHERE id = ?", params)
+        conn.execute(DatabasePool.format_sql(f"UPDATE field_mappings SET {', '.join(updates)} WHERE id = ?"), params)
         conn.commit()
     return api_response(True, message='已确认')
 
@@ -315,10 +315,10 @@ def update_comparison_status(comp_id):
     """更新对照结果的审核状态"""
     data = request.json or {}
     with DatabasePool.get_connection() as conn:
-        conn.execute('''
+        conn.execute(DatabasePool.format_sql('''
             UPDATE interface_comparisons SET status = ?, reviewed_by = ?,
             reviewed_at = CURRENT_TIMESTAMP WHERE id = ?
-        ''', (data.get('status', 'reviewed'), data.get('reviewed_by', ''), comp_id))
+        '''), (data.get('status', 'reviewed'), data.get('reviewed_by', ''), comp_id))
         conn.commit()
     return api_response(True)
 

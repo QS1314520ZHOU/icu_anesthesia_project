@@ -42,7 +42,7 @@ def get_projects():
 
 @project_bp.route('/projects', methods=['POST'])
 def create_project():
-    data = request.json
+    data = request.json or {}
     project_id = project_service.create_project(data)
     return api_response(True, {'project_id': project_id})
 
@@ -53,9 +53,15 @@ def get_project_detail(project_id):
         return api_response(False, error="Project not found", code=404)
     return api_response(True, project)
 
+@project_bp.route('/projects/<int:project_id>', methods=['PUT'])
+def update_project(project_id):
+    data = request.json or {}
+    success = project_service.update_project(project_id, data)
+    return api_response(bool(success))
+
 @project_bp.route('/projects/<int:project_id>/status', methods=['PUT'])
 def update_project_status(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.update_project_status(project_id, data.get('status'))
     return api_response(True)
 
@@ -67,7 +73,7 @@ def delete_project(project_id):
 # --- Stages ---
 @project_bp.route('/projects/<int:project_id>/stages', methods=['POST'])
 def add_stage(project_id):
-    data = request.json
+    data = request.json or {}
     try:
         project_service.add_stage(project_id, data)
         return api_response(True)
@@ -76,7 +82,7 @@ def add_stage(project_id):
 
 @project_bp.route('/projects/stages/<int:stage_id>/scale', methods=['POST'])
 def update_stage_scale(stage_id):
-    data = request.json
+    data = request.json or {}
     try:
         success = project_service.update_stage_scale(stage_id, data.get('quantity', 0))
         return api_response(success)
@@ -91,7 +97,7 @@ def get_milestones(project_id):
 
 @project_bp.route('/projects/<int:project_id>/milestones', methods=['POST'])
 def add_milestone(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_milestone(project_id, data)
     return api_response(True)
 
@@ -113,13 +119,13 @@ def get_interfaces(project_id):
 
 @project_bp.route('/projects/<int:project_id>/interfaces', methods=['POST'])
 def add_interface(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_interface(project_id, data)
     return api_response(True)
 
 @project_bp.route('/projects/interfaces/<int:interface_id>', methods=['PUT'])
 def update_interface(interface_id):
-    data = request.json
+    data = request.json or {}
     project_service.update_interface(interface_id, data)
     return api_response(True)
 
@@ -136,7 +142,7 @@ def get_issues(project_id):
 
 @project_bp.route('/projects/<int:project_id>/issues', methods=['POST'])
 def add_issue(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_issue(project_id, data)
     return api_response(True)
 
@@ -148,7 +154,7 @@ def get_devices(project_id):
 
 @project_bp.route('/projects/<int:project_id>/devices', methods=['POST'])
 def add_device(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_device(project_id, data)
     return api_response(True)
 
@@ -160,7 +166,7 @@ def get_task_dependencies(project_id):
 
 @project_bp.route('/projects/<int:project_id>/dependencies', methods=['POST'])
 def add_task_dependency(project_id):
-    data = request.json
+    data = request.json or {}
     project_service.add_task_dependency(data)
     return api_response(True)
 
@@ -191,6 +197,6 @@ def clear_celebrations(project_id):
 @project_bp.route('/projects/milestones/<int:mid>/retrospective', methods=['POST'])
 def add_retrospective(mid):
     """添加里程碑复盘"""
-    data = request.json
+    data = request.json or {}
     project_service.add_milestone_retrospective(mid, data)
     return api_response(True)

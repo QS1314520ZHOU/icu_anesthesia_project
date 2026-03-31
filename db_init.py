@@ -10,7 +10,9 @@ def reload_notification_config(NOTIFICATION_CONFIG):
     """从数据库加载并同步系统通知配置"""
     try:
         with DatabasePool.get_connection() as conn:
-            configs = conn.execute("SELECT config_key, value FROM system_config").fetchall()
+            configs = conn.execute(
+                DatabasePool.format_sql("SELECT config_key, value FROM system_config")
+            ).fetchall()
             for row in configs:
                 key = row['config_key']
                 val = row['value']
@@ -280,6 +282,10 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_cache_project_type ON report_cache(project_id, report_type)")
+        except:
+            pass
     
         # 11a. AI 风险历史记录表
         cursor.execute(f'''
@@ -330,6 +336,7 @@ def init_db():
                 role TEXT,
                 phone TEXT,
                 email TEXT,
+                daily_rate {REAL_TYPE} DEFAULT 0,
                 join_date DATE,
                 leave_date DATE,
                 is_onsite {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'},
@@ -390,6 +397,7 @@ def init_db():
                 handover_doc_path TEXT,
                 pending_issues TEXT,
                 remote_support_info TEXT,
+                approval_sp_no TEXT,
                 status TEXT DEFAULT '待审批',
                 approved_by TEXT,
                 approved_at TIMESTAMP,
@@ -482,6 +490,7 @@ def init_db():
                 description TEXT,
                 applicant TEXT,
                 receipt_path TEXT,
+                approval_sp_no TEXT,
                 status TEXT DEFAULT '待报销',
                 approved_by TEXT,
                 approved_at TIMESTAMP,
@@ -517,6 +526,7 @@ def init_db():
                 impact_analysis TEXT,
                 requested_by TEXT,
                 requested_date DATE,
+                approval_sp_no TEXT,
                 approved_by TEXT,
                 approved_date DATE,
                 status TEXT DEFAULT '待审批',
@@ -630,7 +640,9 @@ def init_db():
                 sn TEXT UNIQUE,
                 model TEXT,
                 status TEXT DEFAULT '在库',
+                current_project_id INTEGER,
                 location TEXT,
+                operator TEXT,
                 responsible_person TEXT,
                 purchase_date DATE,
                 expire_date DATE,
@@ -739,6 +751,74 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_archive_project_type_date ON report_archive(project_id, report_type, report_date)")
+        except:
+            pass
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_project_date ON standup_minutes(project_id, meeting_date)")
+        except:
+            pass
+
+        # 30.5 后台任务中心
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS background_tasks (
+                id {PK_AUTO},
+                task_id TEXT UNIQUE NOT NULL,
+                task_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                project_id INTEGER,
+                payload_summary TEXT,
+                source_endpoint TEXT,
+                retried_from_task_id TEXT,
+                status TEXT DEFAULT 'processing',
+                result TEXT,
+                error TEXT,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status)")
+        except:
+            pass
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_project_id ON background_tasks(project_id)")
+        except:
+            pass
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_created_at ON background_tasks(created_at)")
+        except:
+            pass
+        try:
+            if db_type == 'postgres':
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS project_id INTEGER")
+            else:
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN project_id INTEGER")
+        except:
+            pass
+        try:
+            if db_type == 'postgres':
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS payload_summary TEXT")
+            else:
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN payload_summary TEXT")
+        except:
+            pass
+        try:
+            if db_type == 'postgres':
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS source_endpoint TEXT")
+            else:
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN source_endpoint TEXT")
+        except:
+            pass
+        try:
+            if db_type == 'postgres':
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS retried_from_task_id TEXT")
+            else:
+                cursor.execute("ALTER TABLE background_tasks ADD COLUMN retried_from_task_id TEXT")
+        except:
+            pass
     
         # 31. 接口规范库
         cursor.execute(f'''
@@ -872,7 +952,7 @@ def init_db():
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = [row[0] for row in cursor.fetchall()]
 
-        for table_name in ['project_stages', 'work_logs', 'project_expenses', 'project_members', 'hardware_assets', 'knowledge_base', 'projects']:
+        for table_name in ['project_stages', 'work_logs', 'project_expenses', 'project_changes', 'project_members', 'project_departures', 'hardware_assets', 'knowledge_base', 'projects']:
             if table_name in tables:
                 if db_type == 'postgres':
                     cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'")
@@ -887,12 +967,19 @@ def init_db():
                     if 'stage_id' not in cols: cursor.execute("ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS stage_id INTEGER")
                 elif table_name == 'project_expenses':
                     if 'stage_id' not in cols: cursor.execute("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS stage_id INTEGER")
+                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
+                elif table_name == 'project_changes':
+                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_changes ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
                 elif table_name == 'project_members':
+                    if 'daily_rate' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS daily_rate {REAL_TYPE} DEFAULT 0")
                     if 'current_city' not in cols: cursor.execute("ALTER TABLE project_members ADD COLUMN IF NOT EXISTS current_city TEXT")
                     if 'lng' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lng {REAL_TYPE}")
                     if 'lat' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lat {REAL_TYPE}")
+                elif table_name == 'project_departures':
+                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_departures ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
                 elif table_name == 'hardware_assets':
                     if 'current_project_id' not in cols: cursor.execute("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS current_project_id INTEGER")
+                    if 'operator' not in cols: cursor.execute("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS operator TEXT")
                 elif table_name == 'knowledge_base':
                     if 'attachment_path' not in cols: cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS attachment_path TEXT")
                     if 'external_link' not in cols: cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS external_link TEXT")
@@ -939,32 +1026,37 @@ def init_db():
 
 def migrate_add_form_making_stage(cursor):
     """为现有项目添加‘表单制作’阶段"""
-    projects = cursor.execute('''
+    projects = cursor.execute(DatabasePool.format_sql('''
         SELECT id FROM projects 
         WHERE id NOT IN (SELECT project_id FROM project_stages WHERE stage_name = '表单制作')
-    ''').fetchall()
+    ''')).fetchall()
     
     for p in projects:
         pid = p[0] if isinstance(p, (list, tuple)) else p['id']
-        deployment_stage = cursor.execute('''
+        deployment_stage = cursor.execute(DatabasePool.format_sql('''
             SELECT stage_order, plan_end_date 
             FROM project_stages 
             WHERE project_id = ? AND stage_name = '系统部署'
-        ''', (pid,)).fetchone()
+        '''), (pid,)).fetchone()
         
         if deployment_stage:
             dep_order = deployment_stage[0] if isinstance(deployment_stage, (list, tuple)) else deployment_stage['stage_order']
             dep_end_date = deployment_stage[1] if isinstance(deployment_stage, (list, tuple)) else deployment_stage['plan_end_date']
             order = dep_order + 1
-            cursor.execute('UPDATE project_stages SET stage_order = stage_order + 1 WHERE project_id = ? AND stage_order >= ?', (pid, order))
-            cursor.execute('''
+            cursor.execute(DatabasePool.format_sql(
+                'UPDATE project_stages SET stage_order = stage_order + 1 WHERE project_id = ? AND stage_order >= ?'
+            ), (pid, order))
+            insert_sql = '''
                 INSERT INTO project_stages (project_id, stage_name, stage_order, plan_start_date, plan_end_date, status)
                 VALUES (?, '表单制作', ?, ?, ?, '待开始')
-            ''', (pid, order, dep_end_date, dep_end_date))
-            stage_id = cursor.lastrowid
+            '''
+            if DatabasePool.is_postgres():
+                insert_sql += ' RETURNING id'
+            cursor.execute(DatabasePool.format_sql(insert_sql), (pid, order, dep_end_date, dep_end_date))
+            stage_id = DatabasePool.get_inserted_id(cursor)
             tasks = ['表单设计说明书', '表单配置', '表单测试']
             for t in tasks:
-                cursor.execute('INSERT INTO tasks (stage_id, task_name) VALUES (?, ?)', (stage_id, t))
+                cursor.execute(DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name) VALUES (?, ?)'), (stage_id, t))
 
 def migrate_to_dynamic_milestones():
     """将现有项目的静态里程碑迁移为基于阶段的动态里程碑"""
@@ -972,14 +1064,17 @@ def migrate_to_dynamic_milestones():
     project_service = ProjectService()
     with DatabasePool.get_connection() as conn:
         cursor = conn.cursor()
-        projects = cursor.execute('SELECT id FROM projects').fetchall()
+        projects = cursor.execute(DatabasePool.format_sql('SELECT id FROM projects')).fetchall()
         for p in projects:
             pid = p[0] if isinstance(p, (list, tuple)) else p['id']
-            cursor.execute('DELETE FROM milestones WHERE project_id = ?', (pid,))
-            stages = cursor.execute('SELECT stage_name, plan_end_date FROM project_stages WHERE project_id = ? ORDER BY stage_order', (pid,)).fetchall()
+            cursor.execute(DatabasePool.format_sql('DELETE FROM milestones WHERE project_id = ?'), (pid,))
+            stages = cursor.execute(DatabasePool.format_sql(
+                'SELECT stage_name, plan_end_date FROM project_stages WHERE project_id = ? ORDER BY stage_order'
+            ), (pid,)).fetchall()
             for s in stages:
                 m_name = f"{s[0] if isinstance(s, (list, tuple)) else s['stage_name']}完成"
-                cursor.execute('INSERT INTO milestones (project_id, name, target_date) VALUES (?, ?, ?)',
-                             (pid, m_name, s[1] if isinstance(s, (list, tuple)) else s['plan_end_date']))
+                cursor.execute(DatabasePool.format_sql(
+                    'INSERT INTO milestones (project_id, name, target_date) VALUES (?, ?, ?)'
+                ), (pid, m_name, s[1] if isinstance(s, (list, tuple)) else s['plan_end_date']))
                 project_service.sync_project_milestones(pid, cursor)
         conn.commit()

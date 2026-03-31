@@ -11,21 +11,16 @@ def check_milestone_warnings():
     warnings = []
     
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        # 查找未完成且即将到期的里程碑
-        from app_config import DB_CONFIG
-        db_type = DB_CONFIG.get('TYPE', 'sqlite')
-        placeholder = '%s' if db_type == 'postgres' else '?'
-        cursor.execute(f'''
+        rows = conn.execute(DatabasePool.format_sql('''
             SELECT m.id, m.name, m.target_date, m.project_id, p.project_name
             FROM milestones m
             JOIN projects p ON m.project_id = p.id
-            WHERE m.is_completed = {placeholder} 
-              AND p.status NOT IN ('已完成', '已终止')
+            WHERE m.is_completed = ? 
+              AND p.status NOT IN ('已完成', '已终止', '已验收', '质保期')
             ORDER BY m.target_date ASC
-        ''', (False,))
-    
-    for row in cursor.fetchall():
+        '''), (False,))
+
+    for row in rows.fetchall():
         try:
             target_str = str(row['target_date']).strip()[:10] if row.get('target_date') else ""
             if not target_str:
@@ -81,9 +76,7 @@ def check_task_stagnation():
     """检查任务停滞预警（7天无更新） - 暂时禁用，需添加updated_at字段"""
     return []
 
-    # conn = get_db()
-    # cursor = conn.cursor()
-    # ... (original code commented out) ...
+    # Legacy implementation removed.
 
 def check_interface_timeout():
     """检查接口对接超时预警"""
@@ -91,18 +84,16 @@ def check_interface_timeout():
     warnings = []
     
     with DatabasePool.get_connection() as conn:
-        cursor = conn.cursor()
-        # 查找未完成且可能超时的接口
-        cursor.execute('''
+        rows = conn.execute(DatabasePool.format_sql('''
             SELECT i.id, i.interface_name as name, i.status, i.plan_date, i.project_id, p.project_name
             FROM interfaces i
             JOIN projects p ON i.project_id = p.id
             WHERE i.status NOT IN ('已完成', '已取消')
-              AND p.status NOT IN ('已完成', '已终止')
+              AND p.status NOT IN ('已完成', '已终止', '已验收', '质保期')
               AND i.plan_date IS NOT NULL
-        ''')
-    
-    for row in cursor.fetchall():
+        '''))
+
+    for row in rows.fetchall():
         try:
             plan_date = datetime.strptime(str(row['plan_date'])[:10], '%Y-%m-%d').date()
             days_overdue = (today - plan_date).days

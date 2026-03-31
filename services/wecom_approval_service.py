@@ -30,7 +30,7 @@ class WeComApprovalService:
         try:
             with DatabasePool.get_connection() as conn:
                 rows = conn.execute(
-                    "SELECT config_key, value FROM system_config WHERE config_key LIKE 'approval_template_%'"
+                    DatabasePool.format_sql("SELECT config_key, value FROM system_config WHERE config_key LIKE 'approval_template_%'")
                 ).fetchall()
                 for row in rows:
                     key = row['config_key'].replace('approval_template_', '')
@@ -43,12 +43,12 @@ class WeComApprovalService:
     def submit_departure_approval(self, departure_id: int, applicant_userid: str) -> dict:
         """提交离场审批到企业微信"""
         with DatabasePool.get_connection() as conn:
-            dep = conn.execute('''
+            dep = conn.execute(DatabasePool.format_sql('''
                 SELECT d.*, p.project_name, p.project_manager
                 FROM project_departures d
                 JOIN projects p ON d.project_id = p.id
                 WHERE d.id = ?
-            ''', (departure_id,)).fetchone()
+            '''), (departure_id,)).fetchone()
             
             if not dep:
                 return {"success": False, "message": "离场记录不存在"}
@@ -91,11 +91,10 @@ class WeComApprovalService:
         
         if result.get("errcode") == 0:
             sp_no = result.get("sp_no")
-            # 保存审批单号到数据库
             with DatabasePool.get_connection() as conn:
                 conn.execute(
-                    'UPDATE project_departures SET remark = ? WHERE id = ?',
-                    (json.dumps({"sp_no": sp_no}), departure_id)
+                    DatabasePool.format_sql('UPDATE project_departures SET approval_sp_no = ?, status = ? WHERE id = ?'),
+                    (sp_no, '审批中', departure_id)
                 )
             return {"success": True, "sp_no": sp_no}
         
@@ -106,12 +105,12 @@ class WeComApprovalService:
     def submit_change_approval(self, change_id: int, applicant_userid: str) -> dict:
         """提交变更审批到企业微信"""
         with DatabasePool.get_connection() as conn:
-            change = conn.execute('''
+            change = conn.execute(DatabasePool.format_sql('''
                 SELECT c.*, p.project_name, p.project_manager
                 FROM project_changes c
                 JOIN projects p ON c.project_id = p.id
                 WHERE c.id = ?
-            ''', (change_id,)).fetchone()
+            '''), (change_id,)).fetchone()
             
             if not change:
                 return {"success": False, "message": "变更记录不存在"}
@@ -151,7 +150,13 @@ class WeComApprovalService:
         )
         
         if result.get("errcode") == 0:
-            return {"success": True, "sp_no": result.get("sp_no")}
+            sp_no = result.get("sp_no")
+            with DatabasePool.get_connection() as conn:
+                conn.execute(
+                    DatabasePool.format_sql('UPDATE project_changes SET approval_sp_no = ?, status = ? WHERE id = ?'),
+                    (sp_no, '审批中', change_id)
+                )
+            return {"success": True, "sp_no": sp_no}
         return {"success": False, "message": result.get("errmsg", "未知错误")}
     
     # ===== 费用审批 =====
@@ -159,12 +164,12 @@ class WeComApprovalService:
     def submit_expense_approval(self, expense_id: int, applicant_userid: str) -> dict:
         """提交费用报销审批"""
         with DatabasePool.get_connection() as conn:
-            expense = conn.execute('''
+            expense = conn.execute(DatabasePool.format_sql('''
                 SELECT e.*, p.project_name, p.project_manager
                 FROM project_expenses e
                 JOIN projects p ON e.project_id = p.id
                 WHERE e.id = ?
-            ''', (expense_id,)).fetchone()
+            '''), (expense_id,)).fetchone()
             
             if not expense:
                 return {"success": False, "message": "费用记录不存在"}
@@ -203,7 +208,13 @@ class WeComApprovalService:
         )
         
         if result.get("errcode") == 0:
-            return {"success": True, "sp_no": result.get("sp_no")}
+            sp_no = result.get("sp_no")
+            with DatabasePool.get_connection() as conn:
+                conn.execute(
+                    DatabasePool.format_sql('UPDATE project_expenses SET approval_sp_no = ?, status = ? WHERE id = ?'),
+                    (sp_no, '审批中', expense_id)
+                )
+            return {"success": True, "sp_no": sp_no}
         return {"success": False, "message": result.get("errmsg", "未知错误")}
     
     # ===== 审批回调处理 =====
@@ -224,12 +235,12 @@ class WeComApprovalService:
             
             # 查找离场审批
             dep = conn.execute(
-                "SELECT id FROM project_departures WHERE remark LIKE ?",
-                (f'%{sp_no}%',)
+                DatabasePool.format_sql("SELECT id FROM project_departures WHERE approval_sp_no = ?"),
+                (sp_no,)
             ).fetchone()
             if dep:
                 conn.execute(
-                    'UPDATE project_departures SET status = ?, approved_at = ? WHERE id = ?',
+                    DatabasePool.format_sql('UPDATE project_departures SET status = ?, approved_at = ? WHERE id = ?'),
                     (new_status, now, dep['id'])
                 )
                 logger.info("离场审批 %d 状态更新为: %s", dep['id'], new_status)
@@ -238,24 +249,26 @@ class WeComApprovalService:
             # 查找变更审批 (需要扩展 project_changes 表增加 sp_no 字段)
             # 这里用类似的逻辑匹配
             change = conn.execute(
-                "SELECT id FROM project_changes WHERE status = '审批中'"
+                DatabasePool.format_sql("SELECT id FROM project_changes WHERE approval_sp_no = ?"),
+                (sp_no,)
             ).fetchone()
             if change:
                 if sp_status in [2, 3]:
                     conn.execute(
-                        'UPDATE project_changes SET status = ?, approved_date = ? WHERE id = ?',
+                        DatabasePool.format_sql('UPDATE project_changes SET status = ?, approved_date = ? WHERE id = ?'),
                         (new_status, now[:10], change['id'])
                     )
                 return
             
             # 查找费用审批
             expense = conn.execute(
-                "SELECT id FROM project_expenses WHERE status = '审批中'"
+                DatabasePool.format_sql("SELECT id, status FROM project_expenses WHERE approval_sp_no = ?"),
+                (sp_no,)
             ).fetchone()
             if expense:
                 expense_status = "已报销" if sp_status == 2 else "已驳回" if sp_status == 3 else expense.get('status', '待报销')
                 conn.execute(
-                    'UPDATE project_expenses SET status = ?, approved_at = ? WHERE id = ?',
+                    DatabasePool.format_sql('UPDATE project_expenses SET status = ?, approved_at = ? WHERE id = ?'),
                     (expense_status, now, expense['id'])
                 )
     
@@ -278,7 +291,7 @@ class WeComApprovalService:
     def _get_wecom_userid(self, name: str) -> str:
         with DatabasePool.get_connection() as conn:
             row = conn.execute(
-                'SELECT wecom_userid FROM users WHERE display_name = ? AND wecom_userid IS NOT NULL',
+                DatabasePool.format_sql('SELECT wecom_userid FROM users WHERE display_name = ? AND wecom_userid IS NOT NULL'),
                 (name,)
             ).fetchone()
             return row['wecom_userid'] if row else None

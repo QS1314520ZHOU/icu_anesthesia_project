@@ -38,7 +38,9 @@ class ApiClient {
                     return data.data !== undefined ? data.data : data;
                 } else {
                     const errorMsg = data.message || data.error || 'Unknown API Error';
-                    if (!options.silent) alert(errorMsg);
+                    if (!options.silent) {
+                        notifyApiError(errorMsg);
+                    }
                     throw new Error(errorMsg);
                 }
             }
@@ -52,7 +54,7 @@ class ApiClient {
         } catch (error) {
             if (!options.silent) {
                 console.error('API Request Failed:', error);
-                alert(error.message || 'Request failed');
+                notifyApiError(error.message || 'Request failed');
             }
             throw error;
         }
@@ -82,6 +84,42 @@ class ApiClient {
     async delete(endpoint) {
         return this.request(endpoint, { method: 'DELETE' });
     }
+}
+
+function notifyApiError(message) {
+    if (typeof showToast === 'function') {
+        showToast(message, 'danger');
+        return;
+    }
+
+    const existing = document.getElementById('apiFallbackToast');
+    if (existing) {
+        existing.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.id = 'apiFallbackToast';
+    toast.textContent = message;
+    toast.setAttribute('role', 'alert');
+    toast.style.position = 'fixed';
+    toast.style.top = '20px';
+    toast.style.right = '20px';
+    toast.style.zIndex = '9999';
+    toast.style.maxWidth = '360px';
+    toast.style.padding = '12px 16px';
+    toast.style.borderRadius = '10px';
+    toast.style.background = '#dc2626';
+    toast.style.color = '#fff';
+    toast.style.boxShadow = '0 10px 30px rgba(0,0,0,0.18)';
+    toast.style.fontSize = '14px';
+    toast.style.lineHeight = '1.5';
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.remove();
+        }
+    }, 4000);
 }
 
 const api = new ApiClient();

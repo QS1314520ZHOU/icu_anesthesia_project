@@ -179,7 +179,7 @@ class InterfaceParserService:
 
                 # 针对常见的样例字段进行正则修复
                 sample_keys = ['request_sample', 'response_sample', 'description', 'remark']
-                pattern = f'"({"|".join(sample_keys)})"\s*:\s*"([\s\S]*?)"(?=\s*[,}}])'
+                pattern = rf'"({"|".join(sample_keys)})"\s*:\s*"([\s\S]*?)"(?=\s*[,}}])'
                 
                 fixed_json = re.sub(pattern, fix_unescaped_newlines, json_str)
                 
@@ -213,21 +213,27 @@ class InterfaceParserService:
             if project_id and raw_text and not doc_id:
                 # 自动存入项目文档库
                 doc_title = f"{category or '接口文档'}_{vendor_name or '解析内容'}"
-                cursor = conn.execute('''
+                doc_sql = '''
                     INSERT INTO project_documents (project_id, doc_name, doc_type, doc_category, remark)
                     VALUES (?, ?, 'txt', '接口对接', ?)
-                ''', (project_id, doc_title, f"AI解析自: {vendor_name or '未知'}"))
-                doc_id = cursor.lastrowid
+                '''
+                if DatabasePool.is_postgres():
+                    doc_sql += ' RETURNING id'
+                cursor = conn.execute(DatabasePool.format_sql(doc_sql), (project_id, doc_title, f"AI解析自: {vendor_name or '未知'}"))
+                doc_id = DatabasePool.get_inserted_id(cursor)
 
             for iface in parsed_interfaces:
-                cursor = conn.execute('''
+                spec_sql = '''
                     INSERT INTO interface_specs
                     (project_id, doc_id, spec_source, category, vendor_name, system_type,
                      interface_name, transcode, protocol, description,
                      request_sample, response_sample, endpoint_url,
                      action_name, view_name, data_direction, raw_text)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                '''
+                if DatabasePool.is_postgres():
+                    spec_sql += ' RETURNING id'
+                cursor = conn.execute(DatabasePool.format_sql(spec_sql), (
                     project_id, doc_id, spec_source, category, vendor_name,
                     iface.get('system_type', ''),
                     iface.get('interface_name', ''),
@@ -242,17 +248,17 @@ class InterfaceParserService:
                     iface.get('data_direction', 'pull'),
                     raw_text
                 ))
-                spec_id = cursor.lastrowid
+                spec_id = DatabasePool.get_inserted_id(cursor)
                 created_ids.append(spec_id)
 
                 for idx, field in enumerate(iface.get('fields', [])):
-                    conn.execute('''
+                    conn.execute(DatabasePool.format_sql('''
                         INSERT INTO interface_spec_fields
                         (spec_id, field_name, field_name_cn, field_type, field_length,
                          is_required, is_primary_key, description, remark,
                          sample_value, field_order)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
+                    '''), (
                         spec_id,
                         field.get('field_name', ''),
                         field.get('field_name_cn', ''),
@@ -277,19 +283,22 @@ class InterfaceParserService:
                        WHERE (project_id = ? OR project_id IS NULL)'''
             params = [project_id]
             if spec_source:
-                query += ' AND spec_source = ?'
-                params.append(spec_source)
+                if spec_source == 'our_standard':
+                    query += " AND spec_source IN ('our_standard', 'our', 'standard')"
+                else:
+                    query += ' AND spec_source = ?'
+                    params.append(spec_source)
             if category:
                 query += ' AND category = ?'
                 params.append(category)
             query += ' ORDER BY system_type, interface_name'
 
-            specs = conn.execute(query, params).fetchall()
+            specs = conn.execute(DatabasePool.format_sql(query), params).fetchall()
             result = []
             for s in specs:
                 spec = dict(s)
                 fields = conn.execute(
-                    'SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order',
+                    DatabasePool.format_sql('SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order'),
                     (spec['id'],)
                 ).fetchall()
                 spec['fields'] = [dict(f) for f in fields]
@@ -300,8 +309,8 @@ class InterfaceParserService:
     def delete_spec(self, spec_id):
         """删除一个接口规范及其所有字段"""
         with DatabasePool.get_connection() as conn:
-            conn.execute('DELETE FROM interface_spec_fields WHERE spec_id = ?', (spec_id,))
-            conn.execute('DELETE FROM interface_specs WHERE id = ?', (spec_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_id = ?'), (spec_id,))
+            conn.execute(DatabasePool.format_sql('DELETE FROM interface_specs WHERE id = ?'), (spec_id,))
             conn.commit()
 
 interface_parser = InterfaceParserService()

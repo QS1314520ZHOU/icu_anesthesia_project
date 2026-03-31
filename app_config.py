@@ -1,11 +1,31 @@
 # app_config.py
 
 import os
+from urllib.parse import urlparse, unquote
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+
+
+def _parse_database_url(database_url):
+    """Parse DATABASE_URL style PostgreSQL config."""
+    if not database_url:
+        return None
+
+    parsed = urlparse(database_url)
+    if parsed.scheme not in ("postgres", "postgresql"):
+        return None
+
+    db_name = parsed.path.lstrip("/")
+    return {
+        "HOST": parsed.hostname or "localhost",
+        "PORT": str(parsed.port or 5432),
+        "NAME": db_name or "icu_pm",
+        "USER": unquote(parsed.username or "postgres"),
+        "PASSWORD": unquote(parsed.password or ""),
+    }
 
 # ========== 企业微信自建应用配置 ==========
 WECOM_CONFIG = {
@@ -49,14 +69,18 @@ GEO_CONFIG = {
 }
 
 # ========== 数据库配置 (PostgreSQL) ==========
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+PARSED_DATABASE_URL = _parse_database_url(DATABASE_URL)
+DEFAULT_DB_TYPE = "postgres" if PARSED_DATABASE_URL else "sqlite"
+
 DB_CONFIG = {
-    "TYPE": os.environ.get("DB_TYPE", "sqlite"),  # 'sqlite' or 'postgres'
+    "TYPE": os.environ.get("DB_TYPE", DEFAULT_DB_TYPE).lower(),  # 'sqlite' or 'postgres'
     "POSTGRES": {
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
-        "NAME": os.environ.get("DB_NAME", "icu_pm"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", (PARSED_DATABASE_URL or {}).get("HOST", "localhost")),
+        "PORT": os.environ.get("DB_PORT", (PARSED_DATABASE_URL or {}).get("PORT", "5432")),
+        "NAME": os.environ.get("DB_NAME", (PARSED_DATABASE_URL or {}).get("NAME", "icu_pm")),
+        "USER": os.environ.get("DB_USER", (PARSED_DATABASE_URL or {}).get("USER", "postgres")),
+        "PASSWORD": os.environ.get("DB_PASSWORD", (PARSED_DATABASE_URL or {}).get("PASSWORD", "")),
         "MIN_CONN": 1,
         "MAX_CONN": 10
     }

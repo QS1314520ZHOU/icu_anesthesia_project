@@ -8,7 +8,7 @@ nl_query_bp = Blueprint('nl_query_v2', __name__, url_prefix='/api')
 @nl_query_bp.route('/projects/<int:project_id>/ask', methods=['POST'])
 def ask_ai(project_id):
     """自然语言查询 (Text-to-SQL)"""
-    data = request.json
+    data = request.json or {}
     question = data.get('question', '')
     
     if not question:
