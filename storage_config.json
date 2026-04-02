@@ -1,0 +1,10 @@
+{
+    "type": "r2",
+    "r2": {
+        "endpoint": "https://5f64a5b269d96934ce377cfd0d67c654.r2.cloudflarestorage.com/myr2",
+        "bucket_name": "icu",
+        "access_key": "6a322f20b3465153f50125da1e2a8eca",
+        "secret_key": "f000e759fff7022934248362f392908bbb2c2a65d2c5592f93e83fd13f82e6bc",
+        "public_domain": "https://pub-4bfb9e1625e846d6ba6d1c3d681cdef1.r2.dev"
+    }
+}

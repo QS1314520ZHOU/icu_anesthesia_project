@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI 智询 - 移动版</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --bg: #eff6ff;
+            --chat-bg: #f8fafc;
+            --user-bubble: #4f46e5;
+            --ai-bubble: #ffffff;
+        }
+
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            padding: 16px 20px;
+            background: white;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            line-height: 1.6;
+            position: relative;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background-color: var(--user-bubble);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .ai-message {
+            align-self: flex-start;
+            background-color: var(--ai-bubble);
+            color: #1e293b;
+            border-bottom-left-radius: 4px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .ai-message .rag-badge {
+            font-size: 10px;
+            background: #f0fdf4;
+            color: #166534;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            display: inline-block;
+            font-weight: 700;
+        }
+
+        .message-content p {
+            margin: 0 0 10px 0;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .input-area {
+            background: white;
+            padding: 12px 16px 30px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            background: #f1f5f9;
+            border-radius: 24px;
+            padding: 8px 16px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .input-wrapper textarea {
+            width: 100%;
+            background: transparent;
+            border: none;
+            outline: none;
+            resize: none;
+            font-family: inherit;
+            font-size: 15px;
+            padding: 4px 0;
+            display: block;
+        }
+
+        .send-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: transform 0.1s;
+        }
+
+        .send-btn:active {
+            transform: scale(0.9);
+        }
+
+        .typing {
+            font-size: 12px;
+            color: #64748b;
+            margin-left: 4px;
+            display: none;
+        }
+
+        .back-btn {
+            text-decoration: none;
+            font-size: 20px;
+            color: #64748b;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <a href="/m/" class="back-btn">←</a>
+        <h1>🤖 AI 交付助手 <span class="typing" id="typing">正在思考...</span></h1>
+        <div style="width: 20px;"></div>
+    </div>
+
+    <div class="chat-container" id="chatContainer">
+        <div class="message ai-message">
+            <div class="message-content">
+                <p>你好，我是你的 ICU 交付总监助手。有什么我可以帮你的吗？</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-area">
+        <div class="input-wrapper">
+            <textarea id="userInput" placeholder="输入问题..." rows="1" oninput="autoExpand(this)"></textarea>
+        </div>
+        <button class="send-btn" onclick="sendMessage()">⬆️</button>
+    </div>
+
+    <script>
+        // 企业微信 JS-SDK 网页授权
+        async function initAuth() {
+            const token = sessionStorage.getItem('user_token');
+            if (token) return true;
+
+            const configRes = await fetch('/m/api/config');
+            const config = await configRes.json();
+            if (!config.success) return false;
+
+            const corpId = config.data.corp_id;
+            const currentUrl = encodeURIComponent(window.location.href);
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                try {
+                    const res = await fetch('/m/api/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        sessionStorage.setItem('user_token', JSON.stringify(data.data));
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error('Auth failed', e);
+                }
+            } else {
+                window.location.href = `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${corpId}&redirect_uri=${currentUrl}&response_type=code&scope=snsapi_base#wechat_redirect`;
+                return false;
+            }
+        }
+
+        let chatHistory = [];
+
+        function saveHistory() {
+            sessionStorage.setItem('chat_history', JSON.stringify(chatHistory));
+        }
+
+        function loadHistory() {
+            const saved = sessionStorage.getItem('chat_history');
+            if (saved) {
+                chatHistory = JSON.parse(saved);
+                chatHistory.forEach(h => {
+                    // Check if it's an AI message with references (simulated or simplified for persistence)
+                    const isAi = h.role === 'assistant' || h.role === 'ai';
+                    addMessage(h.content, isAi ? 'ai' : 'user', false);
+                });
+            }
+        }
+
+        function autoExpand(el) {
+            el.style.height = 'auto';
+            el.style.height = (el.scrollHeight) + 'px';
+        }
+
+        async function saveToKb(btn, content) {
+            btn.innerHTML = '正在保存...';
+            btn.disabled = true;
+            try {
+                // Use the first part of content as title
+                const title = "AI 生成经验: " + content.replace(/<\/?[^>]+(>|$)/g, "").substring(0, 20) + "...";
+                const response = await fetch('/m/api/kb/contribute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: title,
+                        content: content,
+                        engineer_name: currentUser ? (currentUser.name || currentUser.userid) : '移动端人员'
+                    })
+                });
+                const res = await response.json();
+                if (res.success) {
+                    btn.innerHTML = '✅ 已收录至知识库';
+                    btn.style.color = '#10b981';
+                } else {
+                    btn.innerHTML = '❌ 保存失败: ' + res.message;
+                    btn.style.color = '#ef4444';
+                }
+            } catch (e) {
+                console.error(e);
+                btn.innerHTML = '❌ 系统异常';
+                btn.style.color = '#ef4444';
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('userInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            // Clear input
+            input.value = '';
+            input.style.height = 'auto';
+
+            // Add user message to UI
+            addMessage(message, 'user');
+
+            // Show typing
+            document.getElementById('typing').style.display = 'inline';
+
+            try {
+                const response = await fetch('/m/api/ai/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        history: chatHistory
+                    })
+                });
+
+                const res = await response.json();
+                document.getElementById('typing').style.display = 'none';
+
+                if (res.success) {
+                    addMessage(res.data.reply, 'ai', res.data.has_rag_context);
+                    chatHistory.push({ role: 'user', content: message });
+                    chatHistory.push({ role: 'assistant', content: res.data.reply });
+                    saveHistory(); // Persistence
+                } else {
+                    addMessage("抱歉，我遇到了一点问题：" + res.message, 'ai');
+                }
+            } catch (e) {
+                document.getElementById('typing').style.display = 'none';
+                addMessage("系统连接异常，请稍后再试。", 'ai');
+            }
+        }
+
+        function addMessage(content, role, hasRag = false) {
+            const container = document.getElementById('chatContainer');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${role}-message`;
+
+            let html = '';
+            if (role === 'ai') {
+                if (hasRag) {
+                    html += '<span class="rag-badge">🎯 基于知识库</span>';
+                }
+                html += `<div class="message-content">${marked.parse(cleanAiMarkdown(content))}</div>`;
+
+                // Add the save to kb button
+                const btnContent = encodeURIComponent(content);
+                html += `<div style="text-align: right; margin-top: 8px;">
+                            <button onclick="saveToKb(this, decodeURIComponent('${btnContent}'))" style="background: none; border: none; color: var(--primary); font-size: 13px; font-weight: 500; cursor: pointer; padding: 4px 8px;">💡 沉淀为知识</button>
+                         </div>`;
+            } else {
+                html += `<div class="message-content">${content}</div>`;
+            }
+
+            msgDiv.innerHTML = html;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function cleanAiMarkdown(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/【[^】\n]{0,120}†[^】\n]{0,120}】/g, '')
+                .replace(/\[\^\{\{thread-[^\]\n]{0,80}\]?/g, '')
+                .replace(/\[\^[^\]\n]{0,120}\]/g, '')
+                .replace(/\[\^[^\n]{0,120}$/gm, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+
+        // Handle Enter key
+        document.getElementById('userInput').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Initialize on Load
+        (async function () {
+            const authed = await initAuth();
+            if (authed) {
+                loadHistory();
+            }
+        })();
+    </script>
+</body>
+
+</html>

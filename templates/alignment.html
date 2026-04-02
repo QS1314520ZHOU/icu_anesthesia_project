@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能接口文档对齐中心</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* 顶部标题 */
+        .page-header {
+            text-align: center;
+            padding: 30px 0 20px;
+            color: #fff;
+        }
+
+        .page-header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .page-header p {
+            opacity: 0.85;
+            margin-top: 8px;
+            font-size: 14px;
+        }
+
+        /* Tab 导航 */
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 14px;
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: #fff;
+            color: #6c5ce7;
+        }
+
+        .tab-btn:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* 玻璃卡片 */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 表格 */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            background: #f8f9fa;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f1f3f5;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9ff;
+        }
+
+        /* 状态标签 */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-matched {
+            background: #d3f9d8;
+            color: #2b8a3e;
+        }
+
+        .badge-partial {
+            background: #fff3bf;
+            color: #e67700;
+        }
+
+        .badge-missing {
+            background: #ffe3e3;
+            color: #c92a2a;
+        }
+
+        .badge-extra {
+            background: #e7f5ff;
+            color: #1971c2;
+        }
+
+        /* 按钮 */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #6c5ce7, #a855f7);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 15px rgba(108, 92, 231, 0.4);
+        }
+
+        .btn-sm {
+            padding: 6px 14px;
+            font-size: 12px;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1.5px solid #6c5ce7;
+            color: #6c5ce7;
+        }
+
+        .btn-danger {
+            background: #ff6b6b;
+            color: #fff;
+        }
+
+        .btn-copy {
+            background: #e9ecef;
+            color: #495057;
+            padding: 4px 10px;
+            font-size: 11px;
+            border-radius: 6px;
+        }
+
+        /* 表单 */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: #495057;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid #dee2e6;
+            border-radius: 10px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #6c5ce7;
+        }
+
+        select.form-control {
+            appearance: none;
+        }
+
+        textarea.form-control {
+            resize: vertical;
+            min-height: 120px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .upload-zone {
+            border: 2px dashed #dee2e6;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #868e96;
+        }
+
+        .upload-zone:hover {
+            border-color: #6c5ce7;
+            background: #f8f9ff;
+        }
+
+        .upload-zone.dragover {
+            border-color: #6c5ce7;
+            background: #ede9fe;
+        }
+
+        /* 对齐结果进度条 */
+        .score-bar {
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+
+        .score-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.6s ease;
+        }
+
+        /* AI 助手聊天 */
+        .chat-box {
+            border: 1.5px solid #e9ecef;
+            border-radius: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 16px;
+            background: #fafbfc;
+            margin-bottom: 12px;
+        }
+
+        .chat-msg {
+            margin-bottom: 16px;
+        }
+
+        .chat-msg.user {
+            text-align: right;
+        }
+
+        .chat-msg .bubble {
+            display: inline-block;
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: left;
+        }
+
+        .chat-msg.user .bubble {
+            background: #6c5ce7;
+            color: #fff;
+        }
+
+        .chat-msg.ai .bubble {
+            background: #fff;
+            border: 1px solid #e9ecef;
+        }
+
+        .chat-msg .bubble pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 8px 0;
+            overflow-x: auto;
+            font-size: 13px;
+            position: relative;
+        }
+
+        .chat-msg .bubble pre .copy-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input-row input {
+            flex: 1;
+        }
+
+        .chat-input-row .btn {
+            flex-shrink: 0;
+        }
+
+        /* 分栏布局 */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .three-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* 隐藏面板 */
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* 加载动画 */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #e9ecef;
+            border-top-color: #6c5ce7;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* 返回按钮 */
+        .back-link {
+            color: rgba(255, 255, 255, 0.8);
+            text-decoration: none;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .back-link:hover {
+            color: #fff;
+        }
+
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #868e96;
+        }
+
+        .empty-state p {
+            font-size: 15px;
+            margin-top: 12px;
+        }
+
+        /* 详情展开 */
+        .detail-row {
+            background: #f8f9ff;
+        }
+
+        .field-map-table {
+            margin: 8px 0;
+            font-size: 12px;
+        }
+
+        .field-map-table td {
+            padding: 6px 10px;
+        }
+
+        @media (max-width: 768px) {
+            .two-col {
+                grid-template-columns: 1fr;
+            }
+
+            .three-col {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← 返回主界面</a>
+
+        <div class="page-header">
+            <h1>智能接口文档对齐中心</h1>
+            <p>AI 驱动 · 自动识别标准与第三方接口差异 · 一键生成对接请求</p>
+        </div>
+
+        <!-- Tab 导航 -->
+        <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchMainTab('workbench')">📋 对接工作台</button>
+            <button class="tab-btn" onclick="switchMainTab('specs')">📚 标准接口库</button>
+            <button class="tab-btn" onclick="switchMainTab('history')">📁 历史会话</button>
+        </div>
+
+        <!-- ======================== Tab 1: 工作台 ======================== -->
+        <div id="panel-workbench" class="tab-panel active">
+            <div class="two-col">
+                <!-- 左：配置 -->
+                <div>
+                    <div class="glass-card">
+                        <div class="card-title">⚙️ 对齐配置</div>
+                        <div class="form-group">
+                            <label>选择项目</label>
+                            <select id="align-project" class="form-control"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>我方标准版本</label>
+                            <select id="align-spec-version" class="form-control">
+                                <option value="">加载中...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>对方厂商/系统名称</label>
+                            <input id="align-vendor" class="form-control" placeholder="如：东华HIS、卫宁LIS">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右：上传 -->
+                <div>
+                    <div class="glass-card">
+                        <div class="card-title">📄 上传对方接口文档</div>
+                        <div class="upload-zone" id="vendor-upload-zone"
+                            onclick="document.getElementById('vendor-file').click()">
+                            <div style="font-size: 36px; margin-bottom: 8px;">📎</div>
+                            <p>点击或拖拽上传文件</p>
+                            <p style="font-size: 12px; margin-top: 4px;">
+                                支持 PDF / Word / TXT / XML / JSON / WSDL / HL7
+                            </p>
+                            <input type="file" id="vendor-file" hidden
+                                accept=".pdf,.doc,.docx,.txt,.xml,.json,.wsdl,.xsd,.hl7">
+                        </div>
+                        <div id="vendor-file-name" style="margin-top: 8px; font-size: 13px; color: #6c5ce7;"></div>
+                        <div class="form-group" style="margin-top: 12px;">
+                            <label>或直接粘贴文本内容</label>
+                            <textarea id="vendor-raw-text" class="form-control"
+                                placeholder="粘贴 XML / JSON / HL7 / 接口说明文本..."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 执行按钮 -->
+            <div style="text-align: center; margin: 20px 0;">
+                <button class="btn btn-primary" onclick="runAlignment()" id="btn-run-align"
+                    style="padding: 14px 48px; font-size: 16px;">
+                    🚀 一键智能比对 (AI Sync)
+                </button>
+            </div>
+
+            <!-- 对齐结果区 -->
+            <div id="alignment-result-area" style="display:none;">
+                <div class="glass-card">
+                    <div class="card-title">📊 对齐结果</div>
+                    <div id="align-summary" style="margin-bottom: 16px;"></div>
+                    <div class="three-col" id="align-stats" style="margin-bottom: 16px;"></div>
+                    <table class="data-table" id="align-table">
+                        <thead>
+                            <tr>
+                                <th>我方接口</th>
+                                <th>对方接口</th>
+                                <th>状态</th>
+                                <th>置信度</th>
+                                <th>差异说明</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- AI 助手 -->
+                <div class="glass-card">
+                    <div class="card-title">💬 AI 对接助手</div>
+                    <div class="chat-box" id="chat-box">
+                        <div class="chat-msg ai">
+                            <div class="bubble">
+                                你好！对齐已完成。你可以问我：<br>
+                                · "帮我生成请求XX接口的内容，参数是..."<br>
+                                · "对方的医嘱接口，用药频次对应什么字段？"<br>
+                                · "调用检验结果返回空数据，可能原因？"
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chat-input-row">
+                        <input id="chat-input" class="form-control" placeholder="输入你的问题..."
+                            onkeydown="if(event.key==='Enter')askAssistant()">
+                        <button class="btn btn-primary" onclick="askAssistant()">发送</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================== Tab 2: 标准库管理 ======================== -->
+        <div id="panel-specs" class="tab-panel">
+            <div class="glass-card">
+                <div class="card-title" style="justify-content: space-between;">
+                    <span>📚 我方标准接口库</span>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="showImportSpecModal()">📤 上传文档导入</button>
+                        <button class="btn btn-primary btn-sm" onclick="showAddSpecModal()">+ 手动添加</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>选择标准版本</label>
+                    <div style="display:flex; gap: 8px;">
+                        <select id="spec-version-select" class="form-control" onchange="loadSpecInterfaces()"
+                            style="flex:1;"></select>
+                        <input id="new-version-input" class="form-control" placeholder="输入新版本名称" style="flex:1;">
+                        <button class="btn btn-outline btn-sm" onclick="createNewVersion()">创建版本</button>
+                    </div>
+                </div>
+
+                <table class="data-table" id="specs-table">
+                    <thead>
+                        <tr>
+                            <th>系统</th>
+                            <th>接口名称</th>
+                            <th>编码</th>
+                            <th>协议</th>
+                            <th>视图名</th>
+                            <th>必选</th>
+                            <th>字段数</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+                <div id="specs-empty" class="empty-state" style="display:none;">
+                    <p>当前版本还没有接口定义</p>
+                    <p>请上传文档自动导入，或手动添加</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ======================== Tab 3: 历史会话 ======================== -->
+        <div id="panel-history" class="tab-panel">
+            <div class="glass-card">
+                <div class="card-title">📁 历史对齐记录</div>
+                <div class="form-group">
+                    <label>选择项目</label>
+                    <select id="history-project" class="form-control" onchange="loadSessions()"></select>
+                </div>
+                <table class="data-table" id="sessions-table">
+                    <thead>
+                        <tr>
+                            <th>时间</th>
+                            <th>标准版本</th>
+                            <th>对方厂商</th>
+                            <th>匹配度</th>
+                            <th>匹配/部分/缺失</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================== 模态框: 导入标准 ======================== -->
+    <div id="modal-import-spec"
+        style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; display:none; justify-content:center; align-items:center;">
+        <div class="glass-card" style="width: 500px; max-width: 90vw;">
+            <div class="card-title" style="justify-content:space-between;">
+                <span>📤 上传我方文档导入标准库</span>
+                <button onclick="closeModal('modal-import-spec')"
+                    style="background:none;border:none;font-size:18px;cursor:pointer;">✕</button>
+            </div>
+            <div class="form-group">
+                <label>标准版本</label>
+                <input id="import-spec-version" class="form-control" value="手麻标准 V2.0">
+            </div>
+            <div class="form-group">
+                <label>分类</label>
+                <select id="import-spec-category" class="form-control">
+                    <option value="anesthesia">手术麻醉</option>
+                    <option value="icu">重症ICU</option>
+                    <option value="common">通用</option>
+                </select>
+            </div>
+            <div class="upload-zone" onclick="document.getElementById('import-spec-file').click()">
+                <p>点击上传我方接口规范文档</p>
+                <input type="file" id="import-spec-file" hidden accept=".pdf,.doc,.docx,.txt,.xml,.json">
+            </div>
+            <div id="import-spec-filename" style="margin-top:8px; font-size:13px; color:#6c5ce7;"></div>
+            <div style="text-align:right; margin-top:16px;">
+                <button class="btn btn-primary" onclick="doImportSpec()">🤖 AI 解析并导入</button>
+            </div>
+            <div id="import-spec-status" style="margin-top:12px; font-size:13px;"></div>
+        </div>
+    </div>
+
+    <script>
+        // ================================================================
+        //  全局状态
+        // ================================================================
+        let currentSessionId = null;
+        let allProjects = [];
+
+        // ================================================================
+        //  初始化
+        // ================================================================
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadProjects();
+            await loadSpecVersions();
+            setupDragDrop();
+            setupFileInputs();
+        });
+
+        async function loadProjects() {
+            try {
+                const res = await fetch('/api/projects');
+                const data = await res.json();
+                allProjects = data.data || data || [];
+                const options = allProjects.map(p =>
+                    `<option value="${p.id}">${p.project_name} - ${p.hospital_name}</option>`
+                ).join('');
+                document.getElementById('align-project').innerHTML = options;
+                document.getElementById('history-project').innerHTML = options;
+            } catch (e) { console.error('加载项目失败', e); }
+        }
+
+        async function loadSpecVersions() {
+            try {
+                const res = await fetch('/api/alignment/specs/versions');
+                const data = await res.json();
+                const versions = data.data || [];
+                const unique = [...new Set(versions.map(v => v.spec_version))];
+
+                const opts = unique.length > 0
+                    ? unique.map(v => `<option value="${v}">${v}</option>`).join('')
+                    : '<option value="">暂无标准 - 请先创建</option>';
+
+                document.getElementById('align-spec-version').innerHTML = opts;
+                document.getElementById('spec-version-select').innerHTML = opts;
+
+                if (unique.length > 0) loadSpecInterfaces();
+            } catch (e) { console.error('加载版本失败', e); }
+        }
+
+        // ================================================================
+        //  Tab 切换
+        // ================================================================
+        function switchMainTab(tab) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('panel-' + tab).classList.add('active');
+            event.target.classList.add('active');
+            if (tab === 'history') loadSessions();
+        }
+
+        // ================================================================
+        //  标准库管理
+        // ================================================================
+        async function loadSpecInterfaces() {
+            const version = document.getElementById('spec-version-select').value;
+            if (!version) return;
+            const res = await fetch(`/api/alignment/specs?version=${encodeURIComponent(version)}`);
+            const data = await res.json();
+            const list = data.data || [];
+            const tbody = document.querySelector('#specs-table tbody');
+
+            if (list.length === 0) {
+                tbody.innerHTML = '';
+                document.getElementById('specs-empty').style.display = 'block';
+                return;
+            }
+            document.getElementById('specs-empty').style.display = 'none';
+
+            tbody.innerHTML = list.map(s => `<tr>
+        <td>${s.system_name}</td>
+        <td><strong>${s.interface_name}</strong></td>
+        <td><code>${s.interface_code || '-'}</code></td>
+        <td>${s.protocol || '-'}</td>
+        <td><code>${s.view_name || '-'}</code></td>
+        <td>${s.is_required ? '✅' : ''}</td>
+        <td>${(s.fields || []).length}</td>
+        <td>
+            <button class="btn btn-sm btn-outline" onclick="editSpec(${s.id})">编辑</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSpec(${s.id})">删除</button>
+        </td>
+    </tr>`).join('');
+        }
+
+        function createNewVersion() {
+            const name = document.getElementById('new-version-input').value.trim();
+            if (!name) return alert('请输入版本名称');
+            const select = document.getElementById('spec-version-select');
+            const opt = document.createElement('option');
+            opt.value = name; opt.textContent = name;
+            select.appendChild(opt);
+            select.value = name;
+            // 同步到工作台
+            const select2 = document.getElementById('align-spec-version');
+            const opt2 = document.createElement('option');
+            opt2.value = name; opt2.textContent = name;
+            select2.appendChild(opt2);
+            document.getElementById('new-version-input').value = '';
+            loadSpecInterfaces();
+        }
+
+        async function deleteSpec(id) {
+            if (!confirm('确定删除此标准接口？')) return;
+            await fetch(`/api/alignment/specs/${id}`, { method: 'DELETE' });
+            loadSpecInterfaces();
+        }
+
+        function showAddSpecModal() {
+            // 简化：用 prompt 快速添加
+            const name = prompt('接口名称:');
+            if (!name) return;
+            const system = prompt('所属系统 (HIS/LIS/PACS/EMR):', 'HIS');
+            const version = document.getElementById('spec-version-select').value;
+            fetch('/api/alignment/specs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    spec_version: version,
+                    category: 'common',
+                    system_name: system || 'HIS',
+                    interface_name: name,
+                })
+            }).then(() => loadSpecInterfaces());
+        }
+
+        function showImportSpecModal() {
+            const el = document.getElementById('modal-import-spec');
+            el.style.display = 'flex';
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+
+        async function doImportSpec() {
+            const file = document.getElementById('import-spec-file').files[0];
+            if (!file) return alert('请选择文件');
+            const statusEl = document.getElementById('import-spec-status');
+            statusEl.innerHTML = '<span class="spinner"></span> AI 正在解析文档，请稍候...';
+
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('spec_version', document.getElementById('import-spec-version').value);
+            fd.append('category', document.getElementById('import-spec-category').value);
+
+            try {
+                const res = await fetch('/api/alignment/specs/import', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.data && data.data.success) {
+                    statusEl.innerHTML = `✅ 成功导入 ${data.data.count} 个接口`;
+                    await loadSpecVersions();
+                } else {
+                    statusEl.innerHTML = `❌ ${data.data?.message || data.error || '导入失败'}`;
+                }
+            } catch (e) {
+                statusEl.innerHTML = `❌ 请求失败: ${e.message}`;
+            }
+        }
+
+        // ================================================================
+        //  对齐执行
+        // ================================================================
+        async function runAlignment() {
+            const projectId = document.getElementById('align-project').value;
+            const specVersion = document.getElementById('align-spec-version').value;
+            const vendorName = document.getElementById('align-vendor').value;
+            const file = document.getElementById('vendor-file').files[0];
+            const rawText = document.getElementById('vendor-raw-text').value;
+
+            if (!projectId) return alert('请选择项目');
+            if (!specVersion) return alert('请选择标准版本');
+            if (!file && !rawText.trim()) return alert('请上传文档或粘贴文本');
+
+            const btn = document.getElementById('btn-run-align');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> AI 正在解析对齐，请稍候 (约30-60秒)...';
+
+            const fd = new FormData();
+            fd.append('project_id', projectId);
+            fd.append('spec_version', specVersion);
+            fd.append('vendor_name', vendorName);
+            if (file) fd.append('file', file);
+            if (rawText) fd.append('raw_text', rawText);
+
+            try {
+                const res = await fetch('/api/alignment/run', { method: 'POST', body: fd });
+                const data = await res.json();
+
+                btn.disabled = false;
+                btn.innerHTML = '🚀 一键智能比对 (AI Sync)';
+
+                if (data.data && data.data.success) {
+                    currentSessionId = data.data.session_id;
+                    await loadSessionResult(currentSessionId);
+                } else {
+                    alert(data.data?.message || data.error || '对齐失败');
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 一键智能比对 (AI Sync)';
+                alert('请求失败: ' + e.message);
+            }
+        }
+
+        async function loadSessionResult(sessionId) {
+            const res = await fetch(`/api/alignment/sessions/${sessionId}`);
+            const data = await res.json();
+            const detail = data.data;
+            if (!detail) return;
+
+            currentSessionId = sessionId;
+            document.getElementById('alignment-result-area').style.display = 'block';
+
+            // 摘要
+            const score = detail.match_score || 0;
+            const color = score >= 80 ? '#2b8a3e' : score >= 50 ? '#e67700' : '#c92a2a';
+            document.getElementById('align-summary').innerHTML = `
+        <div style="font-size:14px; margin-bottom:8px;">${detail.ai_summary || ''}</div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:24px; font-weight:700; color:${color};">${score}%</span>
+            <div style="flex:1;">
+                <div class="score-bar">
+                    <div class="score-fill" style="width:${score}%; background:${color};"></div>
+                </div>
+            </div>
+        </div>
+    `;
+
+            // 统计卡片
+            document.getElementById('align-stats').innerHTML = `
+        <div style="background:#d3f9d8; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#2b8a3e;">${detail.matched_count || 0}</div>
+            <div style="font-size:12px; color:#2b8a3e;">完全匹配</div>
+        </div>
+        <div style="background:#fff3bf; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#e67700;">${detail.partial_count || 0}</div>
+            <div style="font-size:12px; color:#e67700;">部分匹配</div>
+        </div>
+        <div style="background:#ffe3e3; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#c92a2a;">${detail.missing_count || 0}</div>
+            <div style="font-size:12px; color:#c92a2a;">对方缺失</div>
+        </div>
+    `;
+
+            // 结果列表
+            const results = detail.results || [];
+            const tbody = document.querySelector('#align-table tbody');
+            tbody.innerHTML = results.map(r => {
+                const badge = `<span class="badge badge-${r.match_status}">${({ matched: '✅ 匹配', partial: '⚠️ 部分', missing: '❌ 缺失', extra: '➕ 多出' })[r.match_status] || r.match_status
+                    }</span>`;
+                const conf = r.confidence ? `${Math.round(r.confidence * 100)}%` : '-';
+                const specName = r.spec_interface_name || (r.match_status === 'extra' ? '-' : '?');
+                const vendorName = r.vendor_interface_name || '-';
+
+                let fieldHtml = '';
+                if (r.field_maps && r.field_maps.length > 0) {
+                    fieldHtml = `<tr class="detail-row"><td colspan="6">
+                <table class="data-table field-map-table">
+                    <tr><th>我方字段</th><th>含义</th><th>↔</th><th>对方字段</th><th>转换</th></tr>
+                    ${r.field_maps.map(fm => `<tr>
+                        <td><code>${fm.spec_field_name || '?'}</code></td>
+                        <td>${fm.spec_field_label || ''}</td>
+                        <td>↔</td>
+                        <td><code>${fm.vendor_field_name || '❌ 未映射'}</code></td>
+                        <td>${fm.transform_rule || '-'}</td>
+                    </tr>`).join('')}
+                </table>
+            </td></tr>`;
+                }
+
+                return `<tr>
+            <td><strong>${specName}</strong><br><small style="color:#868e96;">${r.spec_system_name || ''} ${r.spec_protocol || ''}</small></td>
+            <td>${vendorName}<br><small style="color:#868e96;">${r.vendor_view_name || ''}</small></td>
+            <td>${badge}</td>
+            <td>${conf}</td>
+            <td style="font-size:12px; max-width:200px;">${r.diff_summary || '-'}${r.risk_note ? '<br><span style="color:#c92a2a;">⚠️ ' + r.risk_note + '</span>' : ''}</td>
+            <td>
+                ${r.is_confirmed ? '<span style="color:#2b8a3e;">✅ 已确认</span>' :
+                        `<button class="btn btn-sm btn-outline" onclick="confirmResult(${r.id})">确认</button>`}
+                ${r.field_maps?.length ? `<button class="btn btn-sm btn-copy" onclick="this.parentElement.parentElement.nextElementSibling.style.display=this.parentElement.parentElement.nextElementSibling.style.display==='none'?'table-row':'none'">展开字段</button>` : ''}
+            </td>
+        </tr>${fieldHtml ? fieldHtml.replace('display:table-row', 'display:none').replace('<tr class="detail-row">', '<tr class="detail-row" style="display:none;">') : ''}`;
+            }).join('');
+
+            // 滚动到结果区域
+            document.getElementById('alignment-result-area').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function confirmResult(resultId) {
+            await fetch(`/api/alignment/results/${resultId}/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirmed_by: 'user' })
+            });
+            if (currentSessionId) loadSessionResult(currentSessionId);
+        }
+
+        // ================================================================
+        //  AI 助手
+        // ================================================================
+        async function askAssistant() {
+            const input = document.getElementById('chat-input');
+            const question = input.value.trim();
+            if (!question || !currentSessionId) return;
+
+            const chatBox = document.getElementById('chat-box');
+            chatBox.innerHTML += `<div class="chat-msg user"><div class="bubble">${escapeHtml(question)}</div></div>`;
+            input.value = '';
+
+            chatBox.innerHTML += `<div class="chat-msg ai" id="ai-typing"><div class="bubble"><span class="spinner"></span> 正在分析...</div></div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const res = await fetch('/api/alignment/ai-assistant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: currentSessionId, question })
+                });
+                const data = await res.json();
+                document.getElementById('ai-typing')?.remove();
+
+                const answer = data.data?.answer || '无法回答';
+                // 简单渲染 Markdown 代码块
+                const rendered = answer.replace(/```(\w*)\n([\s\S]*?)```/g,
+                    (match, lang, code) => `<pre><button class="btn btn-copy copy-btn" onclick="copyCode(this)">复制</button>${escapeHtml(code)}</pre>`
+                ).replace(/\n/g, '<br>');
+
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble">${rendered}</div></div>`;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } catch (e) {
+                document.getElementById('ai-typing')?.remove();
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble" style="color:#c92a2a;">请求失败: ${e.message}</div></div>`;
+            }
+        }
+
+        function copyCode(btn) {
+            const pre = btn.parentElement;
+            const text = pre.textContent.replace('复制', '').trim();
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = '已复制!';
+                setTimeout(() => btn.textContent = '复制', 1500);
+            });
+        }
+
+        // ================================================================
+        //  历史会话
+        // ================================================================
+        async function loadSessions() {
+            const projectId = document.getElementById('history-project').value;
+            if (!projectId) return;
+            const res = await fetch(`/api/alignment/sessions?project_id=${projectId}`);
+            const data = await res.json();
+            const list = data.data || [];
+            const tbody = document.querySelector('#sessions-table tbody');
+
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#868e96; padding:40px;">暂无对齐记录</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = list.map(s => {
+                const score = s.match_score || 0;
+                const color = score >= 80 ? '#2b8a3e' : score >= 50 ? '#e67700' : '#c92a2a';
+                return `<tr>
+            <td>${s.created_at || ''}</td>
+            <td>${s.spec_version}</td>
+            <td>${s.vendor_name || '-'}</td>
+            <td><strong style="color:${color};">${score}%</strong></td>
+            <td>${s.matched_count || 0} / ${s.partial_count || 0} / ${s.missing_count || 0}</td>
+            <td>${s.status}</td>
+            <td>
+                <button class="btn btn-sm btn-outline" onclick="viewSession(${s.id})">查看</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteSession(${s.id})">删除</button>
+            </td>
+        </tr>`;
+            }).join('');
+        }
+
+        async function viewSession(id) {
+            switchMainTab('workbench');
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-btn')[0].classList.add('active');
+            await loadSessionResult(id);
+        }
+
+        async function deleteSession(id) {
+            if (!confirm('确定删除此对齐记录？')) return;
+            await fetch(`/api/alignment/sessions/${id}`, { method: 'DELETE' });
+            loadSessions();
+        }
+
+        // ================================================================
+        //  工具函数
+        // ================================================================
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function setupDragDrop() {
+            const zone = document.getElementById('vendor-upload-zone');
+            if (!zone) return;
+            zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', e => {
+                e.preventDefault(); zone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) {
+                    document.getElementById('vendor-file').files = e.dataTransfer.files;
+                    document.getElementById('vendor-file-name').textContent = '📎 ' + e.dataTransfer.files[0].name;
+                }
+            });
+        }
+
+        function setupFileInputs() {
+            document.getElementById('vendor-file')?.addEventListener('change', function () {
+                if (this.files[0]) {
+                    document.getElementById('vendor-file-name').textContent = '📎 ' + this.files[0].name;
+                }
+            });
+            document.getElementById('import-spec-file')?.addEventListener('change', function () {
+                if (this.files[0]) {
+                    document.getElementById('import-spec-filename').textContent = '📎 ' + this.files[0].name;
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,18 @@
+[Unit]
+Description=ICU Anesthesia Project Python Web App
+After=network.target mysql.service
+
+[Service]
+# Please update the User/Group to your actual CentOS user
+User=root
+Group=root
+WorkingDirectory=/path/to/icu_anesthesia_project
+Environment="PATH=/path/to/icu_anesthesia_project/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/path/to/icu_anesthesia_project/.venv/bin/python3 app.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/path/to/icu_anesthesia_project/app.log
+StandardError=append:/path/to/icu_anesthesia_project/app.log
+
+[Install]
+WantedBy=multi-user.target
