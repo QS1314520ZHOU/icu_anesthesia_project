@@ -93,8 +93,11 @@ from routes.interface_spec_routes import spec_bp
 from routes.wecom_routes import wecom_bp
 from routes.form_generator_routes import form_generator_bp
 from routes.mobile_routes import mobile_bp
+from routes.hardware_routes import hardware_bp
+from routes.communication_routes import communication_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
+from services.auth_service import auth_service
 from ai_utils import call_ai
 from app_config import NOTIFICATION_CONFIG, PROJECT_STATUS, PROJECT_TEMPLATES
 app.register_blueprint(alignment_bp)
@@ -120,6 +123,43 @@ app.register_blueprint(spec_bp)
 app.register_blueprint(wecom_bp)
 app.register_blueprint(form_generator_bp, url_prefix='/api/form-generator')
 app.register_blueprint(mobile_bp)
+app.register_blueprint(hardware_bp)
+app.register_blueprint(communication_bp)
+
+
+@app.before_request
+def require_global_auth():
+    path = request.path or '/'
+    whitelist_prefixes = [
+        '/static/',
+        '/api/auth/login',
+        '/health',
+        '/m',
+        '/alignment',
+        '/api/alignment',
+    ]
+    whitelist_exact = {
+        '/',
+        '/api/force_static',
+        '/WW_verify_qbEX7XXnUe5licTo.txt',
+    }
+
+    if path in whitelist_exact or any(path.startswith(prefix) for prefix in whitelist_prefixes):
+        return None
+
+    if request.method == 'OPTIONS':
+        return None
+
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if not token:
+        token = request.cookies.get('auth_token')
+
+    user = auth_service.validate_token(token)
+    if not user:
+        return jsonify({"success": False, "message": "请先登录", "code": 401}), 401
+
+    request.current_user = user
+    return None
 
 # thread executor for async tasks
 executor = ThreadPoolExecutor(max_workers=4)
@@ -582,52 +622,6 @@ def delete_template(template_id):
         conn.execute(sql, (template_id,))
         conn.commit()
         return api_response(True, message='模板已删除')
-
-# ========== 客户沟通记录 API ==========
-@app.route('/api/projects/<int:project_id>/communications', methods=['GET'])
-def get_project_communications(project_id):
-    """获取项目的沟通记录"""
-    with DatabasePool.get_connection() as conn:
-        sql = DatabasePool.format_sql('''
-            SELECT * FROM customer_communications 
-            WHERE project_id = ? ORDER BY contact_date DESC
-        ''')
-        records = conn.execute(sql, (project_id,)).fetchall()
-        return api_response(True, [dict(r) for r in records])
-
-@app.route('/api/projects/<int:project_id>/communications', methods=['POST'])
-def add_project_communication(project_id):
-    """添加沟通记录"""
-    data = request.json or {}
-    with DatabasePool.get_connection() as conn:
-        sql = DatabasePool.format_sql('''
-            INSERT INTO customer_communications 
-            (project_id, contact_date, contact_person, contact_method, summary, related_issue_id, created_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''')
-        if DatabasePool.is_postgres():
-            sql += ' RETURNING id'
-        insert_cursor = conn.execute(sql, (
-            project_id,
-            data.get('contact_date'),
-            data.get('contact_person'),
-            data.get('contact_method'),
-            data.get('summary'),
-            data.get('related_issue_id'),
-            data.get('created_by', 'system')
-        ))
-        record_id = DatabasePool.get_inserted_id(insert_cursor)
-        conn.commit()
-        return api_response(True, {'id': record_id, 'message': '沟通记录添加成功'})
-
-@app.route('/api/communications/<int:record_id>', methods=['DELETE'])
-def delete_communication(record_id):
-    """删除沟通记录"""
-    with DatabasePool.get_connection() as conn:
-        sql = DatabasePool.format_sql('DELETE FROM customer_communications WHERE id = ?')
-        conn.execute(sql, (record_id,))
-        conn.commit()
-        return api_response(True, message='记录已删除')
 
 @app.route('/api/projects/<int:project_id>/communications/analyze', methods=['POST'])
 def analyze_communications(project_id):
@@ -3065,62 +3059,6 @@ def delete_kb_item(kid):
             if not os.path.exists(item['attachment_path']):
                 storage_service.delete_file(item['attachment_path'])
         conn.execute(DatabasePool.format_sql('DELETE FROM knowledge_base WHERE id = ?'), (kid,))
-        conn.commit()
-    return jsonify({'success': True})
-
-# ========== 硬件资产管理 API ==========
-@app.route('/api/assets', methods=['GET'])
-def get_assets():
-    status = request.args.get('status')
-    with DatabasePool.get_connection() as conn:
-        query = 'SELECT a.*, p.project_name FROM hardware_assets a LEFT JOIN projects p ON a.current_project_id = p.id'
-        if status:
-            query += ' WHERE a.status = ?'
-            items = conn.execute(DatabasePool.format_sql(query), (status,)).fetchall()
-        else:
-            items = conn.execute(DatabasePool.format_sql(query)).fetchall()
-    return jsonify([dict(i) for i in items])
-
-@app.route('/api/assets', methods=['POST'])
-def add_asset():
-    data = request.json or {}
-    with DatabasePool.get_connection() as conn:
-        conn.execute(DatabasePool.format_sql('''
-            INSERT INTO hardware_assets (asset_name, sn, model, status, current_project_id, location, operator)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        '''), (data['asset_name'], data.get('sn'), data.get('model'), data.get('status', '在库'),
-              data.get('current_project_id'), data.get('location'), data.get('operator')))
-        conn.commit()
-    return jsonify({'success': True})
-
-@app.route('/api/assets/<int:aid>/status', methods=['PUT'])
-def update_asset_status(aid):
-    data = request.json or {}
-    with DatabasePool.get_connection() as conn:
-        existing = conn.execute(
-            DatabasePool.format_sql('SELECT * FROM hardware_assets WHERE id = ?'),
-            (aid,)
-        ).fetchone()
-        if not existing:
-            return jsonify({'success': False, 'message': '资产不存在'}), 404
-        existing = dict(existing)
-        conn.execute(DatabasePool.format_sql('''
-            UPDATE hardware_assets SET status=?, current_project_id=?, location=?, operator=?, updated_at=CURRENT_TIMESTAMP
-            WHERE id=?
-        '''), (
-            data.get('status', existing.get('status')),
-            data.get('current_project_id', existing.get('current_project_id')),
-            data.get('location', existing.get('location')),
-            data.get('operator', existing.get('operator')),
-            aid
-        ))
-        conn.commit()
-    return jsonify({'success': True})
-
-@app.route('/api/assets/<int:aid>', methods=['DELETE'])
-def delete_asset(aid):
-    with DatabasePool.get_connection() as conn:
-        conn.execute(DatabasePool.format_sql('DELETE FROM hardware_assets WHERE id = ?'), (aid,))
         conn.commit()
     return jsonify({'success': True})
 

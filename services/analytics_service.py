@@ -355,48 +355,113 @@ class AnalyticsService:
     def get_project_health_score(self, project_id: int) -> Dict[str, Any]:
         """获取项目健康度评分"""
         with DatabasePool.get_connection() as conn:
-            sql_p = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
+            sql_p = DatabasePool.format_sql('''
+                SELECT id, project_name, hospital_name, status, progress,
+                       plan_end_date, risk_score, project_manager
+                FROM projects
+                WHERE id = ?
+            ''')
             proj = conn.execute(sql_p, (project_id,)).fetchone()
             if not proj:
                 return {"score": 0, "factors": [], "error": "Project not found"}
-            
+
             p = dict(proj)
-            
-            # 1. 未解决问题数
-            sql_issues = DatabasePool.format_sql("SELECT COUNT(*) as c FROM issues WHERE project_id=? AND status!='已解决'")
+
+            today = datetime.now().date()
+
+            # 1. 进度偏差
+            try:
+                plan_end_str = str(p['plan_end_date']).strip()[:10] if p.get('plan_end_date') else ""
+                plan_end = datetime.strptime(plan_end_str, '%Y-%m-%d').date() if plan_end_str else None
+            except (ValueError, AttributeError):
+                plan_end = None
+
+            if plan_end:
+                total_days = (plan_end - today).days
+                expected_progress = max(0, min(100, 100 - (total_days / 90 * 100))) if total_days > 0 else 100
+                progress_deviation = (p.get('progress') or 0) - expected_progress
+            else:
+                expected_progress = None
+                progress_deviation = 0
+
+            # 2. 未解决问题数
+            sql_issues = DatabasePool.format_sql(
+                "SELECT COUNT(*) as c FROM issues WHERE project_id = ? AND status != '已解决'"
+            )
             open_issues = int(conn.execute(sql_issues, (project_id,)).fetchone()['c'])
-            
-            # 2. 逾期里程碑数
-            # Using CURRENT_DATE which is cross-compatible via DatabasePool.format_sql
+
+            # 3. 接口完成率
+            sql_total = DatabasePool.format_sql("SELECT COUNT(*) as c FROM interfaces WHERE project_id = ?")
+            total_interfaces = int(conn.execute(sql_total, (project_id,)).fetchone()['c'])
+            sql_comp = DatabasePool.format_sql(
+                "SELECT COUNT(*) as c FROM interfaces WHERE project_id = ? AND status = '已完成'"
+            )
+            completed_interfaces = int(conn.execute(sql_comp, (project_id,)).fetchone()['c'])
+            interface_rate = (completed_interfaces / total_interfaces * 100) if total_interfaces > 0 else 100
+
+            # 4. 逾期里程碑
             sql_ms = DatabasePool.format_sql('''
-                SELECT COUNT(*) as c FROM milestones 
-                WHERE project_id = ? AND is_completed = ? AND target_date < CURRENT_DATE
+                SELECT COUNT(*) as c
+                FROM milestones
+                WHERE project_id = ? AND is_completed = ? AND target_date < ?
             ''')
-            overdue_ms = int(conn.execute(sql_ms, (project_id, False)).fetchone()['c'])
-            
+            overdue_ms = int(conn.execute(sql_ms, (project_id, False, today.strftime('%Y-%m-%d'))).fetchone()['c'])
+
+            # 5. 健康分
             score = 100.0
-            # 扣分逻辑
-            issue_deduction = float(min(30, open_issues * 5))
-            ms_deduction = float(min(20, overdue_ms * 10))
-            risk_deduction = float(min(15, (p.get('risk_score') or 0) * 0.3))
-            
+            issue_deduction = float(open_issues * 5)
+            milestone_deduction = float(overdue_ms * 10)
+            interface_deduction = 15.0 if interface_rate < 50 else 0.0
+            progress_deduction = 20.0 if progress_deviation < -20 else 0.0
+            risk_deduction = float(min(15, p.get('risk_score') or 0))
+
             score -= issue_deduction
-            score -= ms_deduction
+            score -= milestone_deduction
+            score -= interface_deduction
+            score -= progress_deduction
             score -= risk_deduction
             score = max(0.0, score)
-            
+
             factors = []
             if open_issues > 0:
                 factors.append({'type': 'issue', 'desc': f'{open_issues} 个未解决问题', 'deduction': issue_deduction})
             if overdue_ms > 0:
-                factors.append({'type': 'milestone', 'desc': f'{overdue_ms} 个逾期里程碑', 'deduction': ms_deduction})
-            
+                factors.append({'type': 'milestone', 'desc': f'{overdue_ms} 个逾期里程碑', 'deduction': milestone_deduction})
+            if interface_rate < 50:
+                factors.append({'type': 'interface', 'desc': f'接口完成率仅 {round(interface_rate)}%', 'deduction': interface_deduction})
+            if progress_deviation < -20:
+                factors.append({'type': 'progress', 'desc': f'进度落后 {round(abs(progress_deviation))}%', 'deduction': progress_deduction})
+            if (p.get('risk_score') or 0) > 0:
+                factors.append({'type': 'risk', 'desc': f"风险评分 {round(p.get('risk_score') or 0, 1)}", 'deduction': risk_deduction})
+
+            if score >= 70:
+                health_status = 'green'
+                health_label = '健康'
+            elif score >= 40:
+                health_status = 'yellow'
+                health_label = '需关注'
+            else:
+                health_status = 'red'
+                health_label = '风险'
+
             return {
-                "score": int(round(score)), 
+                "score": int(round(score)),
+                "health_status": health_status,
+                "health_label": health_label,
                 "factors": factors,
                 "details": {
+                    "project_id": project_id,
+                    "project_name": p.get('project_name'),
+                    "hospital_name": p.get('hospital_name'),
+                    "status": p.get('status'),
+                    "progress": p.get('progress') or 0,
                     "open_issues": open_issues,
                     "overdue_ms": overdue_ms,
+                    "interface_rate": round(interface_rate),
+                    "completed_interfaces": completed_interfaces,
+                    "total_interfaces": total_interfaces,
+                    "expected_progress": round(expected_progress) if expected_progress is not None else None,
+                    "progress_deviation": round(progress_deviation),
                     "risk_score": float(p.get('risk_score') or 0)
                 }
             }

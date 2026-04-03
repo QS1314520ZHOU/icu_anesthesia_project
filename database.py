@@ -3,9 +3,11 @@ import threading
 from contextlib import contextmanager
 import os
 import re
+import logging
 from app_config import DB_CONFIG
 
 DATABASE_SQLITE = 'database.db'
+logger = logging.getLogger(__name__)
 
 # PostgreSQL imports
 try:
@@ -163,6 +165,34 @@ class DatabasePool:
         if DB_CONFIG.get('TYPE') != 'postgres':
             return sql
         
+        # 0. 处理 SQLite 专有语法
+        if 'INSERT OR REPLACE' in sql.upper():
+            logger.warning(f"INSERT OR REPLACE 不支持自动转换，请手动改写为 ON CONFLICT: {sql[:100]}")
+
+        if re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", sql, flags=re.IGNORECASE):
+            sql = re.sub(r'INSERT\s+OR\s+IGNORE\s+INTO', 'INSERT INTO', sql, count=1, flags=re.IGNORECASE)
+            if 'ON CONFLICT' not in sql.upper():
+                returning_clause = ''
+                returning_match = re.search(r"\bRETURNING\b.*$", sql, flags=re.IGNORECASE | re.DOTALL)
+                if returning_match:
+                    returning_clause = ' ' + returning_match.group(0).strip()
+                    sql = sql[:returning_match.start()].rstrip()
+
+                has_semicolon = sql.rstrip().endswith(';')
+                sql = sql.rstrip().rstrip(';').rstrip()
+                sql = f"{sql} ON CONFLICT DO NOTHING{returning_clause}"
+                if has_semicolon:
+                    sql += ';'
+
+        pragma_match = re.search(r"PRAGMA\s+table_info\(\s*['\"]?(\w+)['\"]?\s*\)", sql, re.IGNORECASE)
+        if pragma_match:
+            table_name = pragma_match.group(1)
+            sql = (
+                "SELECT column_name as name, data_type as type, is_nullable, "
+                f"column_default as dflt_value FROM information_schema.columns "
+                f"WHERE table_name = '{table_name}' ORDER BY ordinal_position"
+            )
+
         # 1. 替换占位符 ? 为 %s
         # PostgreSQL 使用 %s 而 sqlite3 使用 ?
         # 这里采用简单的全局替换，对于绝大多数业务 SQL 足够
@@ -238,6 +268,14 @@ class DatabasePool:
         for field in bool_fields:
             sql = re.sub(rf"\b{field}\s*=\s*(1|TRUE)\b", f"{field} = TRUE", sql, flags=re.IGNORECASE)
             sql = re.sub(rf"\b{field}\s*=\s*(0|FALSE)\b", f"{field} = FALSE", sql, flags=re.IGNORECASE)
+
+        # 8. 处理 PostgreSQL 保留字表名 users
+        sql = re.sub(
+            r'\b(FROM|JOIN|INTO|UPDATE|EXISTS|TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+users\b',
+            lambda m: f'{m.group(1)} "users"',
+            sql,
+            flags=re.IGNORECASE,
+        )
 
         return sql
 

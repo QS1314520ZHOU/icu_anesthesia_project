@@ -1,7 +1,11 @@
 import json
 import os
+import logging
+import hashlib
 from datetime import datetime
 from database import DatabasePool
+
+logger = logging.getLogger(__name__)
 
 def allowed_file(filename, allowed_extensions):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
@@ -631,7 +635,41 @@ def init_db():
             else:
                 cursor.execute("ALTER TABLE knowledge_base ADD COLUMN embedding BLOB")
         except: pass
-    
+
+        # 23a. RAG 知识条目表
+        if db_type == 'postgres':
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS kb_items (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content TEXT,
+                    category TEXT DEFAULT 'general',
+                    tags TEXT,
+                    source_type TEXT,
+                    source_id INTEGER,
+                    project_id INTEGER,
+                    embedding BYTEA,
+                    created_at {TIMESTAMP_TYPE},
+                    updated_at {TIMESTAMP_TYPE}
+                )
+            ''')
+        else:
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS kb_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    content TEXT,
+                    category TEXT DEFAULT 'general',
+                    tags TEXT,
+                    source_type TEXT,
+                    source_id INTEGER,
+                    project_id INTEGER,
+                    embedding BLOB,
+                    created_at {TIMESTAMP_TYPE},
+                    updated_at {TIMESTAMP_TYPE}
+                )
+            ''')
+
         # 24. 硬件资产报表
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS hardware_assets (
@@ -879,8 +917,106 @@ def init_db():
                 FOREIGN KEY (spec_id) REFERENCES interface_specs(id) ON DELETE CASCADE
             )
         ''')
+
+        # 33. 对齐中心会话表
+        if db_type == 'postgres':
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_sessions (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER NOT NULL,
+                    spec_version TEXT,
+                    vendor_file_name TEXT,
+                    status TEXT DEFAULT 'pending',
+                    summary TEXT,
+                    created_at {TIMESTAMP_TYPE},
+                    updated_at {TIMESTAMP_TYPE}
+                )
+            ''')
+        else:
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    spec_version TEXT,
+                    vendor_file_name TEXT,
+                    status TEXT DEFAULT 'pending',
+                    summary TEXT,
+                    created_at {TIMESTAMP_TYPE},
+                    updated_at {TIMESTAMP_TYPE}
+                )
+            ''')
+
+        # 34. 对齐结果表
+        if db_type == 'postgres':
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_results (
+                    id SERIAL PRIMARY KEY,
+                    session_id INTEGER NOT NULL,
+                    our_spec_id INTEGER,
+                    vendor_spec_id INTEGER,
+                    match_score DOUBLE PRECISION DEFAULT 0,
+                    gap_summary TEXT,
+                    status TEXT DEFAULT 'pending',
+                    confirmed_by TEXT,
+                    confirmed_at TIMESTAMP,
+                    created_at {TIMESTAMP_TYPE},
+                    FOREIGN KEY (session_id) REFERENCES alignment_sessions(id),
+                    FOREIGN KEY (our_spec_id) REFERENCES interface_specs(id),
+                    FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
+                )
+            ''')
+        else:
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    our_spec_id INTEGER,
+                    vendor_spec_id INTEGER,
+                    match_score REAL DEFAULT 0,
+                    gap_summary TEXT,
+                    status TEXT DEFAULT 'pending',
+                    confirmed_by TEXT,
+                    confirmed_at TIMESTAMP,
+                    created_at {TIMESTAMP_TYPE},
+                    FOREIGN KEY (session_id) REFERENCES alignment_sessions(id),
+                    FOREIGN KEY (our_spec_id) REFERENCES interface_specs(id),
+                    FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
+                )
+            ''')
+
+        # 35. 对齐字段映射表
+        if db_type == 'postgres':
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_field_maps (
+                    id SERIAL PRIMARY KEY,
+                    result_id INTEGER NOT NULL,
+                    our_field_name TEXT,
+                    vendor_field_name TEXT,
+                    match_type TEXT DEFAULT 'auto',
+                    confidence DOUBLE PRECISION DEFAULT 0,
+                    manual_override BOOLEAN DEFAULT FALSE,
+                    notes TEXT,
+                    created_at {TIMESTAMP_TYPE},
+                    FOREIGN KEY (result_id) REFERENCES alignment_results(id)
+                )
+            ''')
+        else:
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS alignment_field_maps (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    result_id INTEGER NOT NULL,
+                    our_field_name TEXT,
+                    vendor_field_name TEXT,
+                    match_type TEXT DEFAULT 'auto',
+                    confidence REAL DEFAULT 0,
+                    manual_override INTEGER DEFAULT 0,
+                    notes TEXT,
+                    created_at {TIMESTAMP_TYPE},
+                    FOREIGN KEY (result_id) REFERENCES alignment_results(id)
+                )
+            ''')
     
-        # 33. 接口对照结果
+        # 36. 接口对照结果
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS interface_comparisons (
                 id {PK_AUTO},
@@ -910,7 +1046,7 @@ def init_db():
                 cursor.execute("ALTER TABLE interface_comparisons ADD COLUMN category TEXT")
         except: pass
     
-        # 34. 字段级映射关系
+        # 37. 字段级映射关系
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS field_mappings (
                 id {PK_AUTO},
@@ -1013,15 +1149,35 @@ def init_db():
             ("idx_task_deps_depends_on", "task_dependencies", "depends_on_task_id"),
             ("idx_snapshots_project_id", "progress_snapshots", "project_id"),
             ("idx_standup_project_id", "standup_minutes", "project_id"),
+            ("idx_kb_items_project_id", "kb_items", "project_id"),
+            ("idx_kb_items_category", "kb_items", "category"),
             ("idx_interface_specs_project", "interface_specs", "project_id"),
             ("idx_interface_specs_source", "interface_specs", "spec_source"),
             ("idx_spec_fields_spec", "interface_spec_fields", "spec_id"),
+            ("idx_alignment_sessions_project", "alignment_sessions", "project_id"),
+            ("idx_alignment_results_session", "alignment_results", "session_id"),
+            ("idx_alignment_field_maps_result", "alignment_field_maps", "result_id"),
             ("idx_comparisons_project", "interface_comparisons", "project_id"),
             ("idx_field_mappings_comp", "field_mappings", "comparison_id"),
         ]
         for idx_name, table_name, column_name in indexes:
             try: cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")
             except: pass
+
+        try:
+            user_count_sql = DatabasePool.format_sql("SELECT COUNT(*) as c FROM users")
+            user_count_row = cursor.execute(user_count_sql).fetchone()
+            user_count = user_count_row[0] if isinstance(user_count_row, (list, tuple)) else user_count_row['c']
+            if user_count == 0:
+                admin_password = hashlib.sha256('admin123'.encode()).hexdigest()
+                active_value = True if db_type == 'postgres' else 1
+                seed_sql = DatabasePool.format_sql('''
+                    INSERT INTO users (username, password_hash, display_name, role, is_active)
+                    VALUES (?, ?, ?, ?, ?)
+                ''')
+                cursor.execute(seed_sql, ('admin', admin_password, '系统管理员', 'admin', active_value))
+        except:
+            pass
         conn.commit()
 
 def migrate_add_form_making_stage(cursor):
@@ -1061,9 +1217,22 @@ def migrate_add_form_making_stage(cursor):
 def migrate_to_dynamic_milestones():
     """将现有项目的静态里程碑迁移为基于阶段的动态里程碑"""
     from services.project_service import ProjectService
+
+    logger.info("检查里程碑迁移状态...")
     project_service = ProjectService()
     with DatabasePool.get_connection() as conn:
         cursor = conn.cursor()
+        marker_sql = DatabasePool.format_sql(
+            "SELECT value FROM system_config WHERE config_key = 'milestones_migrated' LIMIT 1"
+        )
+        marker_row = cursor.execute(marker_sql).fetchone()
+        marker_value = None
+        if marker_row:
+            marker_value = marker_row[0] if isinstance(marker_row, (list, tuple)) else marker_row['value']
+
+        if str(marker_value).lower() == 'true':
+            return
+
         projects = cursor.execute(DatabasePool.format_sql('SELECT id FROM projects')).fetchall()
         for p in projects:
             pid = p[0] if isinstance(p, (list, tuple)) else p['id']
@@ -1076,5 +1245,11 @@ def migrate_to_dynamic_milestones():
                 cursor.execute(DatabasePool.format_sql(
                     'INSERT INTO milestones (project_id, name, target_date) VALUES (?, ?, ?)'
                 ), (pid, m_name, s[1] if isinstance(s, (list, tuple)) else s['plan_end_date']))
-                project_service.sync_project_milestones(pid, cursor)
+            project_service.sync_project_milestones(pid, cursor)
+
+        upsert_sql = '''
+            INSERT INTO system_config (config_key, value) VALUES ('milestones_migrated', 'true')
+            ON CONFLICT (config_key) DO UPDATE SET value = EXCLUDED.value
+        '''
+        cursor.execute(DatabasePool.format_sql(upsert_sql))
         conn.commit()
