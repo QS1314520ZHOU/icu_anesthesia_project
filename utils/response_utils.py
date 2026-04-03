@@ -1,26 +1,15 @@
-from flask import jsonify
-import decimal
-from datetime import datetime, date
+from api_utils import api_response as unified_api_response
 
-def api_response(success, data=None, error=None, code=200):
-    """标准 API 响应格式，自动处理 Decimal 和 日期对象"""
-    def serialize(obj):
-        if isinstance(obj, list):
-            return [serialize(i) for i in obj]
-        if isinstance(obj, dict):
-            return {k: serialize(v) for k, v in obj.items()}
-        if isinstance(obj, decimal.Decimal):
-            return float(obj)
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        return obj
 
-    response = {'success': success}
-    if data is not None:
-        response['data'] = serialize(data)
-    if error is not None:
-        response['error'] = error
-    if not success and error:
-        response['message'] = error
-        
-    return jsonify(response), code
+def api_response(success, data=None, error=None, code=200, message=None):
+    """
+    兼容旧接口签名，统一转发到 api_utils.api_response。
+
+    兼容场景：
+    - api_response(True, data)
+    - api_response(False, error="...")
+    - api_response(False, None, "...")
+    - api_response(False, message="...")
+    """
+    final_message = message if message is not None else (error or "")
+    return unified_api_response(success=success, data=data, message=final_message, code=code)
