@@ -377,3 +377,66 @@ function updateSlaCountdown(data) {
     widget.innerHTML = statusHtml;
     parent.appendChild(widget);
 }
+
+async function loadMemberCosts(projectId) {
+    const container = document.getElementById('memberCostTable');
+    if (!container) return;
+
+    try {
+        const data = await api.get(`/projects/${projectId}/financial-costs`);
+        if (!data || data.length === 0) {
+            container.innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8;">暂无人力成本数据</div>';
+            return;
+        }
+
+        let html = '<table class="table table-sm"><thead><tr><th>成员</th><th>累计成本</th></tr></thead><tbody>';
+        data.forEach(m => {
+            html += `<tr><td>${m.name}</td><td>¥${m.cost.toLocaleString()}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '加载失败';
+    }
+}
+
+function showRevenueModal(projectId) {
+    const pIdEl = document.getElementById('revenueProjectId');
+    if (pIdEl) pIdEl.value = projectId;
+
+    document.getElementById('revenueAmount').value = '';
+    document.getElementById('revenueDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('revenueDescription').value = '';
+    openModal('revenueModal');
+}
+
+async function submitRevenue(event) {
+    event.preventDefault();
+    const projectId = document.getElementById('revenueProjectId').value;
+    const amount = document.getElementById('revenueAmount').value;
+    const revenueDate = document.getElementById('revenueDate').value;
+    const revenueType = document.getElementById('revenueType').value;
+    const description = document.getElementById('revenueDescription').value;
+
+    try {
+        const res = await api.post(`/projects/${projectId}/revenue`, {
+            amount: parseFloat(amount),
+            revenue_date: revenueDate,
+            revenue_type: revenueType,
+            description: description
+        });
+
+        if (res.success) {
+            showToast('收入录入成功', 'success');
+            closeModal('revenueModal');
+            if (typeof loadProjectFinancials === 'function') {
+                loadProjectFinancials(projectId);
+            }
+        } else {
+            showToast('录入失败: ' + res.message, 'danger');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('系统错误', 'danger');
+    }
+}

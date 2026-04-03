@@ -76,6 +76,17 @@ python migrate_sqlite_to_pg.py
 - `services/`：业务逻辑与 AI / 企业微信 / 报告 / 调度服务
 - `templates/`：桌面端与移动端页面
 - `static/js/`：前端脚本与模块化 hub 文件
+- 已拆出的核心 hub：`dashboard_hub.js`、`alert_hub.js`、`approval_hub.js`、`reminder_center_hub.js`、`ai_ops_hub.js`、`auth_hub.js`、`admin_hub.js`、`analytics_hub.js`、`operations_hub.js`、`report_hub.js`、`project_detail_hub.js`、`resource_hub.js`、`financial_hub.js`、`map_hub.js`
+- 通知链路也已拆到：`notifications_hub.js`
+- 甘特图链路也已拆到：`gantt_hub.js`
+- AI 分析链路也已拆到：`ai_analysis_hub.js`
+- 共享 UI 基础能力已拆到：`shared_ui_hub.js`
+- 共享状态与常量已拆到：`state_hub.js`
+- 启动初始化已拆到：`bootstrap_hub.js`
+- 协作链路也已拆到：`collaboration_hub.js`
+- 项目详情渲染链也已拆到：`project_detail_render_hub.js`
+- 项目详情工具链也已拆到：`project_detail_tools_hub.js`
+- 项目详情动作链也已拆到：`project_detail_actions_hub.js`
 - `utils/`：通用工具函数
 
 ## 交付辅助文档

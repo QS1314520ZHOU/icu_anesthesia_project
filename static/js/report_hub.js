@@ -1,5 +1,220 @@
 // Report and archive operations extracted from main.js
 
+function renderBeautifulReport(markdown, type) {
+    if (!markdown) return '<div class="error-msg">无报告内容</div>';
+    markdown = cleanAiMarkdown(markdown);
+    let score = null;
+    const scoreMatch = markdown.match(/评分[：:]\s*(\d+)/);
+    if (scoreMatch) score = parseInt(scoreMatch[1]);
+
+    const dateMatch = markdown.match(/报告日期[：:*\s]*(\d{4}-\d{2}-\d{2})/);
+    const countMatch = markdown.match(/项目总数[：:*\s]*(\d+)/);
+    const reportDate = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('zh-CN');
+    const projectCount = countMatch ? countMatch[1] : null;
+
+    const periodMatch = markdown.match(/\*\*报告周期\*\*[：:\s]*([^**\n\t]+)/);
+    const pmMatch = markdown.match(/\*\*项目经理\*\*[：:\s]*([^|**\n\t]+)/);
+    const progressMatch = markdown.match(/\*\*当前进度\*\*[：:\s]*(\d+)/);
+    const contactMatch = markdown.match(/\*\*联系方式\*\*[：:\s]*([^**\n\t]+)/);
+
+    const reportPeriod = periodMatch ? periodMatch[1].trim() : null;
+    const projectPM = pmMatch ? pmMatch[1].trim() : (currentProject ? currentProject.project_manager : null);
+    const progressPercent = progressMatch ? parseInt(progressMatch[1]) : (currentProject ? currentProject.progress : null);
+    const contactInfo = contactMatch ? contactMatch[1].trim() : null;
+
+    const titleMatch = markdown.match(/^#\s+(.+)/m);
+    let title = titleMatch ? titleMatch[1].replace(/[📋🤖📊]/g, '').trim() : (type === 'ai' ? 'AI 智能诊断报告' : '项目周报');
+    title = title.replace(/[\u{1F300}-\u{1F9FF}]/gu, '').trim();
+
+    let cleanedMarkdown = markdown
+        .replace(/^#\s+.+\n?/m, '')
+        .replace(/\*\*报告日期\*\*[^\n]+\n?/g, '')
+        .replace(/报告日期[：:][^\n]+\n?/g, '')
+        .replace(/\*\*报告周期\*\*[^\n]+\n?/g, '')
+        .replace(/\*\*项目经理\*\*[^\n]+\n?/g, '')
+        .replace(/\*\*当前进度\*\*[^\n]+\n?/g, '')
+        .replace(/\*\*联系方式\*\*[^\n]+\n?/g, '')
+        .replace(/^[ \t]*[|｜][ \t]*/gm, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/\*/g, '')
+        .trim();
+
+    const sections = cleanedMarkdown.split(/(?=##\s)/);
+    let html = `<div class="report-container">`;
+
+    html += `
+        <div class="report-header ${type === 'ai' ? 'ai-report' : 'weekly-report'}">
+            <div class="report-header-title">
+                <span class="icon">${type === 'ai' ? '🤖' : '📋'}</span>
+                <h2>${title}</h2>
+            </div>
+            <div class="report-meta">
+                <div class="report-meta-item">
+                    <span class="meta-icon">📅</span>
+                    <span class="meta-label">报告日期</span>
+                    <span class="meta-value">${reportDate}</span>
+                </div>
+                ${projectCount ? `
+                <div class="report-meta-item">
+                    <span class="meta-icon">📊</span>
+                    <span class="meta-label">项目总数</span>
+                    <span class="meta-value">${projectCount}个</span>
+                </div>
+                ` : ''}
+                ${currentProject ? `
+                <div class="report-meta-item">
+                    <span class="meta-icon">🏥</span>
+                    <span class="meta-label">所属医院</span>
+                    <span class="meta-value">${currentProject.hospital_name}</span>
+                </div>
+                <div class="report-meta-item">
+                    <span class="meta-icon">👤</span>
+                    <span class="meta-label">项目经理</span>
+                    <span class="meta-value">${projectPM || currentProject.project_manager || '未指派'}</span>
+                </div>
+                ` : `
+                <div class="report-meta-item">
+                    <span class="meta-icon">🏢</span>
+                    <span class="meta-label">管理维度</span>
+                    <span class="meta-value">全域项目群</span>
+                </div>
+                <div class="report-meta-item">
+                    <span class="meta-icon">🏘️</span>
+                    <span class="meta-label">管理中心</span>
+                    <span class="meta-value">项目管理办公室 (PMO)</span>
+                </div>
+                `}
+            </div>
+        </div>
+
+        ${(reportPeriod || progressPercent !== null) ? `
+        <div class="report-overview-grid">
+            ${reportPeriod ? `
+            <div class="overview-card-v2">
+                <div class="card-icon">📅</div>
+                <div class="card-content">
+                    <div class="card-label">报告周期</div>
+                    <div class="card-value">${reportPeriod}</div>
+                </div>
+            </div>
+            ` : ''}
+            <div class="overview-card-v2">
+                <div class="card-icon">👤</div>
+                <div class="card-content">
+                    <div class="card-label">执行负责人</div>
+                    <div class="card-value">${projectPM || '未设置'}</div>
+                </div>
+            </div>
+            ${progressPercent !== null ? `
+            <div class="overview-card-v2">
+                <div class="card-icon">📈</div>
+                <div class="card-content">
+                    <div class="card-label">项目进度</div>
+                    <div class="card-value">${progressPercent}%</div>
+                    <div class="progress-mini-track">
+                        <div class="progress-mini-bar" style="width: ${progressPercent}%"></div>
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+            ${contactInfo ? `
+            <div class="overview-card-v2">
+                <div class="card-icon">📞</div>
+                <div class="card-content">
+                    <div class="card-label">联系方式</div>
+                    <div class="card-value">${contactInfo}</div>
+                </div>
+            </div>
+            ` : ''}
+            ${projectCount ? `
+            <div class="overview-card-v2">
+                <div class="card-icon">📊</div>
+                <div class="card-content">
+                    <div class="card-label">覆盖范围</div>
+                    <div class="card-value">${projectCount}个项目</div>
+                </div>
+            </div>
+            ` : ''}
+        </div>
+        ` : ''}
+    `;
+
+    if (score !== null) {
+        const scoreClass = score >= 70 ? 'score-high' : (score >= 40 ? 'score-medium' : 'score-low');
+        const scoreText = score >= 70 ? '健康' : (score >= 40 ? '需关注' : '风险');
+        const scoreEmoji = score >= 70 ? '✅' : (score >= 40 ? '⚠️' : '🚨');
+        html += `
+            <div class="score-card ${scoreClass}">
+                <div class="score-circle">
+                    <div class="score-value">${score}</div>
+                    <div class="score-label">分</div>
+                </div>
+                <div class="score-info">
+                    <div class="score-title">${scoreEmoji} 项目健康度：${scoreText}</div>
+                    <div class="score-desc">${score >= 70 ? '项目整体运行良好，继续保持当前节奏。' : score >= 40 ? '项目存在一定风险，建议关注重点问题并及时处理。' : '项目风险较高，需要立即干预，建议召开紧急会议。'}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    sections.forEach(section => {
+        const trimmedSection = section.trim();
+        if (!trimmedSection) return;
+        const sectionTitleMatch = trimmedSection.match(/^##\s*\d*\.?\s*[、]?\s*(.+)/m);
+
+        if (!sectionTitleMatch) {
+            const parsedContent = renderAiMarkdown(trimmedSection);
+            const textContent = parsedContent.replace(/<[^>]*>/g, '').trim();
+            if (textContent.length > 0 && !trimmedSection.startsWith('#')) {
+                html += `<div class="report-section"><div class="report-section-body">${parsedContent}</div></div>`;
+            }
+            return;
+        }
+
+        const sectionTitle = sectionTitleMatch[1].trim();
+        const sectionContent = section.replace(/^##\s*.+\n/, '').trim();
+
+        let iconClass = 'progress', icon = '📊';
+        if (sectionTitle.includes('风险') || sectionTitle.includes('问题') || sectionTitle.includes('待处理')) {
+            iconClass = 'risk'; icon = '⚠️';
+        } else if (sectionTitle.includes('建议') || sectionTitle.includes('措施')) {
+            iconClass = 'suggestion'; icon = '💡';
+        } else if (sectionTitle.includes('重点') || sectionTitle.includes('计划') || sectionTitle.includes('下周')) {
+            iconClass = 'focus'; icon = '🎯';
+        } else if (sectionTitle.includes('概览') || sectionTitle.includes('整体') || sectionTitle.includes('汇总')) {
+            iconClass = 'overview'; icon = '📋';
+        } else if (sectionTitle.includes('亮点') || sectionTitle.includes('成果') || sectionTitle.includes('完成')) {
+            iconClass = 'success'; icon = '✨';
+        } else if (sectionTitle.includes('资源') || sectionTitle.includes('协调')) {
+            iconClass = 'resource'; icon = '🤝';
+        }
+
+        html += `
+            <div class="report-section">
+                <div class="report-section-header">
+                    <div class="report-section-icon ${iconClass}">${icon}</div>
+                    <div class="report-section-title">${sectionTitle}</div>
+                </div>
+                <div class="report-section-body">
+                    ${renderAiMarkdown(sectionContent)}
+                </div>
+            </div>
+        `;
+    });
+
+    html += `
+        <div class="report-footer">
+            <div class="report-footer-info">
+                <span>📄 报告由 AI 自动生成</span>
+                <span>⏰ 生成时间: ${new Date().toLocaleString('zh-CN')}</span>
+            </div>
+        </div>
+    `;
+
+    html += `</div>`;
+    return html;
+}
+
 async function generateWeeklyReport(pid, forceRefresh = false) {
     currentReportProjectId = pid;
     openModal('reportModal');

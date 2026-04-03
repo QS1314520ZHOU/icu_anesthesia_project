@@ -233,3 +233,23 @@ async function doLogout() {
     localStorage.removeItem('token');
     window.location.reload();
 }
+
+(function checkWecomLoginCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+        localStorage.setItem('token', token);
+        window.history.replaceState({}, document.title, '/');
+        if (typeof onLoginSuccess === 'function') {
+            onLoginSuccess(token);
+        } else {
+            location.reload();
+        }
+    }
+
+    const loginError = urlParams.get('login_error');
+    if (loginError) {
+        showToast('企业微信登录失败: ' + loginError, 'danger', 5000);
+        window.history.replaceState({}, document.title, '/');
+    }
+})();

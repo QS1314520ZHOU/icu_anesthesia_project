@@ -1,6 +1,7 @@
 (function () {
     window.warningSeverityFilter = window.warningSeverityFilter || '';
     window.warningSearch = window.warningSearch || '';
+    window.warningCount = window.warningCount || 0;
 
     function syncWarningFiltersToUrl() {
         const params = new URLSearchParams(window.location.search);
@@ -130,5 +131,20 @@
         window.warningSearch = '';
         syncWarningFiltersToUrl();
         window.loadWarnings();
+    };
+
+    window.loadWarningCount = async function () {
+        try {
+            const data = await api.get('/warnings/count');
+            window.warningCount = data.total || 0;
+            const badge = document.getElementById('warningBadge');
+            if (badge) {
+                badge.textContent = window.warningCount;
+                badge.style.display = window.warningCount > 0 ? 'inline-block' : 'none';
+                badge.style.background = data.high > 0 ? 'var(--danger)' : 'var(--warning)';
+            }
+        } catch (e) {
+            console.warn('加载预警数量失败', e);
+        }
     };
 })();

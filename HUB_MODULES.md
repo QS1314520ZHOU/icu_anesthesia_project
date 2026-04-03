@@ -8,8 +8,10 @@
   - today focus cockpit
   - financial snapshot
   - resource snapshot
+  - health dashboard
 - `static/js/alert_hub.js`
   - warning center
+  - warning badge/count
 - `static/js/approval_hub.js`
   - approval center
   - pending approvals
@@ -33,6 +35,23 @@
   - AI chaser
   - AI NLQ modal
   - KB extraction helper
+- `static/js/shared_ui_hub.js`
+  - modal helpers
+  - toast helpers
+  - markdown rendering helpers
+  - generic modal helper
+  - copy-current-view helper
+  - tab dragging helper
+  - theme helpers
+  - AI health widget helpers
+  - rating helpers
+  - dropdown interaction helpers
+- `static/js/state_hub.js`
+  - shared global state
+  - stage/status constants
+- `static/js/bootstrap_hub.js`
+  - desktop startup wiring
+  - initial page boot sequence
 - `static/js/auth_hub.js`
   - auth/session bootstrap helpers
   - login/register helpers
@@ -41,31 +60,64 @@
   - global user management
   - password reset flow
   - AI config management
+- `static/js/analytics_hub.js`
+  - risk trend analysis
+  - delivery prediction
+  - project financial overview
+  - SLA countdown helpers
+  - revenue entry helpers
+- `static/js/operations_hub.js`
+  - PMO dashboard helpers
+  - stage baseline loading
+  - demand impact analysis
+  - risk simulation helpers
+- `static/js/collaboration_hub.js`
+  - communications CRUD
+  - communication AI analysis
+  - uploaded-file analysis
+  - AI retrospective / task suggestions
+- `static/js/notifications_hub.js`
+  - notification center
+  - unread count
+  - reminder check trigger
+- `static/js/gantt_hub.js`
+  - project gantt rendering
+  - global gantt modal
+  - gantt legend helpers
+- `static/js/ai_analysis_hub.js`
+  - project AI analysis modal
+  - strategic AI insight loading
+  - risk radar rendering
 - `static/js/report_hub.js`
   - weekly report modal helpers
   - global report generation
   - report archive list/detail
   - project report export
+  - shared report rendering
 - `static/js/project_detail_hub.js`
   - project detail entry loader
+  - project template save helper
+  - stage expand/add helpers
+- `static/js/project_detail_render_hub.js`
   - project detail main renderer
+  - project detail section renderers
+- `static/js/project_detail_actions_hub.js`
   - project detail modal entry helpers
   - project detail save/edit handlers
   - project detail delete/update handlers
-  - stage expand/add helpers
-  - project detail tab loaders
   - dependency management helpers
+  - risk actions and status changes
+- `static/js/project_detail_tools_hub.js`
   - interface template recommendation helpers
   - document upload helper
 
 ## Shared Base Layer
 
 - `static/js/main.js`
-  - bootstrap
-  - shared modal helpers
-  - shared toast helpers
+  - compatibility shell
+  - load-order anchor
   - remaining cross-module glue
-  - a few legacy analytics helpers still parked here
+  - startup wiring only
 
 ## Practical Next Extraction Targets
 

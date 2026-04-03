@@ -31,14 +31,29 @@ The following hub files now own major cockpit/workbench flows:
 - `static/js/financial_hub.js`
 - `static/js/map_hub.js`
 - `static/js/ai_ops_hub.js`
+- `static/js/shared_ui_hub.js`
+- `static/js/state_hub.js`
+- `static/js/bootstrap_hub.js`
 - `static/js/auth_hub.js`
 - `static/js/admin_hub.js`
+- `static/js/analytics_hub.js`
+- `static/js/operations_hub.js`
+- `static/js/collaboration_hub.js`
+- `static/js/notifications_hub.js`
+- `static/js/gantt_hub.js`
+- `static/js/ai_analysis_hub.js`
 - `static/js/report_hub.js`
 - `static/js/project_detail_hub.js`
-  - now owns the project detail entry and main rendering flow
-  - now covers most high-frequency project detail save/delete/update flows
+  - analytics/forecast and revenue-entry helpers have started moving out of `main.js`
+  - now owns the project detail entry flow
+  - now also owns project template saving
+- `static/js/project_detail_render_hub.js`
+  - now owns the project detail main rendering and section renderers
+- `static/js/project_detail_actions_hub.js`
+  - now covers most project detail save/delete/update flows
   - and several project detail tab loading flows
-  - plus dependency management helpers
+- `static/js/project_detail_tools_hub.js`
+  - now covers interface template recommendation and document upload
 
 ## Stability Hardening Already Applied
 

@@ -2,6 +2,7 @@
     window.todayFocusScope = window.todayFocusScope || 'global';
     window.approvalTrackingStatusFilter = window.approvalTrackingStatusFilter || '';
     window.approvalTrackingSearch = window.approvalTrackingSearch || '';
+    window.healthDashboardVisible = window.healthDashboardVisible || false;
 
     function hydrateDashboardFiltersFromUrl() {
         const params = new URLSearchParams(window.location.search);
@@ -249,5 +250,69 @@
 
     window.showDashboard = async function () {
         await window.renderAdvancedDashboard();
+    };
+
+    window.toggleHealthDashboard = async function () {
+        const container = document.getElementById('healthDashboard');
+        if (!container) return;
+        window.healthDashboardVisible = !window.healthDashboardVisible;
+        if (window.healthDashboardVisible) {
+            container.style.display = 'block';
+            await window.loadHealthDashboard();
+        } else {
+            container.style.display = 'none';
+        }
+    };
+
+    window.loadHealthDashboard = async function () {
+        const container = document.getElementById('healthDashboard');
+        if (!container) return;
+        container.innerHTML = '<div style="text-align:center;padding:20px;color:var(--gray-500);">加载中...</div>';
+        try {
+            const data = await api.get('/dashboard/health');
+            window.renderHealthDashboard(data);
+        } catch (e) {
+            container.innerHTML = `<div style="text-align:center;padding:20px;color:var(--danger);">加载失败: ${e.message}</div>`;
+        }
+    };
+
+    window.renderHealthDashboard = function (data) {
+        const container = document.getElementById('healthDashboard');
+        if (!container) return;
+
+        const { projects, summary } = data;
+        let html = `
+            <div class="health-dashboard">
+                <div class="health-summary">
+                    <div class="health-stat"><div class="health-stat-value">${summary.total}</div><div class="health-stat-label">活跃项目</div></div>
+                    <div class="health-stat health-green"><div class="health-stat-value">🟢 ${summary.green}</div><div class="health-stat-label">健康</div></div>
+                    <div class="health-stat health-yellow"><div class="health-stat-value">🟡 ${summary.yellow}</div><div class="health-stat-label">需关注</div></div>
+                    <div class="health-stat health-red"><div class="health-stat-value">🔴 ${summary.red}</div><div class="health-stat-label">风险</div></div>
+                </div>
+                <div class="health-cards">
+        `;
+
+        for (const p of projects) {
+            const statusColor = p.health_status === 'green' ? '#10b981' : p.health_status === 'yellow' ? '#f59e0b' : '#ef4444';
+            const statusIcon = p.health_status === 'green' ? '🟢' : p.health_status === 'yellow' ? '🟡' : '🔴';
+            html += `
+                <div class="health-card" onclick="loadProjectDetail(${p.id})" style="border-left: 4px solid ${statusColor};">
+                    <div class="health-card-header">
+                        <span class="health-card-title">${p.project_name}</span>
+                        <span class="health-score" style="color:${statusColor}">${statusIcon} ${p.health_score}分</span>
+                    </div>
+                    <div class="health-card-meta">${p.hospital_name} · ${p.project_manager || '未分配'}</div>
+                    <div class="health-metrics">
+                        <span title="进度">📊 ${p.progress || 0}%</span>
+                        <span title="未解决问题">⚠️ ${p.metrics.open_issues}</span>
+                        <span title="逾期里程碑">🎯 ${p.metrics.overdue_milestones}</span>
+                        <span title="接口完成率">🔗 ${p.metrics.interface_rate}%</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `</div></div>`;
+        container.innerHTML = html;
     };
 })();

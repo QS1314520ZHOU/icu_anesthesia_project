@@ -18,6 +18,7 @@
     - cockpit shortcuts
     - today focus cockpit
     - financial snapshot
+    - health dashboard
 - Approval hub
   - File: `static/js/approval_hub.js`
   - Covers:
@@ -30,6 +31,7 @@
     - warning center
     - warning search/filter
     - warning URL state
+    - warning badge/count
 - Reminder center hub
   - File: `static/js/reminder_center_hub.js`
   - Covers:
@@ -44,6 +46,24 @@
     - AI chaser
     - AI NLQ modal
     - KB extraction helper
+- Shared UI hub
+  - File: `static/js/shared_ui_hub.js`
+  - Covers:
+    - toast helpers
+    - markdown rendering helpers
+    - generic modal helper
+    - copy-current-view helper
+    - tab dragging helper
+- State hub
+  - File: `static/js/state_hub.js`
+  - Covers:
+    - shared global state
+    - stage/status constants
+- Bootstrap hub
+  - File: `static/js/bootstrap_hub.js`
+  - Covers:
+    - desktop startup wiring
+    - initial page boot sequence
 - Auth hub
   - File: `static/js/auth_hub.js`
   - Covers:
@@ -56,6 +76,46 @@
     - global user management
     - password reset helpers
     - AI config management
+- Analytics hub
+  - File: `static/js/analytics_hub.js`
+  - Covers:
+    - risk trend modal
+    - delivery prediction
+    - project financial overview
+    - SLA countdown
+    - revenue entry helpers
+- Operations hub
+  - File: `static/js/operations_hub.js`
+  - Covers:
+    - PMO dashboard
+    - stage baseline loading
+    - demand impact analysis
+    - risk simulation
+- Collaboration hub
+  - File: `static/js/collaboration_hub.js`
+  - Covers:
+    - communications CRUD
+    - communication AI analysis
+    - uploaded-file analysis
+    - AI retrospective / task suggestions
+- Notifications hub
+  - File: `static/js/notifications_hub.js`
+  - Covers:
+    - notification center
+    - unread count
+    - reminder check trigger
+- Gantt hub
+  - File: `static/js/gantt_hub.js`
+  - Covers:
+    - project gantt rendering
+    - global gantt modal
+    - gantt legend helpers
+- AI analysis hub
+  - File: `static/js/ai_analysis_hub.js`
+  - Covers:
+    - project AI analysis modal
+    - strategic AI insight loading
+    - risk radar rendering
 - Report hub
   - File: `static/js/report_hub.js`
   - Covers:
@@ -64,16 +124,30 @@
     - AI weekly summary insertion
     - report archive list/detail/manual generation
     - project report export
+    - shared report rendering
 - Project detail hub
   - File: `static/js/project_detail_hub.js`
   - Covers:
-    - project detail entry and main rendering
+    - project detail entry
+    - project template save helper
     - stage add/expand helpers
+- Project detail render hub
+  - File: `static/js/project_detail_render_hub.js`
+  - Covers:
+    - project detail main rendering
+    - project detail section renderers
+- Project detail actions hub
+  - File: `static/js/project_detail_actions_hub.js`
+  - Covers:
     - detail modal entry helpers
     - high-frequency save handlers
     - delete/update/status handlers
     - tab data loaders for worklogs/documents/expenses/changes/acceptances/satisfaction
     - dependency add/delete/load helpers
+    - risk actions and status changes
+- Project detail tools hub
+  - File: `static/js/project_detail_tools_hub.js`
+  - Covers:
     - interface template recommendation / batch import
     - document upload
 - Resource hub
@@ -102,8 +176,16 @@
 - `static/js/approval_hub.js`
 - `static/js/reminder_center_hub.js`
 - `static/js/ai_ops_hub.js`
+- `static/js/state_hub.js`
+- `static/js/shared_ui_hub.js`
 - `static/js/auth_hub.js`
 - `static/js/admin_hub.js`
+- `static/js/analytics_hub.js`
+- `static/js/operations_hub.js`
+- `static/js/collaboration_hub.js`
+- `static/js/notifications_hub.js`
+- `static/js/gantt_hub.js`
+- `static/js/ai_analysis_hub.js`
 - `static/js/report_hub.js`
 - `static/js/project_detail_hub.js`
 - `static/js/resource_hub.js`
