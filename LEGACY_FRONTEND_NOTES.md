@@ -59,6 +59,7 @@ Safe assumption now:
 - analytics/forecast helpers -> use `analytics_hub.js`
 - PMO/operational helpers -> use `operations_hub.js`
 - communication/collaboration helpers -> use `collaboration_hub.js`
+  - includes communications CRUD, meeting assistant, and communication AI helpers
 - notification/reminder helpers -> use `notifications_hub.js`
 - gantt/timeline helpers -> use `gantt_hub.js`
 - AI analysis / radar helpers -> use `ai_analysis_hub.js`

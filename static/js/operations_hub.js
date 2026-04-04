@@ -171,21 +171,70 @@ function showDemandAnalysisModal() {
     if (!modal) {
         const html = `
             <div id="demandAnalysisModal" class="modal">
-                <div class="modal-content modal-lg">
-                    <div class="modal-header">
-                        <h3>🧬 AI 需求变更影响评估 (Impact Analysis)</h3>
-                        <button class="modal-close" onclick="closeModal('demandAnalysisModal')">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div style="margin-bottom:16px;">
-                            <label style="display:block; margin-bottom:8px; font-weight:600;">变更内容描述</label>
-                            <textarea id="changeDescription" placeholder="例：甲方要求增加移动端查询功能，包含3个核心页面..." 
-                                style="width:100%; height:120px; padding:12px; border:1px solid #cbd5e1; border-radius:8px;"></textarea>
+                <div class="modal-content modal-xl" style="max-width:1120px; border-radius:28px; overflow:hidden; background:linear-gradient(180deg,#f8fbff 0%, #ffffff 22%, #ffffff 100%); border:1px solid rgba(148,163,184,0.22); box-shadow:0 30px 80px rgba(15,23,42,0.18);">
+                    <div class="modal-header" style="padding:28px 32px; border-bottom:1px solid rgba(148,163,184,0.14); background:
+                        radial-gradient(circle at top left, rgba(14,165,233,0.18), transparent 32%),
+                        radial-gradient(circle at top right, rgba(99,102,241,0.22), transparent 28%),
+                        linear-gradient(135deg,#0f172a,#172554 62%, #312e81); color:white;">
+                        <div style="display:flex; align-items:center; gap:16px;">
+                            <div style="width:56px; height:56px; border-radius:18px; display:flex; align-items:center; justify-content:center; font-size:28px; background:rgba(255,255,255,0.14); box-shadow:inset 0 1px 0 rgba(255,255,255,0.18);">🧬</div>
+                            <div>
+                                <h3 style="margin:0; font-size:20px; font-weight:800; letter-spacing:0.2px;">AI 需求变更影响评估</h3>
+                                <div style="margin-top:6px; font-size:12px; color:rgba(226,232,240,0.88);">从交付节奏、资源占用、连锁风险到决策建议，输出一份可直接讨论的评估报告</div>
+                            </div>
                         </div>
-                        <button class="btn btn-ai" style="width:100%; border:none;" onclick="runDemandAnalysis()">🚀 开始 AI 多维评估</button>
-                        
-                        <div id="demandAnalysisResult" style="display:none; margin-top:20px;">
-                            <div class="demand-analysis-box" id="demandAnalysisContent"></div>
+                        <button class="modal-close" onclick="closeModal('demandAnalysisModal')" style="width:48px;height:48px;border-radius:16px;background:rgba(255,255,255,0.12);color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);font-size:28px;line-height:1;">&times;</button>
+                    </div>
+                    <div class="modal-body" style="padding:28px 32px 32px;">
+                        <div style="display:grid; grid-template-columns:minmax(320px, 360px) minmax(0, 1fr); gap:24px; align-items:start;">
+                            <div style="background:linear-gradient(180deg,#ffffff,#f8fbff); border:1px solid rgba(148,163,184,0.18); border-radius:24px; padding:22px; box-shadow:0 12px 30px rgba(15,23,42,0.06);">
+                                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+                                    <div>
+                                        <div style="font-size:15px; font-weight:800; color:#0f172a;">变更输入卡</div>
+                                        <div style="font-size:12px; color:#64748b; margin-top:4px;">描述变更背景、范围和约束，AI 会给出多维影响报告</div>
+                                    </div>
+                                    <div style="padding:6px 10px; border-radius:999px; background:#eef2ff; color:#4338ca; font-size:11px; font-weight:700;">Impact</div>
+                                </div>
+                                <label style="display:block; margin-bottom:8px; font-size:13px; font-weight:700; color:#334155;">变更内容描述</label>
+                                <textarea id="changeDescription" placeholder="例：甲方要求增加移动端查询功能，包含3个核心页面；上线时间不变；现有接口需兼容旧流程..." 
+                                    style="width:100%; min-height:220px; padding:16px 18px; border:1px solid rgba(148,163,184,0.22); border-radius:18px; background:#f8fafc; color:#0f172a; line-height:1.75; font-size:14px; resize:vertical; box-shadow:inset 0 1px 2px rgba(15,23,42,0.04);"></textarea>
+                                <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px;">
+                                    <div style="padding:12px; border-radius:16px; background:#eff6ff;">
+                                        <div style="font-size:11px; color:#64748b;">评估关注</div>
+                                        <div style="font-size:13px; font-weight:700; color:#1d4ed8; margin-top:4px;">范围</div>
+                                    </div>
+                                    <div style="padding:12px; border-radius:16px; background:#f5f3ff;">
+                                        <div style="font-size:11px; color:#64748b;">评估关注</div>
+                                        <div style="font-size:13px; font-weight:700; color:#6d28d9; margin-top:4px;">进度</div>
+                                    </div>
+                                    <div style="padding:12px; border-radius:16px; background:#fff7ed;">
+                                        <div style="font-size:11px; color:#64748b;">评估关注</div>
+                                        <div style="font-size:13px; font-weight:700; color:#c2410c; margin-top:4px;">成本</div>
+                                    </div>
+                                </div>
+                                <button class="btn btn-ai" style="width:100%; border:none; margin-top:18px; padding:16px 18px; border-radius:18px; background:linear-gradient(135deg,#4f46e5,#6366f1 48%, #0ea5e9); box-shadow:0 20px 32px rgba(79,70,229,0.24); font-size:16px; font-weight:800; letter-spacing:0.3px;" onclick="runDemandAnalysis()">🚀 开始 AI 多维评估</button>
+                            </div>
+
+                            <div id="demandAnalysisStage" style="min-height:560px; background:
+                                radial-gradient(circle at top right, rgba(125,211,252,0.15), transparent 28%),
+                                linear-gradient(180deg,#ffffff 0%, #f8fafc 100%);
+                                border:1px solid rgba(148,163,184,0.16); border-radius:26px; padding:24px; box-shadow:0 18px 38px rgba(15,23,42,0.07);">
+                                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
+                                    <div>
+                                        <div style="font-size:16px; font-weight:800; color:#0f172a;">评估输出面板</div>
+                                        <div style="font-size:12px; color:#64748b; margin-top:4px;">AI 会将结果组织成适合讨论的简报，而不是一整页黑字堆叠</div>
+                                    </div>
+                                    <div style="padding:7px 12px; border-radius:999px; background:#e0f2fe; color:#0369a1; font-size:11px; font-weight:800;">AI Ready</div>
+                                </div>
+                                <div id="demandAnalysisResult" style="display:none; margin-top:0;">
+                                    <div class="demand-analysis-box" id="demandAnalysisContent"></div>
+                                </div>
+                                <div id="demandAnalysisEmpty" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:440px; text-align:center; color:#94a3b8; padding:32px;">
+                                    <div style="width:88px; height:88px; border-radius:28px; display:flex; align-items:center; justify-content:center; font-size:42px; margin-bottom:18px; background:linear-gradient(135deg,#eef2ff,#e0f2fe); box-shadow:inset 0 1px 0 rgba(255,255,255,0.7);">🛰️</div>
+                                    <div style="font-size:22px; font-weight:800; color:#334155;">等待开始评估</div>
+                                    <div style="margin-top:10px; max-width:480px; line-height:1.8; font-size:14px;">输入变更描述后，AI 会输出核心影响、蝴蝶效应、延期风险、资源成本和决策建议。</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -208,8 +257,16 @@ async function runDemandAnalysis() {
 
     const resultBox = document.getElementById('demandAnalysisResult');
     const content = document.getElementById('demandAnalysisContent');
+    const empty = document.getElementById('demandAnalysisEmpty');
     resultBox.style.display = 'block';
-    content.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>AI 正在计算蝴蝶效应与资源成本...</p></div>';
+    if (empty) empty.style.display = 'none';
+    content.innerHTML = `
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:420px; text-align:center;">
+            <div class="loading-spinner"><div class="spinner"></div></div>
+            <div style="margin-top:18px; font-size:18px; font-weight:800; color:#0f172a;">AI 正在计算影响链路</div>
+            <div style="margin-top:8px; font-size:13px; color:#64748b;">分析交付冲击、资源占用、蝴蝶效应与决策建议，请稍候...</div>
+        </div>
+    `;
 
     try {
         const res = await api.post('/operational/analyze-change', {
@@ -219,10 +276,34 @@ async function runDemandAnalysis() {
 
         const contentStr = typeof res === 'string' ? res : (res.analysis || res.content || JSON.stringify(res));
         if (res) {
-            content.innerHTML = renderAiMarkdown(contentStr || '分析失败');
+            const rendered = renderAiMarkdown(contentStr || '分析失败');
+            content.innerHTML = `
+                <div style="background:white; border:1px solid rgba(148,163,184,0.16); border-radius:22px; overflow:hidden; box-shadow:0 14px 40px rgba(15,23,42,0.08);">
+                    <div style="padding:20px 24px; background:
+                        radial-gradient(circle at top right, rgba(14,165,233,0.16), transparent 30%),
+                        linear-gradient(135deg,#111827,#1e1b4b 58%, #312e81); color:white;">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                            <div>
+                                <div style="font-size:18px; font-weight:800;">变更影响评估报告</div>
+                                <div style="margin-top:6px; font-size:12px; color:rgba(226,232,240,0.88);">AI 从核心影响、连锁风险、延期与资源成本四个角度生成的分析结果</div>
+                            </div>
+                            <div style="padding:8px 14px; border-radius:999px; background:rgba(255,255,255,0.12); font-size:11px; font-weight:800; letter-spacing:0.4px;">Impact Brief</div>
+                        </div>
+                    </div>
+                    <div class="report-detail-content" style="padding:28px 30px; line-height:1.9; font-size:15px; color:#1f2937;">
+                        ${rendered}
+                    </div>
+                </div>
+            `;
         }
     } catch (e) {
-        content.innerHTML = '评估出错: ' + e.message;
+        content.innerHTML = `
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:360px; text-align:center; color:#ef4444;">
+                <div style="width:72px; height:72px; border-radius:24px; display:flex; align-items:center; justify-content:center; font-size:34px; background:#fef2f2; margin-bottom:18px;">⚠️</div>
+                <div style="font-size:20px; font-weight:800;">评估出错</div>
+                <div style="margin-top:8px; max-width:420px; line-height:1.8; font-size:14px; color:#b91c1c;">${e.message}</div>
+            </div>
+        `;
     }
 }
 

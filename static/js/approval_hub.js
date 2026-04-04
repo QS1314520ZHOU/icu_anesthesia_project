@@ -2,6 +2,7 @@
     window.approvalTrackingStatusFilter = window.approvalTrackingStatusFilter || '';
     window.approvalTrackingSearch = window.approvalTrackingSearch || '';
     window.approvalPendingSearch = window.approvalPendingSearch || '';
+    window.selectedApprovalItems = window.selectedApprovalItems || new Set();
 
     function hydrateApprovalFiltersFromUrl() {
         const params = new URLSearchParams(window.location.search);
@@ -77,6 +78,7 @@
                             </div>
                         </div>
                         <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 0 12px 0;flex-wrap:wrap;">
+                            <button class="btn btn-warning btn-sm" onclick="batchRemindApprovals()">⏰ 批量催办</button>
                             <input type="text" value="${window.approvalPendingSearch}" placeholder="搜索项目 / 标题 / 申请人"
                                 oninput="searchApprovalPending(this.value)"
                                 style="width:320px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
@@ -85,6 +87,7 @@
                         <table class="table">
                             <thead>
                                 <tr>
+                                    <th style="width:42px;"><input type="checkbox" onclick="toggleAllApprovalSelections(this.checked)"></th>
                                     <th>类型</th>
                                     <th>项目/医院</th>
                                     <th>内容/标题</th>
@@ -95,6 +98,7 @@
                             <tbody>
                                 ${filteredChanges.map(c => `
                                     <tr style="cursor:pointer;" onclick="loadProjectDetail(${c.project_id})">
+                                        <td><input type="checkbox" data-biz-type="change" data-biz-id="${c.id}" ${window.selectedApprovalItems.has(`change:${c.id}`) ? 'checked' : ''} onclick="event.stopPropagation(); toggleApprovalSelection('change', ${c.id}, this.checked)"></td>
                                         <td><span class="badge badge-purple">变更申请</span></td>
                                         <td>
                                             <div style="font-weight:600;">${c.project_name}</div>
@@ -115,6 +119,7 @@
                                 `).join('')}
                                 ${filteredDepartures.map(d => `
                                     <tr style="cursor:pointer;" onclick="loadProjectDetail(${d.project_id})">
+                                        <td><input type="checkbox" data-biz-type="departure" data-biz-id="${d.id}" ${window.selectedApprovalItems.has(`departure:${d.id}`) ? 'checked' : ''} onclick="event.stopPropagation(); toggleApprovalSelection('departure', ${d.id}, this.checked)"></td>
                                         <td><span class="badge badge-pink">离场申请</span></td>
                                         <td>
                                             <div style="font-weight:600;">${d.project_name}</div>
@@ -135,6 +140,7 @@
                                 `).join('')}
                                 ${filteredExpenses.map(e => `
                                     <tr style="cursor:pointer;" onclick="loadProjectDetail(${e.project_id})">
+                                        <td><input type="checkbox" data-biz-type="expense" data-biz-id="${e.id}" ${window.selectedApprovalItems.has(`expense:${e.id}`) ? 'checked' : ''} onclick="event.stopPropagation(); toggleApprovalSelection('expense', ${e.id}, this.checked)"></td>
                                         <td><span class="badge badge-warning">费用报销</span></td>
                                         <td>
                                             <div style="font-weight:600;">${e.project_name}</div>
@@ -321,9 +327,120 @@
         }
     };
 
-    window.openApprovalTrackingItem = function (projectId) {
-        if (projectId) return loadProjectDetail(projectId);
-        showApprovalCenter();
+    window.toggleApprovalSelection = function (bizType, bizId, checked) {
+        const key = `${bizType}:${bizId}`;
+        if (checked) window.selectedApprovalItems.add(key);
+        else window.selectedApprovalItems.delete(key);
+    };
+
+    window.toggleAllApprovalSelections = function (checked) {
+        document.querySelectorAll('#approvalListContainer tbody input[type="checkbox"]').forEach(box => {
+            box.checked = checked;
+            toggleApprovalSelection(box.dataset.bizType, Number(box.dataset.bizId), checked);
+        });
+    };
+
+    window.batchRemindApprovals = async function () {
+        const items = Array.from(window.selectedApprovalItems).map(key => {
+            const [biz_type, id] = key.split(':');
+            return { biz_type, biz_id: Number(id) };
+        });
+        if (!items.length) {
+            showToast('请先选择待催办的审批项', 'warning');
+            return;
+        }
+        try {
+            const result = await api.post('/approvals/remind', { items });
+            showToast(result?.message || '批量催办已发送', 'success');
+            window.selectedApprovalItems.clear();
+            await window.loadApprovalList();
+        } catch (e) {
+            showToast(`批量催办失败: ${e.message}`, 'danger');
+        }
+    };
+
+    window.handleApproval = async function (bizType, bizId, status) {
+        const routeMap = {
+            change: `/changes/${bizId}`,
+            departure: `/departures/${bizId}`,
+            expense: `/expenses/${bizId}`
+        };
+        const url = routeMap[bizType];
+        if (!url) {
+            showToast('不支持的审批类型', 'warning');
+            return;
+        }
+        try {
+            await api.put(url, { status });
+            showToast(`审批已更新为：${status}`, 'success');
+            await window.loadApprovalList();
+            if (currentProjectId) {
+                loadProjectDetail(currentProjectId, true);
+            }
+        } catch (e) {
+            showToast(`审批处理失败: ${e.message}`, 'danger');
+        }
+    };
+
+    window.openApprovalTrackingItem = async function (projectId, bizType, bizId) {
+        if (!bizType || !bizId) {
+            if (projectId) return loadProjectDetail(projectId);
+            return showApprovalCenter();
+        }
+        const modal = document.getElementById('approvalDetailModal');
+        const container = document.getElementById('approvalDetailContent');
+        if (!modal || !container) {
+            if (projectId) return loadProjectDetail(projectId);
+            return;
+        }
+        openModal('approvalDetailModal');
+        container.innerHTML = '<div class="empty-state"><p>审批详情加载中...</p></div>';
+        try {
+            const data = await api.get(`/approvals/${bizType}/${bizId}`);
+            const timeline = data.timeline || [];
+            const wecomError = data.wecom_error;
+            const detail = data.detail || {};
+            container.innerHTML = `
+                <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px;">
+                    <div>
+                        <div style="padding:16px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;margin-bottom:16px;">
+                            <div style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:6px;">${data.title || '-'}</div>
+                            <div style="font-size:13px;color:#64748b;">${data.project_name || '-'} · ${data.hospital_name || '-'}</div>
+                            <div style="margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;font-size:13px;">
+                                <div><strong>类型：</strong>${data.sub_type || '-'}</div>
+                                <div><strong>申请人：</strong>${data.applicant || '-'}</div>
+                                <div><strong>状态：</strong>${data.status || '-'}</div>
+                                <div><strong>审批单号：</strong>${data.approval_sp_no || '-'}</div>
+                            </div>
+                            <div style="margin-top:14px;padding:12px;border-radius:10px;background:#f8fafc;color:#334155;font-size:13px;line-height:1.7;">
+                                ${data.content || '暂无详细内容'}
+                            </div>
+                            ${wecomError ? `<div style="margin-top:10px;color:#b45309;font-size:12px;">企微审批详情获取失败：${wecomError}</div>` : ''}
+                        </div>
+                        <div style="padding:16px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;">
+                            <div style="font-weight:700;margin-bottom:10px;color:#0f172a;">业务字段快照</div>
+                            <pre style="white-space:pre-wrap;font-size:12px;color:#475569;background:#f8fafc;padding:12px;border-radius:10px;max-height:320px;overflow:auto;">${JSON.stringify(detail, null, 2)}</pre>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="padding:16px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;">
+                            <div style="font-weight:700;margin-bottom:12px;color:#0f172a;">审批时间线</div>
+                            ${timeline.length ? timeline.map(item => `
+                                <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid #f1f5f9;">
+                                    <div style="width:10px;height:10px;border-radius:50%;margin-top:6px;background:${item.status === 'failed' ? '#ef4444' : item.status === 'processing' ? '#f59e0b' : '#10b981'};"></div>
+                                    <div>
+                                        <div style="font-weight:700;color:#0f172a;">${item.label}</div>
+                                        <div style="font-size:12px;color:#64748b;">${item.time || '待更新'} ${item.extra ? `| ${item.extra}` : ''}</div>
+                                    </div>
+                                </div>
+                            `).join('') : '<div style="color:#94a3b8;">暂无时间线数据</div>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state"><p>加载审批详情失败: ${e.message}</p></div>`;
+        }
     };
 
     window.showApprovalCenter = async function () {

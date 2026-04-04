@@ -430,6 +430,94 @@ async function loadStandupHistory(projectId) {
 
 // ========== 全局每日简报面板 ==========
 
+function parseBriefingSections(markdown) {
+    const text = String(markdown || '').replace(/\r\n/g, '\n').trim();
+    const titleMatch = text.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : 'AI 全局晨会简报';
+    const body = text.replace(/^#\s+.+$/m, '').trim();
+    const sectionRegex = /##\s*([^\n]+)\n([\s\S]*?)(?=\n##\s*|$)/g;
+    const sections = [];
+    let match;
+    while ((match = sectionRegex.exec(body)) !== null) {
+        sections.push({
+            title: (match[1] || '').trim(),
+            content: (match[2] || '').trim()
+        });
+    }
+    return {
+        title,
+        intro: sections.length ? '' : body,
+        sections
+    };
+}
+
+function getBriefingSectionAccent(title) {
+    const value = String(title || '');
+    if (value.includes('重点') || value.includes('关注')) return { icon: '🎯', tint: '#eff6ff', border: '#bfdbfe', color: '#1d4ed8' };
+    if (value.includes('风险') || value.includes('阻塞')) return { icon: '⚠️', tint: '#fef2f2', border: '#fecaca', color: '#dc2626' };
+    if (value.includes('里程碑') || value.includes('交付')) return { icon: '🚀', tint: '#ecfeff', border: '#a5f3fc', color: '#0891b2' };
+    if (value.includes('建议') || value.includes('动作') || value.includes('计划')) return { icon: '🧭', tint: '#ecfdf5', border: '#bbf7d0', color: '#16a34a' };
+    return { icon: '📌', tint: '#f8fafc', border: '#e2e8f0', color: '#475569' };
+}
+
+function renderGlobalBriefingContent(result) {
+    const parsed = parseBriefingSections(result.briefing || '');
+    const sections = parsed.sections || [];
+    const introHtml = parsed.intro ? `<div style="margin-bottom:16px;padding:16px 18px;border-radius:18px;background:linear-gradient(135deg,#f8fafc,#ffffff);border:1px solid #e2e8f0;line-height:1.85;color:#334155;">${renderAiMarkdown(parsed.intro)}</div>` : '';
+    const sectionHtml = sections.length
+        ? sections.map(section => {
+            const accent = getBriefingSectionAccent(section.title);
+            return `
+                <section style="border:1px solid ${accent.border};border-radius:22px;background:linear-gradient(180deg,#ffffff 0%,${accent.tint} 100%);overflow:hidden;box-shadow:0 12px 32px rgba(15,23,42,0.05);">
+                    <div style="display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid ${accent.border};background:rgba(255,255,255,0.7);">
+                        <div style="width:42px;height:42px;border-radius:14px;background:${accent.tint};display:flex;align-items:center;justify-content:center;font-size:20px;">${accent.icon}</div>
+                        <div>
+                            <div style="font-size:18px;font-weight:800;color:#0f172a;">${section.title}</div>
+                            <div style="font-size:12px;color:${accent.color};margin-top:2px;">晨会重点分区</div>
+                        </div>
+                    </div>
+                    <div style="padding:18px 20px;line-height:1.85;color:#334155;" class="markdown-content">${renderAiMarkdown(section.content || '暂无内容')}</div>
+                </section>
+            `;
+        }).join('')
+        : `<section style="border:1px solid #e2e8f0;border-radius:22px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);padding:18px 20px;line-height:1.85;color:#334155;" class="markdown-content">${renderAiMarkdown(result.briefing || '暂无简报')}</section>`;
+
+    return `
+        <div style="display:grid;gap:18px;">
+            <div style="position:relative;overflow:hidden;border-radius:26px;background:linear-gradient(135deg,#0f172a 0%,#312e81 45%,#2563eb 100%);padding:24px 24px 22px;color:white;">
+                <div style="position:absolute;right:-40px;top:-30px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,0.18),transparent 70%);"></div>
+                <div style="position:relative;display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:12px;letter-spacing:0.12em;text-transform:uppercase;opacity:0.78;">Morning Briefing</div>
+                        <div style="margin-top:8px;font-size:28px;font-weight:900;line-height:1.25;">${parsed.title}</div>
+                        <div style="margin-top:8px;font-size:13px;max-width:720px;line-height:1.8;color:rgba(255,255,255,0.86);">面向晨会、交付推进和管理复盘的高优先级摘要，重点提炼今日关注、风险信号与行动建议。</div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-sm" style="background:rgba(255,255,255,0.16);color:white;border:1px solid rgba(255,255,255,0.2);" onclick="copyBriefingContent()">📋 复制</button>
+                        <button class="btn btn-sm" style="background:#25d366;color:white;border:none;" onclick="pushGlobalBriefingToWecom()">📤 推送到企业微信</button>
+                    </div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">
+                <div style="padding:18px;border-radius:20px;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #bfdbfe;box-shadow:0 10px 28px rgba(37,99,235,0.06);">
+                    <div style="font-size:12px;color:#64748b;">活跃项目</div>
+                    <div style="margin-top:8px;font-size:30px;font-weight:900;color:#2563eb;">${result.stats?.active_projects || 0}</div>
+                </div>
+                <div style="padding:18px;border-radius:20px;background:linear-gradient(135deg,#fff7ed,#ffffff);border:1px solid #fed7aa;box-shadow:0 10px 28px rgba(234,88,12,0.06);">
+                    <div style="font-size:12px;color:#64748b;">阻塞问题</div>
+                    <div style="margin-top:8px;font-size:30px;font-weight:900;color:#ea580c;">${result.stats?.total_blocking || 0}</div>
+                </div>
+                <div style="padding:18px;border-radius:20px;background:linear-gradient(135deg,#fdf2f8,#ffffff);border:1px solid #fbcfe8;box-shadow:0 10px 28px rgba(219,39,119,0.06);">
+                    <div style="font-size:12px;color:#64748b;">近期里程碑</div>
+                    <div style="margin-top:8px;font-size:30px;font-weight:900;color:#db2777;">${result.stats?.total_milestones || 0}</div>
+                </div>
+            </div>
+            ${introHtml}
+            <div style="display:grid;gap:16px;">${sectionHtml}</div>
+        </div>
+    `;
+}
+
 /**
  * 在仪表盘中显示全局简报面板
  */
@@ -439,9 +527,18 @@ async function showGlobalBriefingPanel() {
     if (!container) return;
 
     container.innerHTML = `
-        <div style="text-align:center;padding:40px;">
-            <div class="spinner" style="margin:0 auto 16px;"></div>
-            <div style="color:var(--gray-500);">正在生成 AI 每日简报...</div>
+        <div style="border-radius:24px;background:linear-gradient(135deg,#0f172a 0%,#312e81 45%,#2563eb 100%);padding:28px;color:white;box-shadow:0 20px 50px rgba(37,99,235,0.16);">
+            <div style="display:flex;align-items:center;gap:14px;">
+                <div style="width:54px;height:54px;border-radius:18px;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:26px;">🧠</div>
+                <div>
+                    <div style="font-size:22px;font-weight:900;">AI 正在生成晨会简报</div>
+                    <div style="margin-top:4px;font-size:13px;color:rgba(255,255,255,0.82);">聚合活跃项目、阻塞风险与里程碑变化，生成适合晨会讨论的管理摘要。</div>
+                </div>
+            </div>
+            <div style="margin-top:22px;padding:22px;border-radius:20px;background:rgba(255,255,255,0.1);backdrop-filter:blur(8px);text-align:center;">
+                <div class="spinner" style="margin:0 auto 14px;"></div>
+                <div style="color:rgba(255,255,255,0.9);font-size:14px;">正在整理项目脉搏和关键行动建议...</div>
+            </div>
         </div>
     `;
 
@@ -449,34 +546,16 @@ async function showGlobalBriefingPanel() {
         const result = await api.get('/standup/daily-briefing');
 
         if (result.briefing) {
-            const htmlContent = renderAiMarkdown(result.briefing);
-
-            container.innerHTML = `
-                <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;">
-                    <div style="flex:1;min-width:100px;background:linear-gradient(135deg,#dbeafe,#eff6ff);padding:16px;border-radius:12px;text-align:center;">
-                        <div style="font-size:24px;font-weight:800;color:#2563eb;">${result.stats?.active_projects || 0}</div>
-                        <div style="font-size:11px;color:#6b7280;margin-top:4px;">活跃项目</div>
-                    </div>
-                    <div style="flex:1;min-width:100px;background:linear-gradient(135deg,#fef3c7,#fffbeb);padding:16px;border-radius:12px;text-align:center;">
-                        <div style="font-size:24px;font-weight:800;color:#d97706;">${result.stats?.total_blocking || 0}</div>
-                        <div style="font-size:11px;color:#6b7280;margin-top:4px;">阻塞问题</div>
-                    </div>
-                    <div style="flex:1;min-width:100px;background:linear-gradient(135deg,#fce7f3,#fdf2f8);padding:16px;border-radius:12px;text-align:center;">
-                        <div style="font-size:24px;font-weight:800;color:#db2777;">${result.stats?.total_milestones || 0}</div>
-                        <div style="font-size:11px;color:#6b7280;margin-top:4px;">近期里程碑</div>
-                    </div>
-                </div>
-                <div style="line-height:1.7;color:#374151;" class="markdown-content">
-                    ${htmlContent}
-                </div>
-                <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;">
-                    <button class="btn btn-sm btn-outline" onclick="copyBriefingContent()">📋 复制</button>
-                    <button class="btn btn-sm" style="background:#25d366;color:white;border:none;" onclick="pushGlobalBriefingToWecom()">📤 推送到企业微信</button>
-                </div>
-            `;
+            container.innerHTML = renderGlobalBriefingContent(result);
         }
     } catch (e) {
-        container.innerHTML = `<div style="color:var(--danger);text-align:center;padding:24px;">加载失败: ${e.message}</div>`;
+        container.innerHTML = `
+            <div style="border-radius:24px;background:linear-gradient(180deg,#ffffff 0%,#fef2f2 100%);border:1px solid #fecaca;padding:28px;text-align:center;box-shadow:0 16px 42px rgba(220,38,38,0.08);">
+                <div style="font-size:48px;margin-bottom:12px;">⚠️</div>
+                <div style="font-size:24px;font-weight:900;color:#991b1b;margin-bottom:8px;">晨会简报加载失败</div>
+                <div style="font-size:14px;color:#7f1d1d;line-height:1.8;">${e.message}</div>
+            </div>
+        `;
     }
 }
 

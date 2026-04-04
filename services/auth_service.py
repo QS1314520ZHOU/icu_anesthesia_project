@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
 import secrets
 import hashlib
+import json
+import re
 from functools import wraps
 from flask import request, jsonify
 from utils.geo_service import geo_service
@@ -34,11 +36,169 @@ ROLES = {
     }
 }
 
+ROLE_MATRIX_CONFIG_KEY = 'auth_role_matrix'
+
 class AuthService:
     """用户认证服务"""
     
     TOKEN_EXPIRY_HOURS = 24
-    # 在 auth_service.py 的 AuthService 类中新增以下方法
+    ROLE_CACHE_TTL_SECONDS = 60
+
+    def _clone_default_roles(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            role_key: {
+                "name": meta.get("name", role_key),
+                "permissions": list(meta.get("permissions", []))
+            }
+            for role_key, meta in ROLES.items()
+        }
+
+    def _sanitize_permissions(self, permissions) -> List[str]:
+        if isinstance(permissions, str):
+            permissions = re.split(r'[\n,，]+', permissions)
+        if not isinstance(permissions, list):
+            permissions = []
+
+        cleaned = []
+        for item in permissions:
+            value = str(item or '').strip()
+            if value and value not in cleaned:
+                cleaned.append(value)
+        return cleaned
+
+    def _sanitize_role_matrix(self, raw_role_matrix) -> Dict[str, Dict[str, Any]]:
+        role_matrix = self._clone_default_roles()
+
+        if isinstance(raw_role_matrix, dict):
+            items = raw_role_matrix.items()
+        elif isinstance(raw_role_matrix, list):
+            items = []
+            for item in raw_role_matrix:
+                if isinstance(item, dict) and item.get('role'):
+                    items.append((item.get('role'), item))
+        else:
+            items = []
+
+        for role_key, meta in items:
+            if not role_key or not isinstance(meta, dict):
+                continue
+
+            existing = role_matrix.get(role_key, {"name": role_key, "permissions": []})
+            role_name = str(meta.get('name') or existing.get('name') or role_key).strip() or role_key
+            permissions = self._sanitize_permissions(meta.get('permissions', existing.get('permissions', [])))
+
+            if role_key == 'admin':
+                role_name = role_name or '管理员'
+                permissions = ['*']
+            else:
+                permissions = [value for value in permissions if value not in ['*', 'admin']]
+
+            role_matrix[role_key] = {
+                "name": role_name,
+                "permissions": permissions
+            }
+
+        if 'admin' not in role_matrix:
+            role_matrix['admin'] = {"name": "管理员", "permissions": ['*']}
+        else:
+            role_matrix['admin']['permissions'] = ['*']
+            role_matrix['admin']['name'] = role_matrix['admin'].get('name') or '管理员'
+
+        return role_matrix
+
+    def _role_sort_key(self, role_key: str):
+        default_order = ['admin', 'project_manager', 'team_member', 'guest']
+        if role_key in default_order:
+            return (0, default_order.index(role_key), role_key)
+        return (1, 999, role_key)
+
+    def invalidate_role_cache(self):
+        self._role_cache = None
+        self._role_cache_loaded_at = None
+
+    def get_role_definitions(self, force_reload: bool = False) -> Dict[str, Dict[str, Any]]:
+        now = datetime.now()
+        if (
+            not force_reload
+            and self._role_cache is not None
+            and self._role_cache_loaded_at is not None
+            and (now - self._role_cache_loaded_at).total_seconds() < self.ROLE_CACHE_TTL_SECONDS
+        ):
+            return {
+                role_key: {
+                    "name": meta.get("name", role_key),
+                    "permissions": list(meta.get("permissions", []))
+                }
+                for role_key, meta in self._role_cache.items()
+            }
+
+        role_matrix = self._clone_default_roles()
+        try:
+            with DatabasePool.get_connection() as conn:
+                if DatabasePool.table_exists(conn, 'system_config'):
+                    row = conn.execute(
+                        DatabasePool.format_sql('SELECT value FROM system_config WHERE config_key = ?'),
+                        (ROLE_MATRIX_CONFIG_KEY,)
+                    ).fetchone()
+                    if row and row['value']:
+                        role_matrix = self._sanitize_role_matrix(json.loads(row['value']))
+        except Exception:
+            role_matrix = self._clone_default_roles()
+
+        self._role_cache = role_matrix
+        self._role_cache_loaded_at = now
+        return {
+            role_key: {
+                "name": meta.get("name", role_key),
+                "permissions": list(meta.get("permissions", []))
+            }
+            for role_key, meta in role_matrix.items()
+        }
+
+    def list_role_definitions(self, force_reload: bool = False) -> List[Dict[str, Any]]:
+        role_matrix = self.get_role_definitions(force_reload=force_reload)
+        return [
+            {
+                "role": role_key,
+                "name": meta.get("name", role_key),
+                "permissions": list(meta.get("permissions", [])),
+                "editable": role_key != 'admin'
+            }
+            for role_key, meta in sorted(role_matrix.items(), key=lambda item: self._role_sort_key(item[0]))
+        ]
+
+    def save_role_definitions(self, role_matrix_payload) -> Dict[str, Any]:
+        role_matrix = self._sanitize_role_matrix(role_matrix_payload)
+        serialized = json.dumps(role_matrix, ensure_ascii=False)
+
+        with DatabasePool.get_connection() as conn:
+            conn.execute(DatabasePool.format_sql('''
+                INSERT INTO system_config (config_key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(config_key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = CURRENT_TIMESTAMP
+            '''), (ROLE_MATRIX_CONFIG_KEY, serialized))
+            conn.commit()
+
+        self.invalidate_role_cache()
+        return {
+            "success": True,
+            "roles": self.list_role_definitions(force_reload=True)
+        }
+
+    def _build_user_payload(self, user_id: int, username: str, display_name: str, role: str, wecom_userid: str = None) -> Dict[str, Any]:
+        """Build a consistent user payload for login/session responses."""
+        role_meta = self.get_role_definitions().get(role, {"name": "未知", "permissions": []})
+        return {
+            "id": user_id,
+            "username": username,
+            "display_name": display_name,
+            "role": role,
+            "role_name": role_meta.get('name', '未知'),
+            "permissions": list(role_meta.get('permissions', [])),
+            "wecom_userid": wecom_userid
+        }
 
     def login_via_wecom(self, wecom_user: dict) -> dict:
         """通过企业微信 OAuth2 登录/自动注册"""
@@ -67,13 +227,13 @@ class AuthService:
                 return {
                     "success": True,
                     "token": token,
-                    "user": {
-                        "id": existing['id'],
-                        "username": existing['username'],
-                        "display_name": existing['display_name'],
-                        "role": existing['role'],
-                        "wecom_userid": wecom_userid
-                    }
+                    "user": self._build_user_payload(
+                        existing['id'],
+                        existing['username'],
+                        existing['display_name'],
+                        existing['role'],
+                        wecom_userid
+                    )
                 }
             
             # 2. 尝试按姓名匹配已有用户并绑定
@@ -177,6 +337,8 @@ class AuthService:
             return {"success": True, "message": "绑定成功"}
 
     def __init__(self):
+        self._role_cache = None
+        self._role_cache_loaded_at = None
         self._ensure_tables()
     
     def _ensure_tables(self):
@@ -258,8 +420,9 @@ class AuthService:
                 return {"success": False, "message": "用户名已存在"}
             
             # 验证角色
-            if role not in ROLES:
-                role = 'team_member'
+            role_definitions = self.get_role_definitions()
+            if role not in role_definitions:
+                role = 'team_member' if 'team_member' in role_definitions else next(iter(role_definitions.keys()), 'team_member')
             
             password_hash = self._hash_password(password)
             
@@ -309,14 +472,13 @@ class AuthService:
             return {
                 "success": True,
                 "token": token,
-                "user": {
-                    "id": user['id'],
-                    "username": user['username'],
-                    "display_name": user['display_name'],
-                    "role": user['role'],
-                    "role_name": ROLES.get(user['role'], {}).get('name', '未知'),
-                    "wecom_userid": user['wecom_userid']
-                }
+                "user": self._build_user_payload(
+                    user['id'],
+                    user['username'],
+                    user['display_name'],
+                    user['role'],
+                    user['wecom_userid']
+                )
             }
     
     def logout(self, token: str) -> Dict[str, Any]:
@@ -359,7 +521,7 @@ class AuthService:
                 "display_name": result['display_name'],
                 "role": result['role'],
                 "wecom_userid": result['wecom_userid'],
-                "permissions": ROLES.get(result['role'], {}).get('permissions', [])
+                "permissions": self.get_role_definitions().get(result['role'], {}).get('permissions', [])
             }
     
     def check_permission(self, user: Dict, permission: str) -> bool:
@@ -377,10 +539,19 @@ class AuthService:
                 FROM users ORDER BY created_at DESC
             ''')).fetchall()
             return [dict(u) for u in users]
+
+    def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """按 ID 获取用户详情"""
+        with DatabasePool.get_connection() as conn:
+            user = conn.execute(DatabasePool.format_sql('''
+                SELECT id, username, email, display_name, role, is_active, last_login, created_at, wecom_userid
+                FROM users WHERE id = ?
+            '''), (user_id,)).fetchone()
+            return dict(user) if user else None
     
     def update_user_role(self, user_id: int, new_role: str) -> Dict[str, Any]:
         """更新用户角色"""
-        if new_role not in ROLES:
+        if new_role not in self.get_role_definitions():
             return {"success": False, "message": "无效的角色"}
         
         with DatabasePool.get_connection() as conn:

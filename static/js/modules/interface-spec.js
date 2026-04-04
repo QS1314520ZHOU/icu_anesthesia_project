@@ -10,6 +10,10 @@ const InterfaceSpec = {
     _uploadSource: null,
     _currentCategory: '手麻标准',
     _chatHistory: [],
+    _builtinStandardDocs: {
+        '手麻标准': '3_2.手术麻醉信息系统对外接口标准文档Ver1.4(1)(1).pdf',
+        '重症标准': '深医重症信息系统接口说明V2.6(1)(1).pdf'
+    },
 
     // ==================== 入口 ====================
     async renderTab(projectId) {
@@ -43,6 +47,9 @@ const InterfaceSpec = {
 
     // ==================== Dashboard ====================
     renderSetupDashboard(container) {
+        const builtinFile = this._builtinStandardDocs[this._currentCategory] || '未配置';
+        const ourReady = this._ourSpecs.length > 0;
+        const vendorReady = this._vendorSpecs.length > 0;
         container.innerHTML = `
             <div style="padding:20px;animation:fadeIn 0.4s ease-out;">
                 <div style="text-align:center;margin-bottom:40px;">
@@ -69,13 +76,21 @@ const InterfaceSpec = {
                                 <option value="重症标准" ${this._currentCategory === '重症标准' ? 'selected' : ''}>重症标准</option>
                             </select>
                         </div>
+                        <div style="margin-bottom:14px;padding:12px 14px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;font-size:12px;color:#475569;line-height:1.7;">
+                            <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">已检测到内置标准文档</div>
+                            <div>${builtinFile}</div>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                            <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.loadBuiltinStandardDoc()" style="flex:1;">⚡ 一键加载内置标准</button>
+                            <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.showUploadModal('our_standard')" style="flex:1;">📤 手动上传标准</button>
+                        </div>
                         <div style="border:2px dashed var(--gray-200);border-radius:12px;padding:30px;text-align:center;cursor:pointer;" onclick="InterfaceSpec.openQuickUpload('our_standard')">
                             <div style="font-size:32px;margin-bottom:12px;">📄</div>
                             <div style="font-weight:600;font-size:14px;color:var(--gray-700);">粘贴文档或点击上传</div>
                             <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">支持 PDF / Word / TXT / XML / JSON</div>
                         </div>
-                        <div id="dashOurStatus" style="margin-top:16px;font-size:13px;display:${this._ourSpecs.length > 0 ? 'block' : 'none'};">
-                            <span style="color:var(--success);font-weight:600;">✓ 标准文档已就绪 (${this._ourSpecs.length} 个接口)</span>
+                        <div id="dashOurStatus" style="margin-top:16px;font-size:13px;display:block;">
+                            <span style="color:${ourReady ? 'var(--success)' : 'var(--warning)'};font-weight:600;">${ourReady ? '✓ 标准文档已就绪' : '⏳ 标准文档待加载'} ${ourReady ? `(${this._ourSpecs.length} 个接口)` : ''}</span>
                         </div>
                     </div>
                     <div style="background:white;border-radius:16px;border:1px solid var(--gray-200);padding:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.05);position:relative;overflow:hidden;">
@@ -95,9 +110,26 @@ const InterfaceSpec = {
                             <div style="font-weight:600;font-size:14px;color:var(--gray-700);">粘贴文档或点击上传</div>
                             <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">支持 XML / JSON / HL7 / PDF / Word</div>
                         </div>
-                        <div id="dashVendorStatus" style="margin-top:16px;font-size:13px;display:${this._vendorSpecs.length > 0 ? 'block' : 'none'};">
-                            <span style="color:var(--success);font-weight:600;">✓ 接口文档已就绪 (${this._vendorSpecs.length} 个接口)</span>
+                        <div id="dashVendorStatus" style="margin-top:16px;font-size:13px;display:block;">
+                            <span style="color:${vendorReady ? 'var(--success)' : 'var(--warning)'};font-weight:600;">${vendorReady ? '✓ 接口文档已就绪' : '⏳ 对方文档待加载'} ${vendorReady ? `(${this._vendorSpecs.length} 个接口)` : ''}</span>
                         </div>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:28px;">
+                    <div style="padding:16px;border-radius:16px;background:${ourReady ? 'linear-gradient(135deg,#ecfdf5,#ffffff)' : 'linear-gradient(135deg,#fff7ed,#ffffff)'};border:1px solid ${ourReady ? '#bbf7d0' : '#fed7aa'};">
+                        <div style="font-size:12px;color:#64748b;">步骤 1</div>
+                        <div style="margin-top:6px;font-size:17px;font-weight:800;color:#0f172a;">加载我方标准</div>
+                        <div style="margin-top:6px;font-size:12px;color:#64748b;">优先使用你放在项目目录的两份 PDF</div>
+                    </div>
+                    <div style="padding:16px;border-radius:16px;background:${vendorReady ? 'linear-gradient(135deg,#ecfdf5,#ffffff)' : 'linear-gradient(135deg,#eff6ff,#ffffff)'};border:1px solid ${vendorReady ? '#bbf7d0' : '#bfdbfe'};">
+                        <div style="font-size:12px;color:#64748b;">步骤 2</div>
+                        <div style="margin-top:6px;font-size:17px;font-weight:800;color:#0f172a;">上传对方接口</div>
+                        <div style="margin-top:6px;font-size:12px;color:#64748b;">医院/HIS/厂商文档上传后即可对照</div>
+                    </div>
+                    <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#f5f3ff,#ffffff);border:1px solid #ddd6fe;">
+                        <div style="font-size:12px;color:#64748b;">步骤 3</div>
+                        <div style="margin-top:6px;font-size:17px;font-weight:800;color:#0f172a;">生成差异报告</div>
+                        <div style="margin-top:6px;font-size:12px;color:#64748b;">查看字段缺口、转换规则和对接建议</div>
                     </div>
                 </div>
                 <div style="text-align:center;">
@@ -111,10 +143,12 @@ const InterfaceSpec = {
 
     // ==================== 主 UI ====================
     renderMainUI(container) {
+        const builtinFile = this._builtinStandardDocs[this._currentCategory] || '';
         container.innerHTML = `
             <div class="interface-spec-module">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;">
                     <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.loadBuiltinStandardDoc()">⚡ 加载内置标准</button>
                         <button class="btn btn-primary btn-sm" onclick="InterfaceSpec.showUploadModal('our_standard')">📤 上传我方标准</button>
                         <button class="btn btn-info btn-sm" onclick="InterfaceSpec.showUploadModal('vendor')">📥 上传对方接口</button>
                         <select id="compareCategory" class="form-control" onchange="InterfaceSpec.loadAll()" style="width:130px;height:32px;padding:0 8px;font-size:12px;border-radius:6px;">
@@ -126,6 +160,7 @@ const InterfaceSpec = {
                         <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.generateReport()">📊 对照报告</button>
                         <button class="btn btn-outline btn-sm" onclick="InterfaceSpec.resetDashboard()" style="color:var(--danger);">🔄 重新对齐</button>
                     </div>
+                    <div style="padding:8px 12px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;font-size:12px;color:#475569;">内置标准: ${builtinFile || '未配置'}</div>
                 </div>
                 <div id="specOverview" style="margin-bottom:20px;"></div>
                 <div style="display:flex;gap:4px;background:var(--gray-100);padding:4px;border-radius:10px;margin-bottom:16px;">
@@ -222,6 +257,7 @@ const InterfaceSpec = {
         const matched = this._comparisons.filter(c => (c.gap_count || 0) === 0 && (c.transform_count || 0) === 0).length;
         const gaps = this._comparisons.reduce((s, c) => s + (c.gap_count || 0), 0);
         const transforms = this._comparisons.reduce((s, c) => s + (c.transform_count || 0), 0);
+        const readiness = this._ourSpecs.length > 0 && this._vendorSpecs.length > 0;
 
         el.innerHTML = `
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;">
@@ -245,6 +281,10 @@ const InterfaceSpec = {
                     <div style="font-size:24px;font-weight:700;color:var(--secondary);">${transforms}</div>
                     <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">需转换</div>
                 </div>
+            </div>
+            <div style="margin-top:14px;padding:14px 16px;border-radius:14px;background:${readiness ? 'linear-gradient(135deg,#ecfdf5,#ffffff)' : 'linear-gradient(135deg,#fff7ed,#ffffff)'};border:1px solid ${readiness ? '#bbf7d0' : '#fed7aa'};font-size:13px;color:#475569;">
+                <span style="font-weight:700;color:${readiness ? '#15803d' : '#c2410c'};">${readiness ? '✓ 已满足对照条件' : '⏳ 还差一步就能开始对照'}</span>
+                <span style="margin-left:8px;">${readiness ? '当前标准文档和对方文档都已就绪，可以直接运行智能对照。' : this._ourSpecs.length === 0 ? '请先加载我方标准文档。' : '请先上传对方接口文档。'}</span>
             </div>`;
     },
 
@@ -629,8 +669,35 @@ const InterfaceSpec = {
                 '<td style="font-size:11px;max-width:200px;">' + (m.transform_rule || '-') + '</td>' +
                 '<td>' + (!m.is_confirmed ? '<button class="btn btn-success btn-xs" onclick="InterfaceSpec.confirmMapping(' + m.id + ')">确认</button>' : '<span style="color:var(--success);font-size:11px;">✓ 已确认</span>') + '</td></tr>';
         }
-        html += '</tbody></table></div>';
+        html += '</tbody></table></div><div style="margin-top:12px;display:flex;justify-content:flex-end;"><button class="btn btn-outline btn-sm" onclick="InterfaceSpec.exportFieldMappings()">导出差异 CSV</button></div>';
         body.innerHTML = html;
+    },
+
+    async loadBuiltinStandardDoc() {
+        const category = (document.getElementById('compareCategory')?.value || document.getElementById('dashOurCategory')?.value || this._currentCategory || '手麻标准');
+        this._currentCategory = category;
+        const btn = Array.from(document.querySelectorAll('button')).find(item => item.textContent && item.textContent.includes('加载内置标准'));
+        const originalText = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '⏳ 加载中...';
+        }
+        try {
+            const res = await api.post('/interface-specs/load-builtin-standard', {
+                category,
+                overwrite: true
+            });
+            const modeText = res.db_reused ? '直接复用已入库标准' : (res.cache_hit ? '使用预解析缓存完成加载' : '首次 AI 解析完成');
+            showToast(`✅ 已加载 ${res.filename}，${modeText}，共 ${res.parsed_count || 0} 个接口`);
+            await this.loadAll(true);
+        } catch (e) {
+            showToast(`❌ 加载内置标准失败: ${e.message || '请检查 PDF 或解析依赖'}`);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
     },
 
     async confirmMapping(mappingId) {
@@ -640,6 +707,27 @@ const InterfaceSpec = {
         } catch (e) {
             showToast(`确认失败: ${e.message}`, 'error');
         }
+    },
+
+    exportFieldMappings() {
+        const rows = Array.from(document.querySelectorAll('#fieldDetailBody tbody tr'));
+        if (!rows.length) {
+            showToast('暂无可导出的字段差异', 'warning');
+            return;
+        }
+        const csv = ['我方字段,对方字段,类型,状态,转换规则'].concat(
+            rows.map(row => Array.from(row.children).slice(0, 5).map(td => `"${String(td.textContent || '').replace(/"/g, '""').trim()}"`).join(','))
+        ).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'interface_field_mappings.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast('字段差异已导出');
     },
 
 

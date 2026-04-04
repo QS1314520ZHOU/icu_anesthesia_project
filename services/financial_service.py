@@ -73,6 +73,7 @@ class FinancialService:
                     INSERT INTO project_revenue (project_id, amount, revenue_date, revenue_type, description)
                     VALUES (?, ?, ?, ?, ?)
                 '''), (project_id, amount, revenue_date, revenue_type, description))
+                conn.commit()
                 return {"success": True}
         except Exception as e:
             logger.error(f"Error adding revenue for project {project_id}: {e}")

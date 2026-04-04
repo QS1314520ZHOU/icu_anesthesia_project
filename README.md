@@ -83,14 +83,86 @@ python migrate_sqlite_to_pg.py
 - 共享 UI 基础能力已拆到：`shared_ui_hub.js`
 - 共享状态与常量已拆到：`state_hub.js`
 - 启动初始化已拆到：`bootstrap_hub.js`
-- 协作链路也已拆到：`collaboration_hub.js`
+- 协作链路也已拆到：`collaboration_hub.js`（含沟通记录、时间线筛选复制、会议助手、沟通 AI 分析）
 - 项目详情渲染链也已拆到：`project_detail_render_hub.js`
 - 项目详情工具链也已拆到：`project_detail_tools_hub.js`
 - 项目详情动作链也已拆到：`project_detail_actions_hub.js`
+- `main.js` 现主要作为兼容壳与加载锚点保留
 - `utils/`：通用工具函数
+
+## Form Generator 策略
+
+Form Generator 现在优先走本地规则编译，而不是逐张表单做人工定制。
+
+- `reference`：命中 `表单/*.json` 本地参考时直接复用
+- `score_table`：适用于评分矩阵 / 风险评估量表，自动生成分组标题、评分项、总分和风险等级
+- `text_table`：适用于普通 Word 表格，自动拆出头部元数据字段、表格底板和表格空白单元格覆盖控件
+- `semantic`：适用于记录单 / 普通结构化表单，按标题、说明、字段、选项组做语义编译
+- `ai`：只有当前面几条策略都不足时才回退 AI
+
+页面中的 Form Generator 调试区会显示本次命中的 `generation_strategy`。
+
+## Form Generator Smoke
+
+可运行本地 smoke 脚本快速确认通用分流是否正常：
+
+```bash
+python scripts/form_generator_smoke.py
+```
+
+如果希望一次性执行 Python 编译校验、前端语法校验和 smoke 回归，可在 PowerShell 中运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1
+```
+
+这条脚本当前会同时检查：
+
+- Core workbench
+- Insight / reporting surfaces
+- Advanced governance surfaces
+- Form Generator
+- Project Detail
+- Alignment Center
+- Interface spec workbench
+- Knowledge Base / Asset Management / Mobile auxiliary surfaces
+- Platform Admin / Share surfaces
+- Collaboration center
+
+如果经过人工确认后需要刷新契约基线，可执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1 -UpdateContracts
+```
+
+或直接运行：
+
+```bash
+python scripts/form_generator_smoke.py --write-contracts
+```
+
+当前 smoke 覆盖：
+
+- `ICU机械通气患者误吸风险评估量表.docx` 应走 `score_table`
+- `普通表格示例.txt` 应走 `text_table`
+- `2.已发压疮评估及护理措施记录单（2025年第4次修订）.doc` 应走 `semantic`
+- 真实 `text_table` 样例应产出唯一的 `table_overlay` 覆盖控件
+- 评分表选项应带稳定 `code`
+- 关键统计项由 `scripts/form_generator_contracts.json` 固定
 
 ## 交付辅助文档
 
+- `FEATURE_COMPLETION_AUDIT.md`
+- `FEATURE_SUGGESTIONS_ROADMAP.md`
+- `INSIGHT_REPORTING_REGRESSION.md`
+- `ADVANCED_GOVERNANCE_REGRESSION.md`
+- `COLLABORATION_REGRESSION.md`
+- `CORE_WORKBENCH_REGRESSION.md`
+- `AUXILIARY_SURFACES_REGRESSION.md`
+- `FORM_GENERATOR_PIPELINE.md`
+- `INTERFACE_SPEC_REGRESSION.md`
+- `PLATFORM_ADMIN_SHARE_REGRESSION.md`
+- `PROJECT_DETAIL_REGRESSION.md`
 - `CURRENT_STATUS.md`
 - `FEATURE_MAP.md`
 - `HUB_MODULES.md`

@@ -123,7 +123,7 @@ async function editKBItem(id) {
         document.getElementById('kbAuthor').value = item.author || '';
         document.getElementById('kbExternalLink').value = item.external_link || '';
 
-        showModal('kbModal');
+        showModal('kbModal', { reset: false });
     } catch (e) {
         showToast('加载案例详情失败: ' + e.message, 'danger');
     }

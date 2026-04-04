@@ -36,9 +36,13 @@ The following hub files now own major cockpit/workbench flows:
 - `static/js/bootstrap_hub.js`
 - `static/js/auth_hub.js`
 - `static/js/admin_hub.js`
+- `static/js/admin_settings.js`
+  - now also owns the visible user/permission tab inside system settings
+  - and a DB-backed editable role/permission matrix
 - `static/js/analytics_hub.js`
 - `static/js/operations_hub.js`
 - `static/js/collaboration_hub.js`
+  - now also owns the meeting assistant extraction/save flow
 - `static/js/notifications_hub.js`
 - `static/js/gantt_hub.js`
 - `static/js/ai_analysis_hub.js`
@@ -55,6 +59,8 @@ The following hub files now own major cockpit/workbench flows:
 - `static/js/project_detail_tools_hub.js`
   - now covers interface template recommendation and document upload
 
+`static/js/main.js` is now kept as a thin compatibility shell and load-order anchor.
+
 ## Stability Hardening Already Applied
 
 - Many partial-update APIs were converted to safe merge updates.
@@ -70,17 +76,26 @@ The following hub files now own major cockpit/workbench flows:
   - refresh without losing context
   - empty-state explanations
 - `static/js/` no longer contains executing `alert(...)` calls; feedback is now centered on the toast flow.
+- Form Generator now uses a layered pipeline instead of per-form one-off fixes:
+  - `reference`
+  - `score_table`
+  - `text_table`
+  - `semantic`
+  - `ai`
+- Form Generator also has local smoke regression coverage via `scripts/form_generator_smoke.py`.
 
 ## Recommended Next Phase
 
 1. Run a real end-to-end validation based on `TEST_CHECKLIST.md`
-2. Continue shrinking `static/js/main.js`
-3. Extract project-detail-heavy logic into a dedicated hub/module
+2. Audit remaining cross-module glue that still depends on global load order
+3. Continue validating project-detail and collaboration flows in the browser
 4. Test against a live PostgreSQL instance and fix runtime mismatches
 
 ## Related Docs
 
 - `README.md`
+- `FEATURE_COMPLETION_AUDIT.md`
+- `FORM_GENERATOR_PIPELINE.md`
 - `FEATURE_MAP.md`
 - `TEST_CHECKLIST.md`
 - `LEGACY_FRONTEND_NOTES.md`

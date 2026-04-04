@@ -5,8 +5,16 @@
 function hydrateMapModeFromUrl() {
     const params = new URLSearchParams(window.location.search);
     const mode = params.get('map_mode');
+    const layer = params.get('map_layer');
+    const region = params.get('map_region');
     if (mode === 'heatmap' || mode === 'normal') {
         window.currentMapMode = mode;
+    }
+    if (layer === 'members' || layer === 'projects') {
+        window.currentMapLayer = layer;
+    }
+    if (region) {
+        window.currentMapRegion = region;
     }
 }
 
@@ -16,6 +24,16 @@ function syncMapModeToUrl() {
         params.set('map_mode', window.currentMapMode);
     } else {
         params.delete('map_mode');
+    }
+    if (window.currentMapLayer && window.currentMapLayer !== 'projects') {
+        params.set('map_layer', window.currentMapLayer);
+    } else {
+        params.delete('map_layer');
+    }
+    if (window.currentMapRegion) {
+        params.set('map_region', window.currentMapRegion);
+    } else {
+        params.delete('map_region');
     }
     const query = params.toString();
     window.history.replaceState({}, '', `${window.location.pathname}${query ? '?' + query : ''}`);
@@ -29,6 +47,15 @@ async function initDeliveryMap() {
                 <div class="panel-title" style="color: #60a5fa; font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 24px;">🗺️</span> 交付数字孪生仪表盘
                 </div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;">
+                    <select id="mapLayerSelect" onchange="changeMapLayer(this.value)" style="width:150px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:#0f172a;color:#e2e8f0;">
+                        <option value="projects">项目图层</option>
+                        <option value="members">人员图层</option>
+                    </select>
+                    <select id="mapRegionSelect" onchange="changeMapRegion(this.value)" style="width:180px;padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:#0f172a;color:#e2e8f0;">
+                        <option value="">全部区域</option>
+                    </select>
+                </div>
                 <div class="btn-group" style="display: flex; gap: 10px; align-items: center;">
                     <button class="btn btn-sm" style="background: rgba(148, 163, 184, 0.15); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; padding: 6px 12px;" onclick="copyCurrentViewLink()">复制当前视图链接</button>
                     <button class="btn btn-sm" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 6px 12px;" onclick="initDeliveryMap()">刷新数据</button>
@@ -36,6 +63,8 @@ async function initDeliveryMap() {
                 </div>
             </div>
             <div class="panel-body" style="flex: 1; position: relative; min-height: 500px; padding: 0; background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);">
+                <div id="mapStateHint" style="position:absolute;top:14px;left:20px;z-index:6;padding:8px 12px;border-radius:10px;background:rgba(15,23,42,0.72);color:#cbd5e1;font-size:12px;border:1px solid rgba(255,255,255,0.08);"></div>
+                <div id="mapSummaryCards" style="position:absolute;top:58px;left:20px;z-index:6;display:flex;gap:8px;flex-wrap:wrap;"></div>
                 <div id="chinaMapContainer" style="width: 100%; height: 100%;"></div>
                 <div id="mapLoading" class="loading-spinner" style="background: rgba(15, 23, 42, 0.8); color: #60a5fa;">正在接入地理信息系统...</div>
             </div>
@@ -48,6 +77,8 @@ async function initDeliveryMap() {
 
     // 默认视图模式 'normal' or 'heatmap'
     if (typeof window.currentMapMode === 'undefined') window.currentMapMode = 'normal';
+    if (typeof window.currentMapLayer === 'undefined') window.currentMapLayer = 'projects';
+    if (typeof window.currentMapRegion === 'undefined') window.currentMapRegion = '';
     hydrateMapModeFromUrl();
     syncMapModeToUrl();
 
@@ -96,6 +127,27 @@ async function initDeliveryMap() {
             projects: d.projects
         }));
 
+        const provinceCenters = {};
+        if (window.chinaJsonCache && Array.isArray(window.chinaJsonCache.features)) {
+            window.chinaJsonCache.features.forEach(feature => {
+                const rawName = feature?.properties?.name || feature?.name || '';
+                const normalizedName = rawName.replace('省', '').replace('市', '').replace('自治区', '').replace('特别行政区', '');
+                const cp = feature?.properties?.cp || feature?.cp;
+                if (normalizedName && Array.isArray(cp) && cp.length >= 2) {
+                    provinceCenters[normalizedName] = cp;
+                }
+            });
+        }
+
+        const regionSelect = document.getElementById('mapRegionSelect');
+        if (regionSelect) {
+            const regions = [...new Set(geoStats.map(d => d.name.replace('省', '').replace('市', '').replace('自治区', '').replace('特别行政区', '')))];
+            regionSelect.innerHTML = '<option value="">全部区域</option>' + regions.map(r => `<option value="${r}">${r}</option>`).join('');
+            regionSelect.value = window.currentMapRegion || '';
+        }
+        const layerSelect = document.getElementById('mapLayerSelect');
+        if (layerSelect) layerSelect.value = window.currentMapLayer || 'projects';
+
         const scatterData = [];
         const heatmapData = []; // 热力图数据 [lng, lat, count]
 
@@ -138,11 +190,54 @@ async function initDeliveryMap() {
             }
         });
 
+        const filteredMapData = window.currentMapRegion
+            ? mapData.filter(item => item.name === window.currentMapRegion)
+            : mapData;
+        const filteredScatterData = window.currentMapRegion
+            ? scatterData.filter(item => (item.city || '').includes(window.currentMapRegion))
+            : scatterData;
+        const filteredHeatmapData = window.currentMapRegion
+            ? heatmapData.filter((_, idx) => {
+                const scatter = filteredScatterData[idx];
+                return !!scatter;
+            })
+            : heatmapData;
+        const projectScatterData = filteredMapData.map(item => {
+            const center = provinceCenters[item.name];
+            if (!center) return null;
+            return {
+                name: item.name,
+                value: center.concat(item.value || 0),
+                avgProgress: item.avgProgress,
+                projects: item.projects
+            };
+        }).filter(Boolean);
+
+        const mapStateHint = document.getElementById('mapStateHint');
+        const mapSummaryCards = document.getElementById('mapSummaryCards');
+        if (mapStateHint) {
+            const projectCount = filteredMapData.length;
+            const memberCount = filteredScatterData.length;
+            mapStateHint.textContent = `当前图层：${window.currentMapLayer === 'members' ? '人员图层' : '项目图层'} | 当前区域：${window.currentMapRegion || '全国'} | 项目 ${projectCount} 个 | 人员 ${memberCount} 人`;
+        }
+        if (mapSummaryCards) {
+            const avgProgress = filteredMapData.length ? (filteredMapData.reduce((sum, item) => sum + Number(item.avgProgress || 0), 0) / filteredMapData.length).toFixed(1) : '0.0';
+            const highLoadMembers = filteredScatterData.filter(item => Number(item.load_score || 0) >= 70).length;
+            mapSummaryCards.innerHTML = `
+                <div style="padding:8px 12px;border-radius:10px;background:rgba(15,23,42,0.72);border:1px solid rgba(255,255,255,0.08);font-size:12px;color:#e2e8f0;">📁 项目 ${filteredMapData.length}</div>
+                <div style="padding:8px 12px;border-radius:10px;background:rgba(15,23,42,0.72);border:1px solid rgba(255,255,255,0.08);font-size:12px;color:#e2e8f0;">👥 人员 ${filteredScatterData.length}</div>
+                <div style="padding:8px 12px;border-radius:10px;background:rgba(15,23,42,0.72);border:1px solid rgba(255,255,255,0.08);font-size:12px;color:#e2e8f0;">${window.currentMapLayer === 'projects' ? '📈 平均进度' : '📍 当前地区成员'} ${window.currentMapLayer === 'projects' ? `${avgProgress}%` : filteredScatterData.length}</div>
+                <div style="padding:8px 12px;border-radius:10px;background:rgba(15,23,42,0.72);border:1px solid rgba(255,255,255,0.08);font-size:12px;color:#fca5a5;">🔥 高负载 ${highLoadMembers}</div>
+            `;
+        }
+
         // 基础配置
         const baseOption = {
             backgroundColor: 'transparent',
             title: {
-                text: window.currentMapMode === 'normal' ? '全国项目覆盖与交付资源分布' : '交付团队资源投入热力',
+                text: window.currentMapMode === 'normal'
+                    ? (window.currentMapLayer === 'members' ? '全国交付人员分布态势' : '全国项目覆盖与交付资源分布')
+                    : '交付团队资源投入热力',
                 left: 'center',
                 top: 30,
                 textStyle: { color: '#f8fafc', fontSize: 20, fontWeight: 800, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 10 }
@@ -158,7 +253,8 @@ async function initDeliveryMap() {
             geo: {
                 map: 'china',
                 roam: true,
-                zoom: 1.1,
+                zoom: window.currentMapRegion && provinceCenters[window.currentMapRegion] ? 1.9 : 1.1,
+                center: window.currentMapRegion && provinceCenters[window.currentMapRegion] ? provinceCenters[window.currentMapRegion] : undefined,
                 label: {
                     show: true,
                     color: 'rgba(255,255,255,0.4)',
@@ -189,7 +285,7 @@ async function initDeliveryMap() {
             baseOption.visualMap = [
                 {
                     min: 0,
-                    max: Math.max(...mapData.map(d => d.value), 5),
+                    max: Math.max(...filteredMapData.map(d => d.value), 5),
                     left: 30,
                     bottom: 30,
                     text: ['项目密集', ''],
@@ -217,7 +313,7 @@ async function initDeliveryMap() {
             ];
 
             baseOption.tooltip.formatter = function (params) {
-                if (params.seriesType === 'map') {
+                if (params.seriesType === 'map' || params.seriesName === '项目点位') {
                     if (!params.data) return `<div style="padding:10px;color:#94a3b8;">${params.name}: 暂无活跃项目</div>`;
                     return `
                         <div style="padding: 15px; border-radius: 12px;">
@@ -238,6 +334,7 @@ async function initDeliveryMap() {
                 } else {
                     const color = params.data.load_score > 70 ? '#f43f5e' : (params.data.load_score >= 40 ? '#10b981' : '#3b82f6');
                     const status = params.data.load_score > 70 ? '高压运行' : (params.data.load_score >= 40 ? '稳健交付' : '资源充沛');
+                    const layerHint = window.currentMapLayer === 'members' ? '人员图层' : '项目关联人员';
                     return `
                         <div style="padding: 15px; min-width:220px;">
                             <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
@@ -265,6 +362,7 @@ async function initDeliveryMap() {
                                 <div style="display:flex; justify-content:space-between;">
                                     <span>待办任务:</span> <b style="color:#f43f5e;">${params.data.task_count}</b>
                                 </div>
+                                <div style="margin-top:6px;color:#94a3b8;font-size:11px;">当前视图：${layerHint}</div>
                             </div>
                         </div>
                     `;
@@ -276,13 +374,43 @@ async function initDeliveryMap() {
                     type: 'map',
                     map: 'china',
                     geoIndex: 0,
-                    data: mapData
+                    data: window.currentMapLayer === 'projects' ? filteredMapData : []
+                },
+                {
+                    name: '项目点位',
+                    type: 'effectScatter',
+                    coordinateSystem: 'geo',
+                    data: window.currentMapLayer === 'projects' ? projectScatterData : [],
+                    symbolSize: function (val) {
+                        return Math.max(14, Number(val[2] || 0) * 5 + 8);
+                    },
+                    showEffectOn: 'render',
+                    rippleEffect: { brushType: 'stroke', scale: 2.4, period: 5 },
+                    itemStyle: {
+                        color: '#93c5fd',
+                        shadowBlur: 18,
+                        shadowColor: 'rgba(96,165,250,0.45)',
+                        opacity: 0.96
+                    },
+                    label: {
+                        show: true,
+                        position: 'right',
+                        formatter: function (params) {
+                            return `${params.data.name} · ${params.data.value[2]}个`;
+                        },
+                        color: '#dbeafe',
+                        fontSize: 11,
+                        backgroundColor: 'rgba(15,23,42,0.58)',
+                        borderRadius: 8,
+                        padding: [4, 8]
+                    },
+                    zlevel: 6
                 },
                 {
                     name: '交付人员',
                     type: 'effectScatter',
                     coordinateSystem: 'geo',
-                    data: scatterData,
+                    data: window.currentMapLayer === 'members' ? filteredScatterData : [],
                     symbolSize: (val) => Math.max(10, val[2] / 5),
                     showEffectOn: 'render',
                     rippleEffect: { brushType: 'stroke', scale: 3, period: 4 },
@@ -311,7 +439,7 @@ async function initDeliveryMap() {
                 {
                     type: 'heatmap',
                     coordinateSystem: 'geo',
-                    data: heatmapData,
+                    data: filteredHeatmapData,
                     pointSize: 18,
                     blurSize: 15
                 }
@@ -354,5 +482,23 @@ function createMapToggleButton() {
 function toggleMapMode() {
     window.currentMapMode = window.currentMapMode === 'normal' ? 'heatmap' : 'normal';
     syncMapModeToUrl();
+    initDeliveryMap();
+}
+
+function changeMapLayer(layer) {
+    window.currentMapLayer = layer || 'projects';
+    syncMapModeToUrl();
+    if (typeof showToast === 'function') {
+        showToast(`已切换为${window.currentMapLayer === 'members' ? '人员图层' : '项目图层'}`, 'success');
+    }
+    initDeliveryMap();
+}
+
+function changeMapRegion(region) {
+    window.currentMapRegion = region || '';
+    syncMapModeToUrl();
+    if (typeof showToast === 'function') {
+        showToast(`已切换区域：${window.currentMapRegion || '全国'}`, 'success');
+    }
     initDeliveryMap();
 }

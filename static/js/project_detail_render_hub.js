@@ -22,22 +22,28 @@ function renderDependencies(deps, pid) {
 
 function renderStages(stages) {
     if (!stages || stages.length === 0) {
-        return '<div class="empty-state"><p>暂无阶段计划</p></div>';
+        return '<div class="empty-state"><p>暂无阶段计划</p><div class="empty-state-hint">可点击右上角“添加阶段”建立项目实施节奏。</div></div>';
     }
     return stages.map(s => `
+        ${(() => {
+            const progress = Number(s.progress || 0);
+            const progressColor = progress >= 100 ? '#10b981' : progress >= 70 ? '#2563eb' : progress >= 30 ? '#f59e0b' : '#94a3b8';
+            const statusBg = progress >= 100 ? '#ecfdf5' : progress >= 30 ? '#eff6ff' : '#f8fafc';
+            const statusColor = progress >= 100 ? '#059669' : progress >= 30 ? '#2563eb' : '#94a3b8';
+            return `
         <div class="stage-item" id="stage-${s.id}">
             <div class="stage-header" onclick="toggleStage(${s.id})">
                 <div class="stage-title-wrap">
                     <div class="stage-title">${s.stage_name}</div>
-                    <span class="stage-status-badge" style="background:${s.status === '已完成' ? '#ecfdf5;color:#059669' : s.status === '进行中' ? '#eff6ff;color:#2563eb' : '#f8fafc;color:#94a3b8'};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">
-                        ${s.status === '已完成' ? '✅ 已完成' : s.status === '进行中' ? '⏳ 进行中' : '⏸ 待开始'}
+                    <span class="stage-status-badge" style="background:${statusBg};color:${statusColor};padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">
+                        ${progress >= 100 ? '✅ 已完成' : progress >= 30 ? '⏳ 进行中' : '⏸ 待开始'}
                     </span>
                 </div>
                 <div class="stage-info">
                     <span>${s.plan_start_date || '-'} ~ ${s.plan_end_date || '-'}</span>
-                    <span>${s.progress || 0}%</span>
-                    <div class="stage-progress-mini">
-                        <div class="stage-progress-mini-bar" style="width:${s.progress || 0}%"></div>
+                    <span style="color:${progressColor};font-weight:700;">${progress}%</span>
+                    <div class="stage-progress-mini" style="background:#eef2f7;">
+                        <div class="stage-progress-mini-bar" style="width:${progress}%;background:${progressColor};"></div>
                     </div>
                 </div>
             </div>
@@ -51,12 +57,13 @@ function renderStages(stages) {
                 `).join('')}
             </div>
         </div>
+    `;})()}
     `).join('');
 }
 
 function renderMilestones(milestones) {
     if (!milestones || milestones.length === 0) {
-        return '<div class="empty-state"><p>暂无里程碑</p></div>';
+        return '<div class="empty-state"><p>暂无里程碑</p><div class="empty-state-hint">建议为关键交付节点设置里程碑，便于提醒与风险预警。</div></div>';
     }
     return milestones.map(m => `
         <div class="milestone-item">
@@ -72,7 +79,7 @@ function renderMilestones(milestones) {
 
 function renderMembers(members) {
     if (!members || members.length === 0) {
-        return '<div class="empty-state"><p>暂无成员</p></div>';
+        return '<div class="empty-state"><p>暂无成员</p><div class="empty-state-hint">请先补录项目成员，后续资源、工时和地图视图会联动展示。</div></div>';
     }
     return members.map(m => `
         <div class="member-item">
@@ -87,7 +94,7 @@ function renderMembers(members) {
 
 function renderContacts(contacts) {
     if (!contacts || contacts.length === 0) {
-        return '<div class="empty-state"><p>暂无联系人</p></div>';
+        return '<div class="empty-state"><p>暂无联系人</p><div class="empty-state-hint">补充甲方联系人后，可用于沟通记录、提醒与满意度回访。</div></div>';
     }
     return contacts.map(c => `
         <div class="contact-item">
@@ -101,7 +108,7 @@ function renderContacts(contacts) {
 }
 
 function renderInterfaces(interfaces) {
-    if (!interfaces || interfaces.length === 0) return '<div class="empty-state"><p>暂无接口数据</p></div>';
+    if (!interfaces || interfaces.length === 0) return '<div class="empty-state"><p>暂无接口数据</p><div class="empty-state-hint">可手工新增接口，或使用模板/批量导入快速初始化。</div></div>';
     const statusMap = { '待开发': 'badge-gray', '开发中': 'badge-info', '联调中': 'badge-warning', '已完成': 'badge-success' };
     return `
         <div style="background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:8px 16px; border-radius:8px; margin-bottom:12px; font-size:13px; display:flex; align-items:center; gap:8px;">
@@ -133,7 +140,7 @@ function renderInterfaces(interfaces) {
 }
 
 function renderIssues(issues) {
-    if (!issues || issues.length === 0) return '<div class="empty-state"><p>暂无问题记录</p></div>';
+    if (!issues || issues.length === 0) return '<div class="empty-state"><p>暂无问题记录</p><div class="empty-state-hint">建议及时记录现场问题，便于 AI 分析、催办和知识沉淀。</div></div>';
     const severityMap = { '高': 'badge-danger', '中': 'badge-warning', '低': 'badge-info' };
     const statusMap = { '待处理': 'badge-danger', '处理中': 'badge-warning', '已解决': 'badge-success' };
     return `
@@ -168,7 +175,7 @@ function renderIssues(issues) {
 }
 
 function renderDepartures(departures) {
-    if (!departures || departures.length === 0) return '<div class="empty-state"><p>暂无离场记录</p></div>';
+    if (!departures || departures.length === 0) return '<div class="empty-state"><p>暂无离场记录</p><div class="empty-state-hint">当项目进入暂停、返场或交接阶段时，可在此记录完整离场流程。</div></div>';
     return departures.map(d => `
         <div class="departure-card type-${d.departure_type}">
             <div class="departure-header">
@@ -466,6 +473,8 @@ function renderProjectDetail(project) {
                             <button onclick="generateWeeklyReport(${project.id})">📋 AI周报</button>
                             <span class="dot-separator">·</span>
                             <button onclick="showAiTaskSuggestions(${project.id})">🤖 AI任务分配</button>
+                            <span class="dot-separator">·</span>
+                            <button onclick="showAiRetrospective(${project.id})">📘 AI复盘</button>
                             
                             <!-- 更多按钮 -->
                             <div class="more-wrapper" onclick="this.classList.toggle('open'); event.stopPropagation();">
@@ -686,10 +695,7 @@ function renderProjectDetail(project) {
                     <div class="panel">
                         <div class="panel-header">
                             <div class="panel-title">👥 项目团队</div>
-                            <div class="btn-group">
-                                <button class="btn btn-ai btn-sm" onclick="showMeetingAssistant()">🎙️ 会议助手</button>
-                                <button class="btn btn-primary btn-sm" onclick="showModal('memberModal')">+ 添加成员</button>
-                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="showModal('memberModal')">+ 添加成员</button>
                         </div>
                         <div class="panel-body">${renderMembers(project.members)}</div>
                     </div>
@@ -721,14 +727,24 @@ function renderProjectDetail(project) {
 
                 <div class="tab-content" id="tab-flow">
                     <div class="panel">
-                        <div class="panel-header">
+                        <div class="panel-header" style="flex-wrap:wrap;gap:8px;">
                             <div class="panel-title">🎨 接口流设计器 (Flow Designer)</div>
-                            <div class="btn-group">
+                            <div class="btn-group" style="flex-wrap:wrap;">
+                                <button class="btn btn-outline btn-sm" onclick="batchAddRecommendedInterfaces()" title="先补齐推荐接口，再生成链路">📋 批量导入接口</button>
+                                <button class="btn btn-outline btn-sm" onclick="switchTab(document.querySelector(&quot;#projectDetailView .tabs .tab[onclick*='interfaces']&quot;), 'interfaces')">🧩 去接口状态</button>
+                                <button class="btn btn-outline btn-sm" onclick="switchTab(document.querySelector(&quot;#projectDetailView .tabs .tab[onclick*='interfaceSpec']&quot;), 'interfaceSpec'); if (window.InterfaceSpec) InterfaceSpec.renderTab(currentProjectId);">📑 去智能对照</button>
                                 <button class="btn btn-outline btn-sm" onclick="renderInterfaceFlow()">🔄 刷新拓扑</button>
                             </div>
                         </div>
                         <div class="panel-body">
-                            <div id="interfaceFlowChart" style="width: 100%; height: 500px; background: #f8fafc; border-radius: 8px;"></div>
+                            <div style="margin-bottom:14px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#eff6ff,#f8fafc);border:1px solid #dbeafe;color:#475569;font-size:13px;line-height:1.8;">
+                                流设计器用于把“医院 / 系统 / 接口”串成一张拓扑图，适合做实施前梳理、联调准备和项目交接。
+                                没有接口数据时会显示引导卡，不再是一块空白区。
+                            </div>
+                            <div style="display:grid;grid-template-columns:minmax(0,1.2fr) 300px;gap:16px;align-items:start;">
+                                <div id="interfaceFlowChart" style="width:100%;min-height:540px;background:#f8fafc;border-radius:16px;border:1px solid #e2e8f0;"></div>
+                                <div id="interfaceFlowSidebar" style="display:grid;gap:12px;"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -847,12 +863,14 @@ function renderProjectDetail(project) {
                         <div class="panel-header" style="flex-wrap:wrap;gap:8px;">
                             <div class="panel-title">💬 客户沟通记录</div>
                             <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button class="btn btn-sm" style="background:linear-gradient(135deg,#4f46e5,#2563eb);color:white;border:none;" onclick="showMeetingAssistant()" title="从会议转写中提取纪要、待办并沉淀到沟通记录">🎙️ 会议助手</button>
                                 <button class="btn btn-sm" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);color:white;border:none;" onclick="analyzeCommunications()" title="AI从项目管理/需求分析角度分析所有沟通记录">🤖 AI 智能分析</button>
                                 <button class="btn btn-sm" style="background:linear-gradient(135deg,#0ea5e9,#2563eb);color:white;border:none;" onclick="document.getElementById('commFileInput').click()" title="上传文件(Word/PDF/Excel/TXT)进行AI分析">📎 上传文件分析</button>
                                 <button class="btn btn-primary btn-sm" onclick="showAddCommunicationModal()">+ 新增记录</button>
                             </div>
                         </div>
                         <div class="panel-body">
+                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">建议在每次客户沟通后及时录入；会议助手也已并入这里，方便从会议纪要直接生成并沉淀沟通记录。</div>
                             <div id="communicationsList">
                                 <div class="loading-spinner"><div class="spinner"></div></div>
                             </div>
@@ -872,7 +890,10 @@ function renderProjectDetail(project) {
                                 <button class="btn btn-primary btn-sm" onclick="showAddDependencyModal()">+ 添加依赖</button>
                             </div>
                         </div>
-                        <div class="panel-body" id="dependenciesContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        <div class="panel-body">
+                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">通过依赖关系可识别关键路径和延期蝴蝶效应，建议为关键任务补全前后置关系。</div>
+                            <div id="dependenciesContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        </div>
                     </div>
                     <div id="criticalPathPanel" style="display:none;margin-top:16px;"></div>
                 </div>
@@ -888,7 +909,10 @@ function renderProjectDetail(project) {
                                 <button class="btn btn-outline btn-sm" onclick="loadStandupHistory(${project.id})">📜 历史纪要</button>
                             </div>
                         </div>
-                        <div class="panel-body" id="standupContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        <div class="panel-body">
+                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">站会助手会聚合当前项目日志、问题和阶段进度，帮助快速形成每日同步材料。</div>
+                            <div id="standupContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        </div>
                     </div>
                     <div id="standupAiResult" style="display:none;margin-top:16px;"></div>
                     <div id="standupHistoryPanel" style="display:none;margin-top:16px;"></div>
@@ -904,7 +928,10 @@ function renderProjectDetail(project) {
                                 <button class="btn btn-sm" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);color:white;border:none;" onclick="generateDeviationReport(${project.id})">🤖 AI偏差诊断</button>
                             </div>
                         </div>
-                        <div class="panel-body" id="deviationContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        <div class="panel-body">
+                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">可通过周期快照查看项目偏差趋势，并使用 AI 偏差诊断识别停滞阶段和异常拐点。</div>
+                            <div id="deviationContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
+                        </div>
                     </div>
                     <div id="deviationAiReport" style="display:none;margin-top:16px;"></div>
                 </div>

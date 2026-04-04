@@ -1,5 +1,36 @@
 // AI helper operations extracted from main.js
 
+window.aiOpsHistory = window.aiOpsHistory || JSON.parse(localStorage.getItem('ai_ops_history') || '[]');
+
+function recordAiOpsHistory(entry) {
+    const payload = {
+        time: new Date().toLocaleString('zh-CN'),
+        type: entry.type || 'unknown',
+        title: entry.title || '未命名操作',
+        detail: entry.detail || '',
+        projectId: currentProjectId || null
+    };
+    window.aiOpsHistory.unshift(payload);
+    window.aiOpsHistory = window.aiOpsHistory.slice(0, 30);
+    localStorage.setItem('ai_ops_history', JSON.stringify(window.aiOpsHistory));
+}
+
+function showAiOpsHistory() {
+    const html = window.aiOpsHistory.length
+        ? window.aiOpsHistory.map(item => `
+            <div style="padding:12px 14px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;background:#fff;">
+                <div style="display:flex;justify-content:space-between;gap:12px;">
+                    <div style="font-weight:700;color:#0f172a;">${item.title}</div>
+                    <div style="font-size:12px;color:#94a3b8;">${item.time}</div>
+                </div>
+                <div style="font-size:12px;color:#64748b;margin-top:6px;">${item.type}${item.projectId ? ` · 项目 ${item.projectId}` : ''}</div>
+                <div style="font-size:13px;color:#334155;margin-top:8px;line-height:1.7;">${item.detail || '无详情'}</div>
+            </div>
+        `).join('')
+        : '<div style="color:#94a3b8;text-align:center;padding:30px;">暂无 AI 操作历史</div>';
+    showGenericModal('🕘 AI 操作历史', html);
+}
+
 function showAiWorklogModal() {
     document.getElementById('aiWorklogInput').value = '';
     document.getElementById('aiWorklogError').style.display = 'none';
@@ -24,6 +55,11 @@ async function saveWorklogAI() {
     try {
         const res = await api.post('/ai/parse-log', { raw_text: rawText });
         if (res) {
+            recordAiOpsHistory({
+                type: 'ai_parse_log',
+                title: 'AI 智能填报',
+                detail: `已解析工作日志，建议工时 ${res.work_hours || 8} 小时`
+            });
             document.getElementById('logDate').value = new Date().toISOString().split('T')[0];
             document.getElementById('workContent').value = res.work_content || rawText;
             document.getElementById('workHours').value = res.work_hours || 8;
@@ -31,7 +67,7 @@ async function saveWorklogAI() {
             document.getElementById('tomorrowPlan').value = res.tomorrow_plan || '';
 
             closeModal('aiWorklogModal');
-            showModal('worklogModal');
+            showModal('worklogModal', { reset: false });
         } else {
             showToast('AI 解析未能返回有效数据', 'warning');
         }
@@ -39,7 +75,7 @@ async function saveWorklogAI() {
         console.error('AI Parse Error:', e);
         showToast('AI 解析服务暂时不可用: ' + e.message, 'danger');
         closeModal('aiWorklogModal');
-        showModal('worklogModal');
+        showModal('worklogModal', { reset: false });
         document.getElementById('workContent').value = rawText;
     } finally {
         btn.disabled = false;
@@ -62,9 +98,14 @@ async function parseAiWorklog() {
     try {
         const res = await api.post('/ai/parse-log', { raw_text: rawText });
         if (res) {
+            recordAiOpsHistory({
+                type: 'ai_parse_log',
+                title: 'AI 智能填报',
+                detail: `已解析工作日志，输出内容长度 ${String(res.work_content || '').length}`
+            });
             closeModal('aiWorklogModal');
             fillWorklogForm(res);
-            showModal('worklogModal');
+            showModal('worklogModal', { reset: false });
             showToast('AI 识别成功，请确认后保存', 'success');
         } else {
             document.getElementById('aiWorklogError').textContent = '识别失败: AI 未返回有效数据';
@@ -170,6 +211,11 @@ async function generateChaser(index) {
         ]);
         if (res && res.professional) {
             lastGeneratedChaser = res;
+            recordAiOpsHistory({
+                type: 'ai_chaser',
+                title: 'AI 智能催单',
+                detail: `已为 ${item.title || item.reason || '滞后项'} 生成催办文案`
+            });
             renderChaserStyles('professional');
         } else {
             container.innerHTML = `<div class="error-text" style="color:#ef4444;padding:20px;text-align:center;">生成格式异常<br><small style="color:#9ca3af;">${JSON.stringify(res).substring(0, 200)}</small></div>`;
@@ -240,6 +286,11 @@ async function extractToKb(issueId, btn) {
     try {
         const res = await api.post('/ai/knowledge/extract', { issue_id: issueId });
         if (res.success) {
+            recordAiOpsHistory({
+                type: 'ai_knowledge_extract',
+                title: '知识提炼',
+                detail: `问题 ${issueId} 已提炼为知识条目`
+            });
             showToast(`✅ 提取成功：${res.data.data.title}`, 'success');
         } else {
             showToast('提取失败: ' + res.message, 'danger');
@@ -275,13 +326,19 @@ async function submitAiQuestion() {
     const sqlSpan = document.getElementById('aiQuerySql');
     const table = document.getElementById('aiResultTable');
     const countDiv = document.getElementById('aiResultCount');
+    const sqlContainer = document.getElementById('aiSqlContainer');
 
     loading.style.display = 'block';
     resultDiv.style.display = 'none';
 
     try {
-        const data = await api.post(`/projects/${currentProjectId}/ask`, { question });
+        const data = await api.post(`/projects/${currentProjectId}/ask`, { question }, { silent: true });
         if (data) {
+            recordAiOpsHistory({
+                type: 'ai_nlq',
+                title: 'AI 项目问答',
+                detail: `问题：${question}`
+            });
             sqlSpan.textContent = data.sql || 'No SQL generated';
 
             let tableHtml = '<thead><tr>';
@@ -308,10 +365,17 @@ async function submitAiQuestion() {
             table.innerHTML = tableHtml;
             countDiv.textContent = `找到 ${data.rows ? data.rows.length : 0} 条记录`;
             resultDiv.style.display = 'block';
+            if (sqlContainer) sqlContainer.style.display = 'none';
         }
     } catch (e) {
         console.error('AI Ask Error:', e);
-        showToast(`请求失败: ${e.message}`, 'danger');
+        if (sqlSpan) sqlSpan.textContent = '';
+        if (table) {
+            table.innerHTML = `<tbody><tr><td colspan="1" style="text-align:center; color:#ef4444; padding:32px;">${e.message}</td></tr></tbody>`;
+        }
+        if (countDiv) countDiv.textContent = '查询失败';
+        if (resultDiv) resultDiv.style.display = 'block';
+        if (sqlContainer) sqlContainer.style.display = 'none';
     } finally {
         loading.style.display = 'none';
         document.getElementById('aiInputContainer').style.boxShadow = '0 4px 12px -2px rgba(0,0,0,0.05)';

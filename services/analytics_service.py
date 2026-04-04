@@ -479,8 +479,9 @@ class AnalyticsService:
             # 理想进度线 (Ideal Line)
             ideal_line = []
             try:
-                start_date = datetime.strptime(project['plan_start_date'] or str(project['created_at'])[:10], '%Y-%m-%d')
-                end_date_str = project['plan_end_date'] or (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
+                start_date_str = str(project['plan_start_date'])[:10] if project['plan_start_date'] else str(project['created_at'])[:10]
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+                end_date_str = str(project['plan_end_date'])[:10] if project['plan_end_date'] else (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')
                 end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
                 
                 # Use current task stats for total if no history
@@ -508,7 +509,7 @@ class AnalyticsService:
             if history:
                 for h in history:
                     remaining = h['tasks_total'] - h['tasks_completed']
-                    actual_line.append({"date": h['record_date'], "value": remaining})
+                    actual_line.append({"date": str(h['record_date'])[:10], "value": remaining})
             else:
                  # Fallback: Start point -> Today/Current Status
                  sql_fall = DatabasePool.format_sql('SELECT COUNT(*) as total, SUM(CASE WHEN is_completed = ? THEN 1 ELSE 0 END) as completed FROM tasks t JOIN project_stages s ON t.stage_id = s.id WHERE s.project_id = ?')
@@ -518,7 +519,7 @@ class AnalyticsService:
                  remaining = total - completed
                  
                  # Point 1: Start (Assumed 0 progress)
-                 actual_line.append({"date": project['plan_start_date'] or str(project['created_at'])[:10], "value": total})
+                 actual_line.append({"date": str(project['plan_start_date'])[:10] if project['plan_start_date'] else str(project['created_at'])[:10], "value": total})
                  
                  # Point 2: Now (Current progress)
                  today_str = datetime.now().strftime('%Y-%m-%d')

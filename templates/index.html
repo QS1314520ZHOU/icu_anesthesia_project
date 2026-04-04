@@ -2637,7 +2637,7 @@
             <button class="header-btn" onclick="showDashboard()">📊 <span class="btn-text">仪表盘</span></button>
             <button class="header-btn" onclick="showGlobalGanttModal()">📅 <span class="btn-text">总览</span></button>
             <button class="header-btn" onclick="generateAllReport()">📋 <span class="btn-text">周报</span></button>
-            <button class="header-btn" onclick="window.open('/tasks-center', '_blank')"
+            <button class="header-btn" onclick="window.location.href='/tasks-center'"
                 style="background:linear-gradient(135deg,rgba(14,116,144,0.45),rgba(2,132,199,0.45));">🗂️ <span
                     class="btn-text">任务中心</span></button>
             <button class="header-btn" onclick="openPmoDashboard()"
@@ -2705,10 +2705,12 @@
                         智能预警 <span id="warningBadge" class="notification-badge" style="display:none;">0</span></button>
                     <button class="btn btn-warning btn-full" onclick="showReminderCenter()">🔔 提醒中心 <span
                             id="reminderBadge" class="notification-badge" style="display:none;">0</span></button>
-                    <button class="btn btn-outline btn-full" onclick="window.open('/tasks-center', '_blank')">🗂️ 任务中心</button>
+                    <button class="btn btn-outline btn-full" onclick="window.location.href='/tasks-center'">🗂️ 任务中心</button>
                     <button class="btn btn-info btn-full" onclick="showDeliveryMap()">🗺️ 交付地图</button>
                     <button class="btn btn-outline btn-full" onclick="showResourceOverview()">👥 资源排班</button>
-                    <button class="btn btn-outline btn-full" onclick="showFinancialOverview()">💰 经营看板</button>
+                    <button class="btn btn-outline btn-full" onclick="showBusinessOverview()">💰 经营看板</button>
+                    <button class="btn btn-outline btn-full" onclick="showFinancialOverview()">📉 财务总览</button>
+                    <button class="btn btn-outline btn-full" onclick="window.location.href='/alignment'">🧩 对齐中心</button>
                     <button class="btn btn-primary btn-full" onclick="showKBView()">📚 知识库</button>
                     <button class="btn btn-success btn-full" onclick="showAssetView()">📦 硬件资产</button>
                     <button class="btn btn-purple btn-full" onclick="showPerformanceAnalytics()">🏅 绩效分析</button>
@@ -2744,6 +2746,7 @@
             <div id="projectDetailView" style="display:none;"></div>
             <div id="mapView" style="display:none; height: 100%; min-height: 600px;"></div>
             <div id="resourceView" style="display:none; padding: 20px;"></div>
+            <div id="businessView" style="display:none; padding: 20px;"></div>
             <div id="financialView" style="display:none; padding: 20px;"></div>
             <div id="analyticsView" style="display:none; padding: 20px;"></div>
             <div id="approvalView" style="display:none; padding: 20px;">
@@ -2846,6 +2849,78 @@
                 <!-- Premium Form Generator UI -->
                 <div class="panel" style="max-width: 1200px; margin: 0 auto;">
                     <div class="panel-body" style="padding: 30px;">
+                        <div style="margin-bottom:28px;padding:22px;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #dbeafe;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+                                <div>
+                                    <h3 style="margin:0 0 8px 0;font-size:18px;color:#0f172a;">智能识别生成</h3>
+                                    <div style="font-size:13px;color:#64748b;line-height:1.8;">上传表单图片、Word、PDF，或直接粘贴表单内容，系统会自动识别字段并生成表单 JSON。</div>
+                                </div>
+                                <div style="padding:8px 12px;border-radius:999px;background:#ffffff;border:1px solid #bfdbfe;font-size:12px;color:#2563eb;">适配 SmartCare EasyForm 风格 JSON</div>
+                            </div>
+                            <div style="margin-bottom:16px;padding:14px 16px;border-radius:16px;background:rgba(255,255,255,0.88);border:1px solid #dbeafe;">
+                                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                                    <div style="font-size:14px;font-weight:800;color:#0f172a;">生成策略说明</div>
+                                    <div style="font-size:11px;color:#64748b;">调试区会显示本次实际命中的 `generation_strategy`</div>
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;">
+                                    <div style="padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                        <div style="font-size:12px;font-weight:800;color:#1d4ed8;">reference</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.7;">命中 `表单/*.json` 本地参考，直接复用并做日期等小修正。</div>
+                                    </div>
+                                    <div style="padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                        <div style="font-size:12px;font-weight:800;color:#0f766e;">score_table</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.7;">识别评分矩阵，自动生成分组标题、评分选项、总分和风险等级。</div>
+                                    </div>
+                                    <div style="padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                        <div style="font-size:12px;font-weight:800;color:#c2410c;">text_table</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.7;">识别普通 Word 表格，先抽头部字段，再生成表格底板和自动填写位。</div>
+                                    </div>
+                                    <div style="padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                        <div style="font-size:12px;font-weight:800;color:#7c3aed;">semantic</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.7;">按标题、说明、字段、选项组做语义解析，适合记录单和普通结构化表单。</div>
+                                    </div>
+                                    <div style="padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                        <div style="font-size:12px;font-weight:800;color:#be185d;">ai</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#64748b;line-height:1.7;">当前面几条都不够稳定时才回退 AI，避免每张单子都做定制优化。</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                                <div>
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>上传表单文件</label>
+                                        <input type="file" id="fgSourceFile" class="form-control" accept=".png,.jpg,.jpeg,.bmp,.webp,.pdf,.doc,.docx,.txt,.md">
+                                    </div>
+                                    <div class="form-group" style="margin-bottom:12px;">
+                                        <label>或粘贴表单文字</label>
+                                        <textarea id="fgSourceText" rows="8" class="form-control" placeholder="例如：患者基本信息表、姓名、性别、年龄、住院号、诊断、手术日期……"></textarea>
+                                    </div>
+                                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                        <button class="btn btn-outline" onclick="FormGenerator.extractSourceText()">📄 先提取文本</button>
+                                        <button class="btn btn-primary" onclick="FormGenerator.generateFromDocument()">🤖 智能生成 JSON</button>
+                                    </div>
+                                    <div class="form-group" style="margin-top:12px;margin-bottom:0;">
+                                        <label>输出模式</label>
+                                        <select id="fgOutputMode" class="form-control" onchange="FormGenerator.onOutputModeChange()">
+                                            <option value="smartcare">SmartCare 完整 JSON</option>
+                                            <option value="generic">通用控件数组</option>
+                                            <option value="patient_only">仅病人信息组件</option>
+                                        </select>
+                                    </div>
+                                    <div id="fgSmartStatus" style="margin-top:10px;font-size:12px;color:var(--gray-500);"></div>
+                                </div>
+                                <div>
+                                    <div class="form-group" style="margin-bottom:0;">
+                                        <label>识别文本预览</label>
+                                        <textarea id="fgExtractedText" rows="12" class="form-control" placeholder="这里会显示从文件里提取出的文本，可手工修正后再生成 JSON。"></textarea>
+                                    </div>
+                                    <div id="fgLayoutInsights" style="margin-top:12px;padding:14px;border-radius:14px;background:#ffffff;border:1px solid #e2e8f0;display:none;"></div>
+                                    <div id="fgVisionInsights" style="margin-top:12px;padding:14px;border-radius:14px;background:#ffffff;border:1px solid #ddd6fe;display:none;"></div>
+                                    <div id="fgFieldInsights" style="margin-top:12px;padding:14px;border-radius:14px;background:#ffffff;border:1px solid #dbeafe;display:none;"></div>
+                                    <div id="fgDebugInfo" style="margin-top:12px;padding:14px;border-radius:14px;background:#0f172a;border:1px solid #1e293b;color:#cbd5e1;display:none;"></div>
+                                </div>
+                            </div>
+                        </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
                             <!-- Left: Config -->
                             <div>
@@ -2917,12 +2992,57 @@
                                 <div
                                     style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                                     <h3 style="font-size: 16px; color: var(--gray-800); margin: 0;">生成结果</h3>
-                                    <button class="btn btn-outline btn-xs" onclick="FormGenerator.copy()">📋
-                                        复制结果</button>
+                                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                        <button class="btn btn-outline btn-xs" onclick="FormGenerator.copy()">📋 复制结果</button>
+                                        <button class="btn btn-outline btn-xs" onclick="FormGenerator.exportCurrentResult()">💾 导出JSON</button>
+                                        <button class="btn btn-outline btn-xs" onclick="FormGenerator.compareWithReference()">🧪 对照入院.json</button>
+                                        <button class="btn btn-outline btn-xs" onclick="FormGenerator.applyReferenceFixes()">🛠 一键修正到参考</button>
+                                    </div>
                                 </div>
                                 <textarea id="fgResult" rows="20" class="form-control" readonly
                                     style="flex: 1; font-family: monospace; font-size: 11px; background: var(--gray-50);"></textarea>
                                 <div id="fgStatus" style="margin-top: 8px; font-size: 12px; color: var(--gray-500);">
+                                </div>
+                                <div id="fgComparePanel" style="display:none;margin-top:14px;padding:14px;border-radius:16px;background:#fff;border:1px solid #e2e8f0;"></div>
+                                <div style="margin-top:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                        <h3 style="font-size: 16px; color: var(--gray-800); margin: 0;">表单预览</h3>
+                                        <button class="btn btn-outline btn-xs" onclick="FormGenerator.renderPreview()">🔄 刷新预览</button>
+                                    </div>
+                                    <div style="margin-bottom:10px;font-size:12px;color:#64748b;line-height:1.7;">预览中带有“自动填写位”标记的控件，表示它们来自普通表格空白单元格的通用推断，可在下方工作台继续修改。</div>
+                                    <div id="fgPreview" style="min-height:280px;padding:18px;border-radius:16px;background:#ffffff;border:1px solid var(--gray-200);box-shadow:inset 0 1px 0 rgba(255,255,255,0.8);">
+                                        <div style="color:var(--gray-400);text-align:center;padding:40px 12px;">生成 JSON 后，这里会渲染一个可试填的表单预览。</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                        <h3 style="font-size: 16px; color: var(--gray-800); margin: 0;">字段编辑工作台</h3>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.refreshFieldEditor()">🔄 重新读取结果</button>
+                                            <button class="btn btn-primary btn-xs" onclick="FormGenerator.applyFieldEdits()">💾 应用修改并重建</button>
+                                        </div>
+                                    </div>
+                                    <div id="fgFieldEditor" style="min-height:220px;padding:16px;border-radius:16px;background:#ffffff;border:1px solid var(--gray-200);">
+                                        <div style="color:var(--gray-400);text-align:center;padding:36px 12px;">生成 SmartCare JSON 后，这里会出现可编辑的字段列表。</div>
+                                    </div>
+                                </div>
+                                <div style="margin-top:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                                        <h3 style="font-size: 16px; color: var(--gray-800); margin: 0;">表格单元格编辑</h3>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.autoFillTableCellsFromVision()">🪄 OCR回填单元格</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.autoFillHeadersFirst()">🧭 优先识别首列/表头</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.autoRecommendBindings()">🔍 推荐业务绑定</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.applyPatientTemplate()">🩺 套用病人信息模板</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.autoDetectTableRowRoles()">🧠 预判行类型</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.autoMarkDateCells()">📅 自动标记日期格</button>
+                                            <button class="btn btn-outline btn-xs" onclick="FormGenerator.refreshTableEditor()">🔄 重新读取表格</button>
+                                            <button class="btn btn-primary btn-xs" onclick="FormGenerator.applyTableEdits()">🧩 应用单元格修改</button>
+                                        </div>
+                                    </div>
+                                    <div id="fgTableEditor" style="min-height:220px;padding:16px;border-radius:16px;background:#ffffff;border:1px solid var(--gray-200);">
+                                        <div style="color:var(--gray-400);text-align:center;padding:36px 12px;">当结果包含 table 组件时，这里会展示可编辑的单元格网格。</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2949,9 +3069,11 @@
                             <select id="assetStatusFilter" class="form-select-sm" onchange="loadAssets()">
                                 <option value="">全部状态</option>
                                 <option value="在库">在库</option>
-                                <option value="现场已安装">现场已安装</option>
                                 <option value="在途">在途</option>
+                                <option value="借出">借出</option>
+                                <option value="现场已安装">现场已安装</option>
                                 <option value="返修中">返修中</option>
+                                <option value="已报废">已报废</option>
                             </select>
                         </div>
                     </div>
@@ -3390,6 +3512,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeModal('aiWorklogModal')">取消</button>
+                <button class="btn btn-outline" onclick="showAiOpsHistory()">🕘 查看历史</button>
                 <button class="btn btn-ai" id="btnAiParse" onclick="parseAiWorklog()">🚀 智能识别并填报</button>
             </div>
         </div>
@@ -3422,6 +3545,7 @@
                         <div style="color: #9ca3af; text-align: center; margin-top: 100px;">请从左侧选择一个事项进行生成</div>
                     </div>
                     <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-outline" style="flex: 1;" onclick="showAiOpsHistory()">🕘 历史</button>
                         <button class="btn btn-outline" style="flex: 1;" onclick="copyChaserContent()">📋 复制内容</button>
                         <button class="btn btn-primary" style="flex: 1;" onclick="sendMockChaser()">📤 模拟发送</button>
                     </div>
@@ -3565,9 +3689,24 @@
             </div>
         </div>
     </div>
-    </div>
+            </div>
 
-    <!-- PMO 决策舱 (Portfolio Board) - Premium Redesign -->
+            <div class="modal" id="approvalDetailModal">
+                <div class="modal-content modal-large">
+                    <div class="modal-header">
+                        <h3>📋 审批详情</h3>
+                        <button class="modal-close" onclick="closeModal('approvalDetailModal')">&times;</button>
+                    </div>
+                    <div class="modal-body" id="approvalDetailContent">
+                        <div class="empty-state"><p>加载中...</p></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-outline" onclick="closeModal('approvalDetailModal')">关闭</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PMO 决策舱 (Portfolio Board) - Premium Redesign -->
     <div class="modal" id="pmoModal" style="backdrop-filter: blur(12px); background: rgba(2, 6, 23, 0.6);">
         <div class="modal-content"
             style="max-width: 1100px; border-radius: 28px; border: 1px solid rgba(255,255,255,0.08); overflow: hidden; box-shadow: 0 40px 80px -15px rgba(0, 0, 0, 0.7); background: #ffffff;">
@@ -3904,9 +4043,12 @@
                     <div style="font-size: 13px; color: var(--gray-500);">
                         仅管理员可见。可禁用违规账号或重置密码。
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="loadGlobalUsers()">
-                        <span class="icon">🔄</span> 刷新列表
-                    </button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="showRoleMatrixModal()">🛡️ 权限矩阵</button>
+                        <button class="btn btn-secondary btn-sm" onclick="loadGlobalUsers()">
+                            <span class="icon">🔄</span> 刷新列表
+                        </button>
+                    </div>
                 </div>
 
                 <div class="table-container" style="max-height: 500px; overflow-y: auto;">
@@ -4113,6 +4255,13 @@
                             <option value="emr_sync">EMR: 病历同步</option>
                             <option value="排班">手术排班: 排班数据采集</option>
                         </select>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px;flex-wrap:wrap;">
+                            <div id="interfaceCategoryHint" style="font-size:12px;color:#64748b;">当前项目类型: 未知</div>
+                            <div style="display:flex;gap:6px;">
+                                <button type="button" class="btn btn-outline btn-xs" onclick="markCurrentTemplateFeedback(true)">👍 推荐有效</button>
+                                <button type="button" class="btn btn-outline btn-xs" onclick="markCurrentTemplateFeedback(false)">👎 待优化</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>系统名称</label>
@@ -4400,6 +4549,7 @@
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="refreshRiskAnalysis()">🔄 重新评估</button>
                 <button class="btn btn-primary" onclick="callAiAnalysis(currentProjectId)">🤖 完整诊断</button>
+                <button class="btn btn-outline" onclick="showAiAnalysisHistory()">🕘 分析历史</button>
                 <button class="btn btn-outline" onclick="closeModal('riskModal')">关闭</button>
             </div>
         </div>
@@ -4432,6 +4582,7 @@
                 <button class="btn btn-primary" onclick="generateWeeklyReport(currentProjectId)">📋 周报</button>
                 <button class="btn btn-success" onclick="exportProjectReport(currentProjectId)">📤 导出Json</button>
                 <button class="btn btn-info" onclick="exportProjectPDF(currentProjectId)">📄 导出PDF</button>
+                <button class="btn btn-outline" onclick="showAiAnalysisHistory()">🕘 历史版本</button>
                 <button class="btn btn-outline" onclick="showBurndownChart(currentProjectId)">📈 燃尽图</button>
                 <button class="btn btn-outline" onclick="copyReportContent('aiContent')">📋 复制</button>
                 <button class="btn btn-outline" onclick="closeModal('aiModal')">关闭</button>
@@ -4526,6 +4677,10 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" onclick="refreshWeeklyReport()">🔄 重新生成</button>
+                <button class="btn btn-outline" onclick="exportCurrentReport('html')">🌐 导出 HTML</button>
+                <button class="btn btn-outline" onclick="exportCurrentReport('markdown')">📝 导出 Markdown</button>
+                <button class="btn btn-outline" onclick="exportCurrentReport('txt')">📄 导出 TXT</button>
+                <button class="btn btn-outline" onclick="copyCurrentReportContent()">📋 复制内容</button>
                 <button class="btn btn-outline" onclick="closeModal('reportModal')">关闭</button>
             </div>
         </div>
@@ -4538,7 +4693,7 @@
     <div class="modal" id="communicationModal">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
-                <h3>💬 添加沟通记录</h3>
+                <h3 id="communicationModalTitle">💬 添加沟通记录</h3>
                 <button class="modal-close" onclick="closeModal('communicationModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -4560,25 +4715,57 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>关联问题 (可选)</label>
+                    <select id="commIssueSelect" class="form-control">
+                        <option value="">无关联问题</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>沟通摘要</label>
                     <textarea id="commSummary" class="form-control" rows="3" placeholder="记录沟通要点..."></textarea>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeModal('communicationModal')">取消</button>
-                <button class="btn btn-primary" onclick="saveCommunication()">保存</button>
+                <button class="btn btn-primary" id="saveCommunicationBtn" onclick="saveCommunication()">保存</button>
             </div>
         </div>
     </div>
 
     <!-- 提醒模态框 -->
-    <div class="modal" id="notificationsModal">
-        <div class="modal-content modal-large">
-            <div class="modal-header">
-                <h3>🔔 消息提醒</h3>
-                <button class="modal-close" onclick="closeModal('notificationsModal')">&times;</button>
+        <div class="modal" id="notificationsModal">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h3>🔔 消息提醒</h3>
+                    <button class="modal-close" onclick="closeModal('notificationsModal')">&times;</button>
+                </div>
+            <div class="modal-body">
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:16px;">
+                    <div class="form-group" style="margin-bottom:0;min-width:180px;">
+                        <label>类型</label>
+                        <select id="notificationTypeFilter" onchange="showNotificationsModal()">
+                            <option value="">全部类型</option>
+                            <option value="danger">高危</option>
+                            <option value="warning">预警</option>
+                            <option value="info">信息</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;min-width:180px;">
+                        <label>状态</label>
+                        <select id="notificationReadFilter" onchange="showNotificationsModal()">
+                            <option value="">全部状态</option>
+                            <option value="unread">未读</option>
+                            <option value="read">已读</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
+                        <label>搜索</label>
+                        <input id="notificationKeyword" type="text" placeholder="搜索标题 / 内容 / 项目" oninput="showNotificationsModal()">
+                    </div>
+                </div>
+                <div id="notificationSummary" style="margin-bottom:12px;font-size:12px;color:#64748b;"></div>
+                <div id="notificationsList"></div>
             </div>
-            <div class="modal-body" id="notificationsList"></div>
             <div class="modal-footer">
                 <button class="btn btn-outline btn-sm" onclick="checkReminders()">🔄 检查提醒</button>
                 <button class="btn btn-success btn-sm" onclick="markAllNotificationsRead()">✓ 一键已读</button>
@@ -4785,9 +4972,10 @@
                             <label>状态</label>
                             <select id="assetStatus">
                                 <option value="在库">在库</option>
+                                <option value="在途">在途</option>
                                 <option value="借出">借出</option>
-                                <option value="现场运行">现场运行</option>
-                                <option value="维修中">维修中</option>
+                                <option value="现场已安装">现场已安装</option>
+                                <option value="返修中">返修中</option>
                                 <option value="已报废">已报废</option>
                             </select>
                         </div>
@@ -4970,6 +5158,85 @@
                 <button class="btn btn-outline" onclick="copyCurrentViewLink()">🔗 复制当前视图链接</button>
                 <button class="btn btn-outline" onclick="loadReminderDigest(); switchReminderTab(getReminderTabFromUrl())">🔄 刷新</button>
                 <button class="btn btn-outline" onclick="closeModal('reminderModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 经营月报录入模态框 -->
+    <div class="modal" id="businessMetricModal">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #0f766e, #0ea5a4); color: white;">
+                <h3 style="display:flex;align-items:center;gap:10px;">
+                    <span style="font-size:24px;">📊</span> 经营月报录入
+                </h3>
+                <button class="modal-close" onclick="closeModal('businessMetricModal')"
+                    style="color:white;opacity:0.8;background:transparent;border:none;font-size:24px;cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <form id="businessMetricForm" onsubmit="submitBusinessMetric(event)">
+                    <input type="hidden" id="businessMetricProjectId">
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">项目名称</label>
+                        <input type="text" id="businessMetricProjectName" readonly
+                            style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;background:#f8fafc;">
+                    </div>
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">统计月份</label>
+                            <input type="month" id="businessMetricMonth" required
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">当月产值</label>
+                            <input type="number" id="businessOutputValue" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">当月回款</label>
+                            <input type="number" id="businessCollectedAmount" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">直接成本</label>
+                            <input type="number" id="businessDirectCost" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">人力成本</label>
+                            <input type="number" id="businessLaborCost" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">税费</label>
+                            <input type="number" id="businessTaxAmount" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                    </div>
+                    <div class="form-row" style="margin-bottom:12px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">管理成本</label>
+                            <input type="number" id="businessManagementCost" step="0.01" min="0" placeholder="0.00"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="display:block;margin-bottom:5px;font-size:13px;font-weight:600;">备注</label>
+                            <input type="text" id="businessMetricNotes" placeholder="本月经营说明"
+                                style="width:100%;padding:10px;border:1px solid var(--gray-300);border-radius:6px;">
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:flex-end;gap:10px;">
+                        <button type="button" class="btn btn-outline" onclick="closeModal('businessMetricModal')">取消</button>
+                        <button type="submit" class="btn btn-success">保存月报</button>
+                    </div>
+                </form>
+                <div style="margin-top:18px; padding-top:18px; border-top:1px solid var(--gray-200);">
+                    <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--gray-700);">历史月报</div>
+                    <div id="businessMetricHistory" style="max-height:260px;overflow:auto;color:var(--gray-600);font-size:13px;">暂无数据</div>
+                </div>
             </div>
         </div>
     </div>
@@ -5172,6 +5439,9 @@
         <div id="adminSettingsBtn" style="display:none; margin-bottom:8px;">
             <button class="btn btn-outline btn-full" onclick="adminSettings.open()">🛠️ 系统配置</button>
         </div>
+        <div id="userManagementBtn" style="display:none; margin-bottom:8px;">
+            <button class="btn btn-outline btn-full" onclick="openUserManagementModal()">👥 用户与权限</button>
+        </div>
         <button class="btn btn-outline btn-full" onclick="doLogout()">退出登录</button>
     </div>
 
@@ -5200,6 +5470,7 @@
     <script src='/api/force_static/js/project_detail_actions_hub.js?v=1'></script>
     <script src='/api/force_static/js/resource_hub.js?v=1'></script>
     <script src='/api/force_static/js/financial_hub.js?v=1'></script>
+    <script src='/api/force_static/js/business_hub.js?v=1'></script>
     <script src='/api/force_static/js/map_hub.js?v=1'></script>
     <script src='/api/force_static/js/bootstrap_hub.js?v=1'></script>
     <script src='/api/force_static/js/kb_management.js?v=2'></script>
@@ -5207,7 +5478,7 @@
     <script src='/api/force_static/js/daily_report.js?v=2'></script>
     <script src='/api/force_static/js/standup.js?v=2'></script>
     <script src='/api/force_static/js/admin_settings.js?v=5'></script>
-    <script src='/api/force_static/js/form_generator.js?v=3'></script>
+    <script src='/api/force_static/js/form_generator.js?v=31'></script>
 
     <!-- Service Worker Registration -->
     <script>
@@ -5307,6 +5578,13 @@
                         </div>
                     </div>
 
+                    <div class="report-section-paper" style="margin-bottom:30px;">
+                        <h3
+                            style="border-bottom:2px solid #3b82f6; padding-bottom:8px; margin-bottom:16px; font-size:18px;">
+                            四、 经营风险提示</h3>
+                        <div id="periodIssues" style="font-size:14px; line-height:1.7; color:#334155;"></div>
+                    </div>
+
                     <div
                         style="margin-top:60px; border-top:1px solid #e2e8f0; padding-top:20px; color:#94a3b8; font-size:12px; text-align:center;">
                         此报告由 ICU-PM 智能管控平台自动生成 | 数据截至: <span id="reportPrintDate"></span>
@@ -5374,17 +5652,120 @@
     <!-- 会议助理 (纪要提取) 弹窗 -->
     <div id="meetingAssistantModal" class="modal">
         <div class="modal-content modal-lg">
-            <div class="modal-header">
-                <h3>🎙️ AI 会议助理 (纪要与行动提取)</h3>
-                <button class="modal-close" onclick="closeModal('meetingAssistantModal')">&times;</button>
+            <div class="modal-header"
+                style="background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 55%,#06b6d4 100%);color:white;border:none;padding:22px 26px;">
+                <div style="display:flex;align-items:center;gap:14px;">
+                    <div
+                        style="width:46px;height:46px;border-radius:16px;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:22px;backdrop-filter:blur(8px);">
+                        🎙️</div>
+                    <div>
+                        <h3 style="margin:0;color:white;font-size:22px;">AI 会议助手</h3>
+                        <div style="margin-top:4px;font-size:13px;opacity:0.82;">提取纪要、待办与风险，并可一键沉淀到项目沟通记录</div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeModal('meetingAssistantModal')"
+                    style="background:rgba(255,255,255,0.16);color:white;border:none;width:42px;height:42px;border-radius:14px;">&times;</button>
             </div>
-            <div class="modal-body">
-                <textarea id="meetingTranscript" placeholder="粘贴会议转写文本或速记内容..."
-                    style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
-                <button class="btn btn-primary" onclick="extractMeetingActions()">提取纪要与待办</button>
-                <div id="meetingResult" class="markdown-content"
-                    style="margin-top:20px; display:none; background:#f0f9ff; padding:20px; border-radius:12px; border:1px solid #bae6fd;">
-                    <!-- 结果填充 -->
+            <div class="modal-body"
+                style="background:linear-gradient(180deg,#f8fbff 0%,#f8fafc 100%);padding:24px;">
+                <div style="display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,0.95fr);gap:18px;">
+                    <div
+                        style="background:white;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 12px 35px rgba(15,23,42,0.06);padding:20px;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;">
+                            <div>
+                                <div style="font-size:16px;font-weight:800;color:#0f172a;">会议原文</div>
+                                <div style="margin-top:4px;font-size:13px;color:#64748b;">支持会议转写、聊天速记、录音整理稿。建议保留说话顺序和责任人姓名。</div>
+                            </div>
+                            <div
+                                style="padding:8px 10px;border-radius:12px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:700;">AI 提取</div>
+                        </div>
+                        <textarea id="meetingTranscript" placeholder="粘贴会议转写文本、需求讨论记录或客户沟通速记..."
+                            style="width:100%;height:260px;padding:16px 18px;border:1px solid #cbd5e1;border-radius:16px;font-family:inherit;font-size:14px;line-height:1.7;background:#fcfdff;resize:vertical;"></textarea>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px;">
+                            <button class="btn btn-primary" onclick="extractMeetingActions()"
+                                style="background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;box-shadow:0 10px 24px rgba(37,99,235,0.25);">提取纪要与待办</button>
+                            <button class="btn btn-outline" onclick="clearMeetingAssistant()"
+                                style="border-color:#cbd5e1;color:#475569;background:white;">清空内容</button>
+                            <div style="font-size:12px;color:#94a3b8;">提取后可直接保存到项目沟通记录</div>
+                        </div>
+                    </div>
+                    <div
+                        style="background:white;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 12px 35px rgba(15,23,42,0.06);padding:20px;display:flex;flex-direction:column;min-height:420px;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;">
+                            <div>
+                                <div style="font-size:16px;font-weight:800;color:#0f172a;">提取结果</div>
+                                <div style="margin-top:4px;font-size:13px;color:#64748b;">纪要摘要、待办与风险会分区展示，方便继续处理。</div>
+                            </div>
+                            <div id="meetingResultMeta"
+                                style="display:none;padding:8px 10px;border-radius:12px;background:#ecfeff;color:#0f766e;font-size:12px;font-weight:700;">已生成</div>
+                        </div>
+                        <div id="meetingResultEmpty"
+                            style="flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #cbd5e1;border-radius:18px;background:radial-gradient(circle at top,#eff6ff 0%,#ffffff 70%);padding:28px;text-align:center;color:#64748b;">
+                            <div>
+                                <div style="font-size:38px;margin-bottom:10px;">🗂️</div>
+                                <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:8px;">提取结果会显示在这里</div>
+                                <div style="font-size:13px;line-height:1.8;">建议结果生成后直接保存为沟通记录，后续还能继续做 AI 沟通分析。</div>
+                            </div>
+                        </div>
+                        <div id="meetingResultActions" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
+                            <button class="btn btn-primary btn-sm" onclick="showMeetingSaveDraftPanel()"
+                                style="background:linear-gradient(135deg,#0f766e,#14b8a6);border:none;">编辑后保存到沟通记录</button>
+                            <button class="btn btn-outline btn-sm" onclick="copyMeetingAssistantResult()">复制 Markdown</button>
+                        </div>
+                        <div id="meetingSaveDraftPanel" style="display:none;margin-bottom:14px;padding:16px;border-radius:16px;background:linear-gradient(180deg,#f8fffb 0%,#ffffff 100%);border:1px solid #cceee3;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
+                                <div>
+                                    <div style="font-size:15px;font-weight:800;color:#0f172a;">保存前确认</div>
+                                    <div style="margin-top:4px;font-size:12px;color:#64748b;">你可以补充联系人、调整日期和修改摘要，再保存到沟通记录。</div>
+                                </div>
+                                <button class="btn btn-outline btn-sm" onclick="hideMeetingSaveDraftPanel()">收起</button>
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px;">
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">联系人</label>
+                                    <input id="meetingSaveContactPerson" type="text" placeholder="如：张主任 / 项目组会议" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                                </div>
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">沟通日期</label>
+                                    <input id="meetingSaveDate" type="date" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:220px minmax(0,1fr);gap:12px;margin-bottom:12px;">
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">沟通方式</label>
+                                    <select id="meetingSaveMethod" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:white;">
+                                        <option value="会议">会议</option>
+                                        <option value="现场会议">现场会议</option>
+                                        <option value="电话会议">电话会议</option>
+                                        <option value="视频会议">视频会议</option>
+                                        <option value="微信">微信</option>
+                                        <option value="电话">电话</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">摘要标题</label>
+                                    <input id="meetingSaveTitle" type="text" placeholder="如：AI会议助手提取纪要" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;">
+                                </div>
+                            </div>
+                            <div style="margin-bottom:12px;">
+                                <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">关联问题</label>
+                                <select id="meetingSaveIssueSelect" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:12px;background:white;">
+                                    <option value="">不关联问题</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display:block;font-size:12px;color:#64748b;margin-bottom:6px;">保存摘要</label>
+                                <textarea id="meetingSaveSummary" rows="10" placeholder="可修改将要写入沟通记录的内容" style="width:100%;padding:12px 14px;border:1px solid #cbd5e1;border-radius:14px;line-height:1.7;font-family:inherit;resize:vertical;"></textarea>
+                            </div>
+                            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:12px;">
+                                <button class="btn btn-outline btn-sm" onclick="prefillMeetingSaveDraft(true)">重置为AI提取内容</button>
+                                <button class="btn btn-primary btn-sm" id="meetingSaveDraftBtn" onclick="saveMeetingToCommunication()" style="background:linear-gradient(135deg,#0f766e,#14b8a6);border:none;">确认保存到沟通记录</button>
+                            </div>
+                        </div>
+                        <div id="meetingResult" class="markdown-content" style="display:none;overflow:auto;">
+                            <!-- 结果填充 -->
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -5404,7 +5785,15 @@
                     style="width:100%; height:150px; padding:12px; border:1px solid #cbd5e1; border-radius:8px; margin-bottom:16px; font-family:inherit;"></textarea>
                 <button class="btn btn-primary" onclick="parseMultiLogs()">智能拆解并导入</button>
                 <div id="multiLogPreview" style="margin-top:20px; display:none;">
-                    <h4 style="font-size:14px; margin-bottom:12px;">提取到的条目 (预览)</h4>
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                        <h4 style="font-size:14px; margin:0;">提取到的条目 (预览)</h4>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-outline btn-sm" onclick="toggleAllParsedMultiLogs(true)">全选</button>
+                            <button class="btn btn-outline btn-sm" onclick="toggleAllParsedMultiLogs(false)">清空</button>
+                            <button class="btn btn-success btn-sm" id="importParsedLogsBtn" onclick="importParsedMultiLogs()">导入选中日志</button>
+                        </div>
+                    </div>
+                    <div id="multiLogStatus" style="display:none;margin-bottom:12px;font-size:12px;"></div>
                     <div id="multiLogItems"
                         style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
                         <!-- 预览条目 -->

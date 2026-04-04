@@ -1,5 +1,59 @@
 // Project detail editing helpers extracted from main.js
 
+function switchTab(tabEl, tabName) {
+    currentActiveTab = tabName;
+
+    const root = document.getElementById('projectDetailView');
+    if (!root) return;
+
+    root.querySelectorAll('.tabs .tab').forEach(tab => tab.classList.remove('active'));
+    if (tabEl) tabEl.classList.add('active');
+
+    root.querySelectorAll('.tab-content').forEach(panel => panel.classList.remove('active'));
+    const target = document.getElementById(`tab-${tabName}`);
+    if (target) target.classList.add('active');
+
+    if (!currentProjectId) return;
+
+    try {
+        if (tabName === 'pulse' && typeof renderBurndownInDetail === 'function') {
+            renderBurndownInDetail(currentProjectId);
+        } else if (tabName === 'communications' && typeof loadCommunications === 'function') {
+            loadCommunications(currentProjectId);
+        } else if (tabName === 'flow' && typeof renderInterfaceFlow === 'function') {
+            renderInterfaceFlow();
+        } else if (tabName === 'standup' && typeof loadStandupData === 'function') {
+            const dateStr = document.getElementById('standupDatePicker')?.value || '';
+            loadStandupData(currentProjectId, dateStr);
+        } else if (tabName === 'deviation' && typeof loadDeviationAnalysis === 'function') {
+            loadDeviationAnalysis(currentProjectId);
+        } else if (tabName === 'financials' && typeof loadProjectFinancials === 'function') {
+            loadProjectFinancials(currentProjectId);
+        } else if (tabName === 'dependencies' && typeof loadDependencies === 'function') {
+            loadDependencies(currentProjectId);
+        }
+    } catch (e) {
+        console.error('switchTab loader failed:', tabName, e);
+    }
+}
+
+function renderProjectDetailSkeleton() {
+    const container = document.getElementById('projectDetailView');
+    if (!container) return;
+    container.innerHTML = `
+        <div class="detail-header" style="margin-bottom:20px;">
+            <div>
+                <div style="width:260px;height:32px;background:#e2e8f0;border-radius:10px;margin-bottom:10px;"></div>
+                <div style="width:420px;height:14px;background:#f1f5f9;border-radius:8px;"></div>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:20px;">
+            ${Array.from({ length: 5 }).map(() => '<div style="height:96px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 10px 30px rgba(15,23,42,0.05);"></div>').join('')}
+        </div>
+        <div class="panel" style="margin-bottom:20px;"><div class="panel-body"><div class="loading-spinner">正在加载项目详情...</div></div></div>
+    `;
+}
+
 async function loadProjectDetail(projectId, preserveTab = false) {
     const previousTab = currentActiveTab;
     currentProjectId = projectId;
@@ -7,51 +61,127 @@ async function loadProjectDetail(projectId, preserveTab = false) {
 
     hideAllViews();
     document.getElementById('projectDetailView').style.display = 'block';
+    renderProjectDetailSkeleton();
 
-    currentProject = await api.get(`/projects/${projectId}`);
-    renderProjectDetail(currentProject);
-
-    if (currentProject.stages && currentProject.stages.length > 0) {
-        const activeStage = currentProject.stages.find(s => s.status === '进行中') || currentProject.stages.find(s => s.status === '待开始');
-        if (activeStage && typeof loadContextualRecommendations === 'function') {
-            loadContextualRecommendations(activeStage.stage_name);
+    try {
+        currentProject = await api.get(`/projects/${projectId}`);
+        const cached = allProjects.find(project => Number(project.id) === Number(projectId));
+        if (cached) {
+            cached.progress = currentProject.progress;
+            cached.status = currentProject.status;
         }
-    }
+        renderProjectList();
+        renderProjectDetail(currentProject);
 
-    refreshAiDecisionCenter(projectId);
-    loadProjectPrediction(projectId);
-    loadProjectSlaCountdown(projectId);
-    loadSimilarProjects(projectId);
-    checkMilestoneCelebrations(projectId);
-    loadStageBaselines();
-
-    if (preserveTab && previousTab) {
-        setTimeout(() => {
-            const tabs = document.querySelectorAll('#projectDetailView .tabs .tab');
-            let found = false;
-            tabs.forEach(tab => {
-                const onclickStr = tab.getAttribute('onclick') || '';
-                if (onclickStr.includes(`'${previousTab}'`)) {
-                    tab.click();
-                    found = true;
-                }
-            });
-
-            if (!found && previousTab !== 'gantt') {
-                const tabMap = {
-                    'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
-                    'flow': 5, 'devices': 6, 'issues': 7, 'communications': 8, 'departures': 9,
-                    'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13, 'acceptance': 14,
-                    'satisfaction': 15, 'dependencies': 16, 'standup': 17, 'deviation': 18,
-                    'interfaceSpec': 19, 'financials': 20
-                };
-                const tabIndex = tabMap[previousTab];
-                if (tabIndex !== undefined && tabs[tabIndex]) {
-                    tabs[tabIndex].click();
-                }
+        if (currentProject.stages && currentProject.stages.length > 0) {
+            const activeStage = currentProject.stages.find(s => s.status === '进行中') || currentProject.stages.find(s => s.status === '待开始');
+            if (activeStage && typeof loadContextualRecommendations === 'function') {
+                loadContextualRecommendations(activeStage.stage_name);
             }
-        }, 100);
+        }
+
+        refreshAiDecisionCenter(projectId);
+        loadProjectPrediction(projectId);
+        loadProjectSlaCountdown(projectId);
+        loadSimilarProjects(projectId);
+        checkMilestoneCelebrations(projectId);
+        loadStageBaselines();
+
+        if (preserveTab && previousTab) {
+            setTimeout(() => {
+                const tabs = document.querySelectorAll('#projectDetailView .tabs .tab');
+                let found = false;
+                tabs.forEach(tab => {
+                    const onclickStr = tab.getAttribute('onclick') || '';
+                    if (onclickStr.includes(`'${previousTab}'`)) {
+                        tab.click();
+                        found = true;
+                    }
+                });
+
+                if (!found && previousTab !== 'gantt') {
+                    const tabMap = {
+                        'gantt': 0, 'pulse': 1, 'stages': 2, 'milestones': 3, 'team': 4,
+                        'flow': 5, 'devices': 6, 'issues': 7, 'communications': 8, 'departures': 9,
+                        'worklogs': 10, 'documents': 11, 'expenses': 12, 'changes': 13, 'acceptance': 14,
+                        'satisfaction': 15, 'dependencies': 16, 'standup': 17, 'deviation': 18,
+                        'interfaceSpec': 19, 'financials': 20
+                    };
+                    const tabIndex = tabMap[previousTab];
+                    if (tabIndex !== undefined && tabs[tabIndex]) {
+                        tabs[tabIndex].click();
+                    }
+                }
+            }, 100);
+        }
+    } catch (e) {
+        const container = document.getElementById('projectDetailView');
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">⚠️</div>
+                    <div class="empty-state-text">项目详情加载失败</div>
+                    <div class="empty-state-hint">${e.message || '未知错误'}</div>
+                </div>
+            `;
+        }
+        console.error('loadProjectDetail failed:', e);
     }
+}
+
+function refreshProjectDetailSections(sections = []) {
+    if (!currentProject || !Array.isArray(sections) || sections.length === 0) return;
+
+    if (sections.includes('stages')) {
+        const el = document.querySelector('#tab-stages .panel-body');
+        if (el) el.innerHTML = renderStages(currentProject.stages || []);
+    }
+
+    if (sections.includes('milestones')) {
+        const el = document.querySelector('#tab-milestones .panel-body');
+        if (el) el.innerHTML = renderMilestones(currentProject.milestones || []);
+    }
+
+    if (sections.includes('members')) {
+        const el = document.querySelector('#tab-team .panel:nth-of-type(1) .panel-body');
+        if (el) el.innerHTML = renderMembers(currentProject.members || []);
+    }
+
+    if (sections.includes('contacts')) {
+        const el = document.querySelector('#tab-team .panel:nth-of-type(2) .panel-body');
+        if (el) el.innerHTML = renderContacts(currentProject.contacts || []);
+    }
+
+    if (sections.includes('interfaces')) {
+        const el = document.querySelector('#tab-interfaces .panel-body');
+        if (el) el.innerHTML = renderInterfaces(currentProject.interfaces || []);
+    }
+
+    if (sections.includes('issues')) {
+        const el = document.querySelector('#tab-issues .panel-body');
+        if (el) el.innerHTML = renderIssues(currentProject.issues || []);
+    }
+}
+
+async function syncCurrentProjectDetailState(sections = []) {
+    if (!currentProjectId) return null;
+    const project = await api.get(`/projects/${currentProjectId}`);
+    currentProject = project;
+
+    if (Array.isArray(allProjects)) {
+        const cached = allProjects.find(item => Number(item.id) === Number(currentProjectId));
+        if (cached) {
+            cached.progress = project.progress;
+            cached.status = project.status;
+        }
+        renderProjectList();
+    }
+
+    if (sections.length) {
+        refreshProjectDetailSections(sections);
+    }
+
+    return project;
 }
 
 // Risk actions moved to static/js/project_detail_actions_hub.js

@@ -175,6 +175,10 @@ class ProjectService:
             projects = []
             for row in rows:
                 p_dict = dict(row)
+                try:
+                    stored_progress = int(round(float(p_dict.get('progress') or 0)))
+                except Exception:
+                    stored_progress = 0
                 # 性能优化：不再在列表循环中执行昂贵的 AI 风险分析
                 # 风险分改为从 projects 表中读取缓存值
                 # p_dict['risk_score'] = p_dict.get('risk_score', 0) 
@@ -196,7 +200,26 @@ class ProjectService:
                 progress_row = conn.execute(sql_pr, (True, p_dict['id'])).fetchone()
                 total = progress_row['total'] if progress_row['total'] else 0
                 done = progress_row['done'] if progress_row['done'] else 0
-                p_dict['progress'] = round(done / total * 100) if total > 0 else 0
+
+                sql_stage_progress = DatabasePool.format_sql('''
+                    SELECT COUNT(*) as stage_count, AVG(COALESCE(progress, 0)) as avg_progress
+                    FROM project_stages
+                    WHERE project_id = ?
+                ''')
+                stage_progress_row = conn.execute(sql_stage_progress, (p_dict['id'],)).fetchone()
+                stage_count = stage_progress_row['stage_count'] if stage_progress_row and stage_progress_row['stage_count'] else 0
+                stage_avg_progress = round(float(stage_progress_row['avg_progress'] or 0)) if stage_progress_row else 0
+
+                if total > 0:
+                    task_progress = round(done / total * 100)
+                    if task_progress == 0:
+                        p_dict['progress'] = max(stored_progress, stage_avg_progress)
+                    else:
+                        p_dict['progress'] = task_progress
+                elif stage_count > 0:
+                    p_dict['progress'] = max(stored_progress, stage_avg_progress)
+                else:
+                    p_dict['progress'] = stored_progress
                 
                 # 获取风险分析内容 (从数据库)
                 p_dict['risk_analysis'] = p_dict.get('risk_analysis', '')
@@ -319,7 +342,7 @@ class ProjectService:
             sql_sel = DatabasePool.format_sql('SELECT * FROM milestones WHERE id = ?')
             m = conn.execute(sql_sel, (mid,)).fetchone()
             if not m: return False
-            new_status = 0 if m['is_completed'] else 1
+            new_status = (not bool(m['is_completed'])) if DatabasePool.is_postgres() else (0 if m['is_completed'] else 1)
             completed_date = datetime.now().strftime('%Y-%m-%d') if new_status else None
             sql_upd = DatabasePool.format_sql('UPDATE milestones SET is_completed = ?, completed_date = ? WHERE id = ?')
             conn.execute(sql_upd, (new_status, completed_date, mid))
@@ -476,7 +499,7 @@ class ProjectService:
             
             project_id = task['project_id']
             stage_id = task['stage_id']
-            new_status = 0 if task['is_completed'] else 1
+            new_status = (not bool(task['is_completed'])) if DatabasePool.is_postgres() else (0 if task['is_completed'] else 1)
             today = datetime.now().strftime('%Y-%m-%d')
             completed_date = today if new_status else None
             
@@ -860,8 +883,8 @@ class ProjectService:
             
             for task_name in task_list:
                 if isinstance(task_name, str) and task_name.strip():
-                    sql_tk = DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name, is_completed) VALUES (?, ?, 0)')
-                    conn.execute(sql_tk, (stage_id, task_name.strip()))
+                    sql_tk = DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name, is_completed) VALUES (?, ?, ?)')
+                    conn.execute(sql_tk, (stage_id, task_name.strip(), False if DatabasePool.is_postgres() else 0))
             
             # 触发状态更新
             ProjectService._update_project_auto_status(project_id, conn)
@@ -894,6 +917,11 @@ class ProjectService:
     def get_geo_stats():
         """获取地理分布统计数据 - 采用动态 API 推断"""
         with DatabasePool.get_connection() as conn:
+            def normalize_region_name(value):
+                if not value:
+                    return ''
+                return str(value).strip().replace('省', '').replace('市', '').replace('自治区', '').replace('特别行政区', '')
+
             # 1. Project stats by province
             sql = DatabasePool.format_sql("SELECT id, province, city, hospital_name, progress, project_name FROM projects WHERE status != '已终止'")
             all_projects = conn.execute(sql).fetchall()
@@ -901,24 +929,42 @@ class ProjectService:
             geo_map = {} # province -> {count, progress_sum, projects}
             
             for p in all_projects:
-                province = p['province']
-                city = p['city']
+                province = normalize_region_name(p['province'])
+                city = normalize_region_name(p['city'])
                 
                 # 如果省份或城市缺失，尝试动态解析
                 if not province or not city:
-                    # 组合详细名称以供解析
-                    full_name = (p['hospital_name'] or p['project_name'] or "").strip()
-                    geo_details = geo_service.resolve_address_details(full_name)
-                    
+                    candidates = [
+                        (p['hospital_name'] or '').strip(),
+                        (p['project_name'] or '').strip(),
+                        city
+                    ]
+                    geo_details = None
+                    for candidate in candidates:
+                        if not candidate:
+                            continue
+                        geo_details = geo_service.resolve_address_details(candidate)
+                        if geo_details:
+                            break
+
                     if geo_details:
-                        province = province or geo_details.get('province')
-                        city = city or geo_details.get('city')
-                        
-                        # 只有在解析成功且原先缺失时才写回数据库，提升后续性能
-                        try:
-                            sql_up_p = DatabasePool.format_sql('UPDATE projects SET province = ?, city = ? WHERE id = ?')
-                            conn.execute(sql_up_p, (province, city, p['id']))
-                        except: pass
+                        province = province or normalize_region_name(geo_details.get('province'))
+                        city = city or normalize_region_name(geo_details.get('city'))
+
+                # 如果只有城市，还尝试由城市反推省份
+                if not province and city:
+                    city_details = geo_service.resolve_address_details(city)
+                    if city_details:
+                        province = normalize_region_name(city_details.get('province'))
+                        city = city or normalize_region_name(city_details.get('city'))
+
+                # 尝试把解析结果写回数据库，提升后续性能
+                if province or city:
+                    try:
+                        sql_up_p = DatabasePool.format_sql('UPDATE projects SET province = ?, city = ? WHERE id = ?')
+                        conn.execute(sql_up_p, (province or p['province'], city or p['city'], p['id']))
+                    except Exception:
+                        pass
                 
                 if not province: province = '未知'
                 
@@ -942,13 +988,14 @@ class ProjectService:
             # 2. Member locations with workload assessment
             members = []
             sql_mems = DatabasePool.format_sql('''
-                SELECT m.name, m.role, m.lng, m.lat,
+                SELECT m.id, m.name, m.role, m.lng, m.lat,
+                       m.current_city as member_city,
                        CASE 
                            WHEN m.current_city IS NOT NULL AND m.current_city != '' THEN m.current_city 
                            WHEN p.city IS NOT NULL AND p.city != '' THEN p.city 
                            ELSE p.hospital_name 
                        END as current_city,
-                       p.project_name,
+                       p.project_name, p.city as project_city, p.province as project_province, p.hospital_name,
                        (SELECT COUNT(DISTINCT project_id) FROM project_members 
                         WHERE name = m.name AND status = '在岗') as project_count,
                        (SELECT COUNT(*) FROM tasks t 
@@ -965,31 +1012,61 @@ class ProjectService:
                 load_score = (row['project_count'] * 20) + (row['task_count'] * 5)
                 
                 lng, lat = row['lng'], row['lat']
-                city = row['current_city']
+                city = normalize_region_name(row['member_city']) or normalize_region_name(row['project_city']) or normalize_region_name(row['current_city'])
+                province = normalize_region_name(row['project_province'])
                 
                 # On-the-fly resolution if missing
+                if (lng is None or lat is None) or not city or not province:
+                    member_candidates = [
+                        (row['member_city'] or '').strip(),
+                        (row['project_city'] or '').strip(),
+                        (row['hospital_name'] or '').strip(),
+                        (row['project_name'] or '').strip(),
+                    ]
+                    geo_details = None
+                    for candidate in member_candidates:
+                        if not candidate:
+                            continue
+                        geo_details = geo_service.resolve_address_details(candidate)
+                        if geo_details:
+                            break
+
+                    if geo_details:
+                        province = province or normalize_region_name(geo_details.get('province'))
+                        city = city or normalize_region_name(geo_details.get('city'))
+                        if lng is None or lat is None:
+                            lng, lat = geo_details.get('lng'), geo_details.get('lat')
+
                 if (lng is None or lat is None) and city:
-                    city = city.strip()
                     coords = geo_service.resolve_coords(city)
                     if coords:
                         lng, lat = coords[0], coords[1]
-                        # Optional: Lazy update back to DB for performance
-                        try:
-                            sql_up_m = DatabasePool.format_sql('UPDATE project_members SET lng = ?, lat = ?, current_city = ? WHERE name = ?')
-                            conn.execute(sql_up_m, (lng, lat, city, row['name']))
-                        except: pass
+
+                # Optional: Lazy update back to DB for performance
+                if city or (lng is not None and lat is not None):
+                    try:
+                        sql_up_m = DatabasePool.format_sql('UPDATE project_members SET lng = ?, lat = ?, current_city = ? WHERE id = ?')
+                        conn.execute(sql_up_m, (lng, lat, city or row['member_city'], row['id']))
+                    except Exception:
+                        pass
 
                 members.append({
                     'name': row['name'],
                     'role': row['role'],
                     'lng': lng,
                     'lat': lat,
-                    'current_city': city,
+                    'current_city': city or '未定位',
+                    'current_province': province or '',
                     'project_name': row['project_name'],
                     'project_count': row['project_count'],
                     'task_count': row['task_count'],
                     'load_score': load_score
                 })
+
+            try:
+                conn.commit()
+            except Exception:
+                pass
 
             return {'stats': stats, 'members': members}
 

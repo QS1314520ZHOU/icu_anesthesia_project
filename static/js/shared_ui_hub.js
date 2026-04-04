@@ -38,25 +38,28 @@ function showToast(message, typeOrDuration = 3000, maybeDuration) {
     }, duration);
 }
 
-function openModal(modalId) {
+function openModal(modalId, options = {}) {
     const el = document.getElementById(modalId);
     if (!el) {
         console.error('[DEBUG] openModal failed: element not found', modalId);
         return;
     }
 
-    const forms = el.querySelectorAll('form');
-    forms.forEach(f => f.reset());
-    const textareas = el.querySelectorAll('textarea');
-    textareas.forEach(t => t.value = '');
+    const shouldReset = options.reset !== false;
+    if (shouldReset) {
+        const forms = el.querySelectorAll('form');
+        forms.forEach(f => f.reset());
+        const textareas = el.querySelectorAll('textarea');
+        textareas.forEach(t => t.value = '');
+    }
 
     el.classList.add('show');
     el.style.display = 'flex';
     console.log('[DEBUG] openModal success:', modalId);
 }
 
-function showModal(modalId) {
-    openModal(modalId);
+function showModal(modalId, options = {}) {
+    openModal(modalId, options);
 }
 
 function closeModal(modalId) {
@@ -85,13 +88,54 @@ function renderAiMarkdown(text) {
     return cleaned.replace(/\n/g, '<br>');
 }
 
+async function writeTextToClipboard(text) {
+    const value = String(text ?? '');
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(value);
+            return;
+        } catch (e) {
+            console.warn('[clipboard] navigator.clipboard.writeText failed, fallback to execCommand', e);
+        }
+    }
+
+    const input = document.createElement('textarea');
+    input.value = value;
+    input.setAttribute('readonly', 'readonly');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(input);
+    if (!copied) {
+        throw new Error('当前环境不支持自动复制');
+    }
+}
+
 async function copyCurrentViewLink() {
     try {
-        await navigator.clipboard.writeText(window.location.href);
+        await writeTextToClipboard(window.location.href);
         showToast('当前视图链接已复制', 'success');
     } catch (e) {
         showToast('复制链接失败: ' + e.message, 'danger');
     }
+}
+
+function closeGenericModal() {
+    const modal = document.getElementById('askAiModal');
+    if (!modal) return;
+
+    const modalTitle = modal.querySelector('h3');
+    const inputGroup = modal.querySelector('.input-group');
+    const contentDiv = modal.querySelector('#genericModalContent');
+
+    modal.style.display = 'none';
+    if (inputGroup) inputGroup.style.display = 'flex';
+    if (contentDiv) contentDiv.style.display = 'none';
+    if (modalTitle) modalTitle.textContent = '🔮 AI 项目问答';
 }
 
 function showGenericModal(title, contentHtml) {
@@ -123,10 +167,7 @@ function showGenericModal(title, contentHtml) {
 
     const closeBtn = modal.querySelector('.modal-close');
     closeBtn.onclick = () => {
-        modal.style.display = 'none';
-        if (inputGroup) inputGroup.style.display = 'flex';
-        contentDiv.style.display = 'none';
-        if (modalTitle) modalTitle.textContent = '🔮 AI 项目问答';
+        closeGenericModal();
     };
 }
 

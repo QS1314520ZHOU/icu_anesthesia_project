@@ -58,8 +58,15 @@
   - full-page login overlay
 - `static/js/admin_hub.js`
   - global user management
+  - role matrix display
+  - user role switching
   - password reset flow
   - AI config management
+- `static/js/admin_settings.js`
+  - AI config center
+  - user / permission tab
+  - editable role matrix
+  - WeCom / map / storage config
 - `static/js/analytics_hub.js`
   - risk trend analysis
   - delivery prediction
@@ -73,9 +80,11 @@
   - risk simulation helpers
 - `static/js/collaboration_hub.js`
   - communications CRUD
+  - meeting assistant extraction / save-to-communication flow
   - communication AI analysis
   - uploaded-file analysis
   - AI retrospective / task suggestions
+  - communication timeline filtering / copy helpers
 - `static/js/notifications_hub.js`
   - notification center
   - unread count
@@ -116,12 +125,11 @@
 - `static/js/main.js`
   - compatibility shell
   - load-order anchor
-  - remaining cross-module glue
-  - startup wiring only
+  - minimal cross-module glue
+  - feature code no longer lives here
 
 ## Practical Next Extraction Targets
 
-1. Keep shrinking project-detail-heavy logic inside `project_detail_hub.js`
-   - project detail tabs
-   - delete/update handlers
-   - remaining detail-only helpers still parked in `main.js`
+1. Reduce implicit global coupling between hub files
+   - document shared globals that are still relied on across modules
+   - move reusable helpers into the most appropriate shared hub when needed

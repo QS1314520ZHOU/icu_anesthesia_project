@@ -30,25 +30,37 @@ def delete_change(change_id):
 # --- Acceptances ---
 @lifecycle_bp.route('/projects/<int:project_id>/acceptances', methods=['GET'])
 def get_project_acceptances(project_id):
-    acceptances = lifecycle_service.get_project_acceptances(project_id)
-    return api_response(True, acceptances)
+    try:
+        acceptances = lifecycle_service.get_project_acceptances(project_id)
+        return api_response(True, acceptances)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @lifecycle_bp.route('/projects/<int:project_id>/acceptances', methods=['POST'])
 def add_project_acceptance(project_id):
-    data = request.json or {}
-    lifecycle_service.add_project_acceptance(project_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        lifecycle_service.add_project_acceptance(project_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @lifecycle_bp.route('/acceptances/<int:acceptance_id>', methods=['PUT'])
 def update_acceptance(acceptance_id):
-    data = request.json or {}
-    lifecycle_service.update_acceptance(acceptance_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        lifecycle_service.update_acceptance(acceptance_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @lifecycle_bp.route('/acceptances/<int:acceptance_id>', methods=['DELETE'])
 def delete_acceptance(acceptance_id):
-    lifecycle_service.delete_acceptance(acceptance_id)
-    return api_response(True)
+    try:
+        lifecycle_service.delete_acceptance(acceptance_id)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 # --- Satisfaction ---
 @lifecycle_bp.route('/projects/<int:project_id>/satisfaction', methods=['GET'])

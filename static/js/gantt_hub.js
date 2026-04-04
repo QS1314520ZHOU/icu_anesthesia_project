@@ -23,10 +23,21 @@ async function renderProjectGantt(project) {
     chartDom.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在生成任务时间轴...</p></div>';
 
     try {
-        const ganttTasks = await api.get(`/projects/${project.id}/gantt-data`, { silent: true });
+        const [ganttTasks, baselines] = await Promise.all([
+            api.get(`/projects/${project.id}/gantt-data`, { silent: true }),
+            api.get('/operational/stage-baselines', { silent: true }).catch(() => [])
+        ]);
+
         if (!ganttTasks || ganttTasks.length === 0) {
             chartDom.innerHTML = '<div class="empty-state"><p>暂无详细任务时间数据</p></div>';
             return;
+        }
+
+        const baselineHint = document.getElementById('baselineHint');
+        if (baselineHint) {
+            baselineHint.textContent = baselines && baselines.length
+                ? `已加载 ${baselines.length} 个阶段基线，红框任务表示存在依赖关系`
+                : '暂无阶段基线数据，红框任务表示存在依赖关系';
         }
 
         if (!document.getElementById('projectGanttChart')) return;
@@ -36,7 +47,8 @@ async function renderProjectGantt(project) {
         const categories = ganttTasks.map(t => t.name);
         const seriesData = [];
         const milestoneData = [];
-        let minDate = null, maxDate = null;
+        let minDate = null;
+        let maxDate = null;
 
         ganttTasks.forEach((t, idx) => {
             const start = new Date(t.start);
@@ -44,11 +56,12 @@ async function renderProjectGantt(project) {
             if (!minDate || start < minDate) minDate = start;
             if (!maxDate || end > maxDate) maxDate = end;
 
-            const color = STAGE_COLORS[project.stages[0]?.stage_name] || '#5B8FF9';
+            const color = STAGE_COLORS[project.stages?.[0]?.stage_name] || '#5B8FF9';
+            const isCritical = !!(t.dependencies || '').trim();
             seriesData.push({
                 name: t.name,
-                value: [idx, start.getTime(), end.getTime(), t.progress, t.id],
-                itemStyle: { color, borderRadius: 4 }
+                value: [idx, start.getTime(), end.getTime(), t.progress, t.id, isCritical ? 1 : 0],
+                itemStyle: { color, borderRadius: 4, borderColor: isCritical ? '#ef4444' : color, borderWidth: isCritical ? 2 : 0 }
             });
         });
 
@@ -72,7 +85,8 @@ async function renderProjectGantt(project) {
                     if (params.seriesType === 'custom') {
                         const start = new Date(params.value[1]).toLocaleDateString('zh-CN');
                         const end = new Date(params.value[2]).toLocaleDateString('zh-CN');
-                        return `<div style="padding:8px;"><div style="font-weight:600;margin-bottom:8px;">${params.name}</div><div style="color:#666;font-size:12px;">工期: ${start} ~ ${end}</div><div style="color:#666;font-size:12px;">完成进度: ${params.value[3]}%</div></div>`;
+                        const criticalText = params.value[5] ? '<div style="color:#ef4444;font-size:12px;">关键/依赖任务</div>' : '';
+                        return `<div style="padding:8px;"><div style="font-weight:600;margin-bottom:8px;">${params.name}</div><div style="color:#666;font-size:12px;">工期: ${start} ~ ${end}</div><div style="color:#666;font-size:12px;">完成进度: ${params.value[3]}%</div>${criticalText}</div>`;
                     }
                     if (params.seriesType === 'scatter') {
                         return `<div style="padding:8px;"><div style="font-weight:600;color:#f59e0b;">🎯 里程碑: ${params.name}</div><div style="color:#666;font-size:12px;">截止日期: ${new Date(params.value[0]).toLocaleDateString('zh-CN')}</div></div>`;
@@ -119,7 +133,12 @@ async function renderProjectGantt(project) {
                             type: 'group',
                             children: [
                                 { type: 'rect', shape: rectShape, style: { fill: apiRef.visual('color'), opacity: 0.15 } },
-                                { type: 'rect', shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width * progress / 100, height: rectShape.height }, style: { fill: apiRef.visual('color') } }
+                                { type: 'rect', shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width * progress / 100, height: rectShape.height }, style: { fill: apiRef.visual('color') } },
+                                ...(apiRef.value(5) ? [{
+                                    type: 'rect',
+                                    shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width, height: rectShape.height },
+                                    style: { stroke: '#ef4444', lineWidth: 2, fill: 'transparent' }
+                                }] : [])
                             ]
                         };
                     },
@@ -174,22 +193,37 @@ async function renderProjectGantt(project) {
     }
 }
 
-async function showGlobalGanttModal() {
-    document.getElementById('globalGanttModal').classList.add('show');
-    const res = await fetch('/api/analytics/gantt');
-    const data = await res.json();
-    renderGanttLegend('globalGanttLegend');
+window.showGlobalGanttModal = async function showGlobalGanttModal() {
+    const modal = document.getElementById('globalGanttModal');
     const chartDom = document.getElementById('globalGanttChart');
-    if (data.length === 0) {
-        chartDom.innerHTML = '<div class="empty-state"><p>暂无项目数据</p></div>';
+    if (!modal || !chartDom) {
+        showToast('项目总览视图未找到，请刷新页面后重试', 'danger');
         return;
     }
 
-    const myChart = echarts.init(chartDom);
+    openModal('globalGanttModal');
+    renderGanttLegend('globalGanttLegend');
+    chartDom.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在加载项目总览...</p></div>';
+
+    try {
+        const data = await api.get('/analytics/gantt', { silent: true });
+        if (!Array.isArray(data) || data.length === 0) {
+            chartDom.innerHTML = '<div class="empty-state"><p>暂无项目数据</p><div class="empty-state-hint">创建项目并补充阶段计划后，这里会显示全局总览甘特图。</div></div>';
+            return;
+        }
+
+        const existingInstance = echarts.getInstanceByDom(chartDom);
+        if (existingInstance) {
+            echarts.dispose(existingInstance);
+        }
+        chartDom.innerHTML = '';
+
+        const myChart = echarts.init(chartDom);
     const categories = data.map(item => item.project.hospital_name || item.project.project_name);
     const seriesData = [];
     const milestoneData = [];
-    let minDate = null, maxDate = null;
+    let minDate = null;
+    let maxDate = null;
 
     data.forEach((item, projectIdx) => {
         item.stages.forEach(s => {
@@ -199,9 +233,10 @@ async function showGlobalGanttModal() {
             if (!minDate || start < minDate) minDate = start;
             if (!maxDate || end > maxDate) maxDate = end;
             const color = STAGE_COLORS[s.stage_name] || '#5B8FF9';
+            const isCritical = (s.progress || 0) < 100 && (s.status || '') !== '已完成';
             seriesData.push({
                 name: s.stage_name,
-                value: [projectIdx, start.getTime(), end.getTime(), s.progress, item.project.project_name, item.project.id],
+                value: [projectIdx, start.getTime(), end.getTime(), s.progress, item.project.project_name, item.project.id, isCritical ? 1 : 0],
                 itemStyle: { color, borderRadius: 3 }
             });
         });
@@ -220,12 +255,13 @@ async function showGlobalGanttModal() {
         }
     });
 
-    const today = new Date().getTime();
-    myChart.setOption({
+        const today = new Date().getTime();
+        myChart.setOption({
         tooltip: {
             formatter: params => {
                 if (params.seriesType === 'custom') {
-                    return `<div style="padding:8px;"><div style="font-weight:600;margin-bottom:4px;">${params.value[4]}</div><div style="color:#8b5cf6;margin-bottom:8px;">${params.name}</div><div style="color:#666;font-size:12px;">时间: ${new Date(params.value[1]).toLocaleDateString('zh-CN')} ~ ${new Date(params.value[2]).toLocaleDateString('zh-CN')}</div><div style="color:#666;font-size:12px;">进度: ${params.value[3]}%</div><div style="margin-top:4px;color:var(--primary);font-size:11px;">(点击跳转项目详情)</div></div>`;
+                    const criticalText = params.value[6] ? '<div style="color:#ef4444;font-size:12px;">重点关注阶段</div>' : '';
+                    return `<div style="padding:8px;"><div style="font-weight:600;margin-bottom:4px;">${params.value[4]}</div><div style="color:#8b5cf6;margin-bottom:8px;">${params.name}</div><div style="color:#666;font-size:12px;">时间: ${new Date(params.value[1]).toLocaleDateString('zh-CN')} ~ ${new Date(params.value[2]).toLocaleDateString('zh-CN')}</div><div style="color:#666;font-size:12px;">进度: ${params.value[3]}%</div>${criticalText}<div style="margin-top:4px;color:var(--primary);font-size:11px;">(点击跳转项目详情)</div></div>`;
                 }
                 if (params.seriesType === 'scatter') {
                     return `<div style="padding:8px;"><div style="font-weight:600;color:#f59e0b;">🎯 里程碑: ${params.name}</div><div style="color:#666;font-size:12px;">日期: ${new Date(params.value[0]).toLocaleDateString('zh-CN')}</div></div>`;
@@ -272,7 +308,12 @@ async function showGlobalGanttModal() {
                         type: 'group',
                         children: [
                             { type: 'rect', shape: rectShape, style: { fill: apiRef.visual('color'), opacity: 0.2 } },
-                            { type: 'rect', shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width * progress / 100, height: rectShape.height }, style: { fill: apiRef.visual('color') } }
+                            { type: 'rect', shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width * progress / 100, height: rectShape.height }, style: { fill: apiRef.visual('color') } },
+                            ...(apiRef.value(6) ? [{
+                                type: 'rect',
+                                shape: { x: rectShape.x, y: rectShape.y, width: rectShape.width, height: rectShape.height },
+                                style: { stroke: '#ef4444', lineWidth: 2, fill: 'transparent' }
+                            }] : [])
                         ]
                     };
                 },
@@ -300,13 +341,23 @@ async function showGlobalGanttModal() {
         ]
     });
 
-    myChart.on('click', function (params) {
-        if (params.seriesType === 'custom') {
-            const projectId = params.value[5];
-            closeModal('globalGanttModal');
-            loadProjectDetail(projectId);
-        }
-    });
+        myChart.on('click', function (params) {
+            if (params.seriesType === 'custom') {
+                const projectId = params.value[5];
+                closeModal('globalGanttModal');
+                loadProjectDetail(projectId);
+            }
+        });
 
-    window.addEventListener('resize', () => myChart.resize());
-}
+        if (!window.__globalGanttResizeBound) {
+            window.addEventListener('resize', () => {
+                const chart = echarts.getInstanceByDom(document.getElementById('globalGanttChart'));
+                if (chart) chart.resize();
+            });
+            window.__globalGanttResizeBound = true;
+        }
+    } catch (e) {
+        console.error('Global Gantt Error:', e);
+        chartDom.innerHTML = `<div class="empty-state"><p>项目总览加载失败</p><div class="empty-state-hint">${e.message || '请稍后重试'}</div></div>`;
+    }
+};

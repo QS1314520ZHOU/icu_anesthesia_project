@@ -29,8 +29,12 @@ def get_communication(record_id):
 def create_communication(project_id):
     try:
         data = request.json or {}
+        current_user = getattr(request, 'current_user', None) or {}
+        data['created_by'] = current_user.get('display_name') or current_user.get('username') or data.get('created_by')
         record = communication_service.create_communication(project_id, data)
         return api_response(True, record, message='沟通记录添加成功')
+    except ValueError as e:
+        return api_response(False, message=str(e), code=400)
     except Exception as e:
         return api_response(False, message=str(e), code=500)
 
@@ -42,6 +46,8 @@ def update_communication(record_id):
         if not record:
             return api_response(False, message='沟通记录不存在', code=404)
         return api_response(True, record, message='沟通记录更新成功')
+    except ValueError as e:
+        return api_response(False, message=str(e), code=400)
     except Exception as e:
         return api_response(False, message=str(e), code=500)
 

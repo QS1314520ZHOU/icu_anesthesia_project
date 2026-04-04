@@ -24,7 +24,8 @@ BASE_CITY_COORDS = {
     '随州': [113.37, 31.70], '襄阳': [112.1224, 32.0086], '宜昌': [111.28, 30.69],
     '文山': [104.2442, 23.3695], '丘北': [104.18, 24.04], '广南': [105.05, 24.04],
     '富宁': [105.62, 23.62], '毕节': [105.29, 27.30], '遵义': [106.93, 27.70],
-    '大理': [100.27, 25.61], '莆田': [119.0078, 25.4310], '垫江': [107.33, 30.33]
+    '大理': [100.27, 25.61], '莆田': [119.0078, 25.4310], '垫江': [107.33, 30.33],
+    '保康': [111.2613, 31.8783]
 }
 
 class GeoService:
@@ -68,7 +69,8 @@ class GeoService:
         if not name: return ""
         name = name.strip()
         # Remove common suffixes that might confuse basic geocoders or fuzzy matches
-        return re.sub(r'(省|市|自治区|特别行政区|区|县|镇|乡|医院|分院)$', '', name)
+        name = re.sub(r'(人民医院|中医院|附属第二医院|附属医院|医院|分院)$', '', name)
+        return re.sub(r'(省|市|自治区|特别行政区|区|县|镇|乡)$', '', name)
 
     def resolve_coords(self, location_name):
         if not location_name: return None
@@ -96,20 +98,36 @@ class GeoService:
         """Resolves address into structured detail: province, city, lng, lat."""
         if not location_name: return None
         location_name = location_name.strip()
-        
-        cached = self._get_details_from_cache(location_name)
-        if cached: return cached
-        
+        normalized = self.normalize_name(location_name)
+
+        # 0. 优先使用本地启发式映射，避免医院全称被公共地理服务误匹配到错误地区
+        province_hint, city_hint = self._parse_name_heuristically(location_name)
+        if not city_hint and normalized:
+            province_hint, city_hint = self._parse_name_heuristically(normalized)
         result = None
+        if city_hint:
+            coords = BASE_CITY_COORDS.get(city_hint)
+            if coords:
+                result = {
+                    'province': province_hint,
+                    'city': city_hint,
+                    'lng': coords[0],
+                    'lat': coords[1],
+                    'provider': 'heuristic'
+                }
+
+        cached = self._get_details_from_cache(location_name)
+        if cached and not result:
+            return cached
         
         # 1. Try primary provider
-        if self.provider == 'baidu' and self.baidu_ak:
+        if not result and self.provider == 'baidu' and self.baidu_ak:
             result = self._fetch_details_from_baidu(location_name)
-        elif self.provider == 'amap' and self.amap_key:
+        elif not result and self.provider == 'amap' and self.amap_key:
             result = self._fetch_details_from_amap(location_name)
-        elif self.provider == 'tianditu' and self.tianditu_key:
+        elif not result and self.provider == 'tianditu' and self.tianditu_key:
             result = self._fetch_details_from_tianditu(location_name)
-        elif self.provider == 'google' and self.google_ak:
+        elif not result and self.provider == 'google' and self.google_ak:
             result = self._fetch_details_from_google_full(location_name)
             
         # 2. Fallbacks if primary fails
@@ -146,7 +164,8 @@ class GeoService:
     def _parse_name_heuristically(self, location_name):
         standalone_map = {
             '莆田': '福建', '垫江': '重庆', '眉山': '四川', '襄阳': '湖北', '随州': '湖北',
-            '昆明': '云南', '文山': '云南', '丘北': '云南', '红河': '云南', '广南': '云南'
+            '昆明': '云南', '文山': '云南', '丘北': '云南', '红河': '云南', '广南': '云南',
+            '保康': '湖北'
         }
         for c, p in standalone_map.items():
             if c in location_name:

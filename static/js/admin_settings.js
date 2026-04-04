@@ -150,6 +150,7 @@ var adminSettings = {
                         <div class="admin-tab active" onclick="adminSettings.switchTab(event, 'tabAiConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">AI 模型配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">企业微信配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabWecomBind')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">用户企微绑定</div>
+                        <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabPermissions')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">用户与权限</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabMapConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">地图服务配置</div>
                         <div class="admin-tab" onclick="adminSettings.switchTab(event, 'tabStorageConfig')" style="padding: 16px 4px; cursor: pointer; font-weight: 600; color: var(--gray-500);">云存储配置</div>
                     </div>
@@ -243,6 +244,81 @@ var adminSettings = {
                             </div>
                             <div id="wecomBindList">
                                 <div class="text-center" style="padding: 40px; color: var(--gray-500);">⏳ 加载中...</div>
+                            </div>
+                        </div>
+
+                        <!-- Permission Tab -->
+                        <div id="tabPermissions" class="admin-tab-pane" style="display: none;">
+                            <div style="display:grid;gap:20px;">
+                                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                                        <div>
+                                            <div style="font-size:15px;font-weight:600;color:var(--gray-800);">权限目录</div>
+                                            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">先理解权限再修改角色，能明显降低误配置概率。下方会按能力域解释当前常用权限。</div>
+                                        </div>
+                                    </div>
+                                    <div id="permissionCatalogSummary"></div>
+                                </div>
+
+                                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                                        <div>
+                                            <div style="font-size:15px;font-weight:600;color:var(--gray-800);">角色权限矩阵</div>
+                                            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">这里展示并维护当前后端实际生效的角色与权限映射。为降低风险，admin 保持只读，其余角色可直接编辑显示名和权限列表。</div>
+                                        </div>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-primary btn-sm" onclick="adminSettings.saveRolePermissionMatrix()">💾 保存矩阵</button>
+                                            <button class="btn btn-outline btn-sm" onclick="adminSettings.loadRolePermissionMatrix()">🔄 重新加载</button>
+                                        </div>
+                                    </div>
+                                    <div id="rolePermissionMatrix">
+                                        <div class="text-center" style="padding: 32px; color: var(--gray-500);">⏳ 加载中...</div>
+                                    </div>
+                                </div>
+
+                                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                                        <div>
+                                            <div style="font-size:15px;font-weight:600;color:var(--gray-800);">用户角色管理</div>
+                                            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">可直接调整角色、启用/禁用账号或重置密码。当前登录账号不能被自己禁用。</div>
+                                        </div>
+                                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                            <button class="btn btn-outline btn-sm" onclick="adminSettings.loadUserPermissionList()">🔄 刷新用户</button>
+                                            <button class="btn btn-outline btn-sm" onclick="showRoleMatrixModal()">🛡️ 弹窗查看矩阵</button>
+                                        </div>
+                                    </div>
+                                    <div class="table-container" style="max-height:420px;overflow:auto;">
+                                        <table class="table" style="width:100%;">
+                                            <thead>
+                                                <tr>
+                                                    <th>ID</th>
+                                                    <th>用户名</th>
+                                                    <th>显示名</th>
+                                                    <th>角色</th>
+                                                    <th>状态</th>
+                                                    <th>最后登录</th>
+                                                    <th>操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="permissionUserList">
+                                                <tr><td colspan="7" style="text-align:center;color:var(--gray-500);">加载中...</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <div style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:20px;">
+                                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:16px;">
+                                        <div>
+                                            <div style="font-size:15px;font-weight:600;color:var(--gray-800);">最近权限变更</div>
+                                            <div style="font-size:13px;color:var(--gray-500);margin-top:4px;">这里会显示最近的角色矩阵保存、用户角色切换、账号启停和密码重置操作。</div>
+                                        </div>
+                                        <button class="btn btn-outline btn-sm" onclick="adminSettings.loadPermissionAuditLogs()">🔄 刷新记录</button>
+                                    </div>
+                                    <div id="permissionAuditList">
+                                        <div class="text-center" style="padding: 32px; color: var(--gray-500);">⏳ 加载中...</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -449,10 +525,14 @@ var adminSettings = {
         const el = document.getElementById(this.modalId);
         el.classList.add('show');
         el.style.display = 'flex';
+        this.renderPermissionCatalog();
         this.loadAiConfigs();
         this.loadWecomConfig();
         this.loadStorageConfig();
         this.loadWecomBindList();
+        this.loadRolePermissionMatrix();
+        this.loadUserPermissionList();
+        this.loadPermissionAuditLogs();
         this.loadMapConfig();
     },
 
@@ -463,6 +543,13 @@ var adminSettings = {
 
         event.currentTarget.classList.add('active');
         document.getElementById(tabId).style.display = 'block';
+
+        if (tabId === 'tabPermissions') {
+            this.renderPermissionCatalog();
+            this.loadRolePermissionMatrix();
+            this.loadUserPermissionList();
+            this.loadPermissionAuditLogs();
+        }
     },
 
     // ========== AI Configuration Logic ==========
@@ -547,6 +634,48 @@ var adminSettings = {
     },
 
     currentConfigs: [], // Store loaded configs for edit reference
+    currentRoleMatrix: [],
+    permissionCatalogGroups: [
+        {
+            title: '项目与协作',
+            description: '决定是否能查看项目和推进基础协作操作。',
+            permissions: [
+                { code: 'project:read', desc: '查看项目、项目详情、地图、协作入口。' },
+                { code: 'project:write', desc: '编辑项目基础信息和关键项目配置。' }
+            ]
+        },
+        {
+            title: '报告与经营',
+            description: '控制报告查看、生成和经营/财务数据能力。',
+            permissions: [
+                { code: 'report:read', desc: '查看经营、财务、报表等分析结果。' },
+                { code: 'report:write', desc: '生成或导出报告、周报等内容。' }
+            ]
+        },
+        {
+            title: '团队与资源',
+            description: '控制资源、成员、排班等团队侧能力。',
+            permissions: [
+                { code: 'team:read', desc: '查看成员负荷、资源概览和团队信息。' },
+                { code: 'team:write', desc: '编辑团队相关信息和资源操作。' }
+            ]
+        },
+        {
+            title: '执行记录',
+            description: '控制日志、问题等交付执行动作。',
+            permissions: [
+                { code: 'worklog:write', desc: '填写或补录工作日志。' },
+                { code: 'issue:write', desc: '登记或更新问题项。' }
+            ]
+        },
+        {
+            title: 'AI 能力',
+            description: '控制 AI 分析、总结和辅助建议等入口。',
+            permissions: [
+                { code: 'ai:use', desc: '使用 AI 分析、AI 问答、AI 任务建议等功能。' }
+            ]
+        }
+    ],
 
     // Legacy mapping if needed, but we unified loadAiConfigs
 
@@ -622,8 +751,10 @@ var adminSettings = {
         try {
             if (id) {
                 await api.put(`/admin/ai-configs/${id}`, data);
+                showToast('✅ AI 配置已更新', 'success');
             } else {
                 await api.post('/admin/ai-configs', data);
+                showToast('✅ AI 配置已添加', 'success');
             }
             this.closeAddConfigModal();
             this.loadAiConfigs();
@@ -982,6 +1113,270 @@ var adminSettings = {
         } catch (e) {
             showToast('❌ 请求失败: ' + e.message, 'danger');
         }
+    },
+
+    loadRolePermissionMatrix: async function () {
+        const container = document.getElementById('rolePermissionMatrix');
+        if (!container) return;
+        container.innerHTML = '<div class="text-center" style="padding: 32px; color: var(--gray-500);">⏳ 加载中...</div>';
+
+        try {
+            const roleMatrix = typeof fetchRoleDefinitions === 'function'
+                ? await fetchRoleDefinitions()
+                : [];
+            this.currentRoleMatrix = Array.isArray(roleMatrix) ? roleMatrix : [];
+            container.innerHTML = this.renderRolePermissionEditor(this.currentRoleMatrix);
+        } catch (e) {
+            container.innerHTML = `<div class="error-msg">加载失败: ${e.message}</div>`;
+        }
+    },
+
+    renderPermissionCatalog: function () {
+        const container = document.getElementById('permissionCatalogSummary');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
+                ${this.permissionCatalogGroups.map(group => `
+                    <section style="border:1px solid #e5e7eb;border-radius:14px;padding:16px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);">
+                        <div style="font-size:15px;font-weight:700;color:#111827;">${group.title}</div>
+                        <div style="margin-top:6px;font-size:12px;color:#64748b;line-height:1.7;">${group.description}</div>
+                        <div style="display:grid;gap:8px;margin-top:12px;">
+                            ${group.permissions.map(item => `
+                                <div style="padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                    <div style="font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;font-size:12px;font-weight:700;color:#1d4ed8;">${item.code}</div>
+                                    <div style="margin-top:4px;font-size:12px;color:#475569;line-height:1.6;">${item.desc}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                `).join('')}
+            </div>
+        `;
+    },
+
+    renderRolePermissionEditor: function (roleMatrix) {
+        const roles = Array.isArray(roleMatrix) ? roleMatrix : [];
+        if (!roles.length) {
+            return '<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-500);">暂无角色配置数据</div>';
+        }
+
+        return `
+            <div class="table-container" style="overflow-x:auto;">
+                <table class="table" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="min-width:120px;">角色键</th>
+                            <th style="min-width:140px;">显示名称</th>
+                            <th>权限列表</th>
+                            <th style="min-width:88px;">状态</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${roles.map((item, index) => {
+                            const editable = item.editable !== false && item.role !== 'admin';
+                            const nameValue = typeof escapeAdminText === 'function'
+                                ? escapeAdminText(item.name || item.role || '')
+                                : (item.name || item.role || '');
+                            const roleValue = typeof escapeAdminText === 'function'
+                                ? escapeAdminText(item.role || '')
+                                : (item.role || '');
+                            const permissionValue = typeof escapeAdminText === 'function'
+                                ? escapeAdminText((item.permissions || []).join(', '))
+                                : (item.permissions || []).join(', ');
+
+                            return `
+                                <tr>
+                                    <td>
+                                        <div style="font-weight:700;color:#0f172a;">${roleValue}</div>
+                                        <div style="margin-top:4px;font-size:12px;color:#94a3b8;">固定角色键，不建议在现阶段变更</div>
+                                    </td>
+                                    <td>
+                                        <input data-role-name="${index}" type="text" value="${nameValue}" ${editable ? '' : 'disabled'}
+                                            style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;background:${editable ? 'white' : '#f8fafc'};">
+                                    </td>
+                                    <td>
+                                        <textarea data-role-permissions="${index}" rows="3" ${editable ? '' : 'disabled'}
+                                            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;line-height:1.6;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;background:${editable ? 'white' : '#f8fafc'};resize:vertical;">${permissionValue}</textarea>
+                                        <div style="margin-top:6px;font-size:12px;color:#64748b;">使用英文逗号或换行分隔，例如：<code>project:read, report:read, ai:use</code></div>
+                                        ${editable ? `
+                                            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                                                ${this.permissionCatalogGroups.flatMap(group => group.permissions.map(item => `
+                                                    <button type="button"
+                                                        onclick="adminSettings.appendPermission(${index}, '${item.code}')"
+                                                        title="${item.desc}"
+                                                        style="padding:4px 8px;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#334155;font-size:11px;cursor:pointer;">
+                                                        + ${item.code}
+                                                    </button>
+                                                `)).join('')}
+                                            </div>
+                                        ` : ''}
+                                    </td>
+                                    <td>
+                                        <span class="badge" style="background:${editable ? '#ecfeff' : '#fef3c7'};color:${editable ? '#155e75' : '#92400e'};">
+                                            ${editable ? '可编辑' : '锁定'}
+                                        </span>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+                <div style="margin-top:12px;font-size:12px;color:#64748b;line-height:1.7;">
+                当前权限为后端角色矩阵驱动；保存后新登录会立即拿到新权限，现有会话在重新请求 <code>/api/auth/me</code> 或重新登录后也会更新。为避免误放大权限，非 admin 角色提交的 <code>*</code> 或 <code>admin</code> 标记会被后端自动过滤。
+            </div>
+        `;
+    },
+
+    appendPermission: function (index, permissionCode) {
+        const textarea = document.querySelector(`[data-role-permissions="${index}"]`);
+        if (!textarea) return;
+
+        const values = textarea.value
+            .split(/[\n,，]+/)
+            .map(value => value.trim())
+            .filter(Boolean);
+
+        if (!values.includes(permissionCode)) {
+            values.push(permissionCode);
+            textarea.value = values.join(', ');
+        }
+        textarea.focus();
+    },
+
+    collectRolePermissionPayload: function () {
+        const currentMatrix = Array.isArray(this.currentRoleMatrix) ? this.currentRoleMatrix : [];
+        return currentMatrix.map((item, index) => {
+            const editable = item.editable !== false && item.role !== 'admin';
+            if (!editable) {
+                return {
+                    role: item.role,
+                    name: item.name,
+                    permissions: item.permissions || []
+                };
+            }
+
+            const nameInput = document.querySelector(`[data-role-name="${index}"]`);
+            const permissionInput = document.querySelector(`[data-role-permissions="${index}"]`);
+            const rawPermissions = permissionInput ? permissionInput.value : '';
+            const permissions = rawPermissions
+                .split(/[\n,，]+/)
+                .map(value => value.trim())
+                .filter(Boolean);
+
+            return {
+                role: item.role,
+                name: (nameInput ? nameInput.value : item.name || item.role || '').trim() || item.role,
+                permissions
+            };
+        });
+    },
+
+    saveRolePermissionMatrix: async function () {
+        const payload = this.collectRolePermissionPayload();
+        if (!payload.length) {
+            showToast('暂无可保存的角色配置', 'warning');
+            return;
+        }
+
+        try {
+            await api.post('/admin/roles', { roles: payload });
+            showToast('✅ 角色权限矩阵已保存', 'success');
+            await this.loadRolePermissionMatrix();
+            await this.loadUserPermissionList();
+            if (typeof loadGlobalUsers === 'function' && document.getElementById('globalUserList')) {
+                await loadGlobalUsers();
+            }
+        } catch (e) {
+            showToast('❌ 保存角色权限矩阵失败: ' + e.message, 'danger');
+        }
+    },
+
+    loadUserPermissionList: async function () {
+        const tbody = document.getElementById('permissionUserList');
+        if (!tbody) return;
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-500);">加载中...</td></tr>';
+
+        try {
+            const [users, roleMatrix] = await Promise.all([
+                api.get('/users'),
+                typeof fetchRoleDefinitions === 'function' ? fetchRoleDefinitions() : []
+            ]);
+            if (typeof buildAdminUserRows !== 'function') {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:red;">用户权限渲染器未加载</td></tr>';
+                return;
+            }
+            tbody.innerHTML = buildAdminUserRows(users, roleMatrix);
+        } catch (e) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:red;">加载失败: ${e.message}</td></tr>`;
+        }
+    },
+
+    loadPermissionAuditLogs: async function () {
+        const container = document.getElementById('permissionAuditList');
+        if (!container) return;
+        container.innerHTML = '<div class="text-center" style="padding: 32px; color: var(--gray-500);">⏳ 加载中...</div>';
+
+        try {
+            const logs = await api.get('/operation-logs?entity_type=auth', { silent: true });
+            container.innerHTML = this.renderPermissionAuditLogs(Array.isArray(logs) ? logs : []);
+        } catch (e) {
+            container.innerHTML = `<div class="error-msg">加载失败: ${e.message}</div>`;
+        }
+    },
+
+    renderPermissionAuditLogs: function (logs) {
+        if (!logs.length) {
+            return '<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-500);">暂无权限相关变更记录</div>';
+        }
+
+        const normalizePayload = value => {
+            if (!value) return null;
+            if (typeof value === 'object') return value;
+            try {
+                return JSON.parse(value);
+            } catch (e) {
+                return value;
+            }
+        };
+
+        const summarize = value => {
+            const payload = normalizePayload(value);
+            if (!payload) return '无';
+            if (typeof payload === 'string') return payload;
+            if (Array.isArray(payload)) return `共 ${payload.length} 项`;
+            return Object.entries(payload)
+                .slice(0, 4)
+                .map(([key, val]) => `${key}: ${typeof val === 'object' ? JSON.stringify(val) : val}`)
+                .join(' | ');
+        };
+
+        return `
+            <div style="display:grid;gap:10px;">
+                ${logs.slice(0, 12).map(log => `
+                    <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;background:#fff;">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                            <div>
+                                <div style="font-size:14px;font-weight:700;color:#111827;">${log.operation_type || '未命名操作'}</div>
+                                <div style="margin-top:4px;font-size:12px;color:#64748b;">${log.operator || '系统'} · ${log.entity_name || '-'} · ${log.created_at || '-'}</div>
+                            </div>
+                            <span class="badge" style="background:#eef2ff;color:#4338ca;">${log.entity_type || 'auth'}</span>
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px;">
+                            <div style="padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                <div style="font-size:11px;color:#94a3b8;">变更前</div>
+                                <div style="margin-top:4px;font-size:12px;color:#334155;line-height:1.7;">${summarize(log.old_value)}</div>
+                            </div>
+                            <div style="padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;">
+                                <div style="font-size:11px;color:#94a3b8;">变更后</div>
+                                <div style="margin-top:4px;font-size:12px;color:#334155;line-height:1.7;">${summarize(log.new_value)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     },
 
     // ========== Map Service Configuration Logic ==========

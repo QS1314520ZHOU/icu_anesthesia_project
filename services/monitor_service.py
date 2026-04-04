@@ -123,15 +123,59 @@ class MonitorService:
 
     def get_notifications(self, limit=50):
         """获取通知列表"""
+        return self.get_notification_inbox(limit=limit)
+
+    def get_notification_inbox(self, limit=50, notification_type=None, read_status=None, keyword=None):
+        """获取通知收件箱，支持分类、已读状态与关键词筛选"""
         with DatabasePool.get_connection() as conn:
-            sql = DatabasePool.format_sql('''
+            clauses = ['1=1']
+            params = []
+
+            if notification_type:
+                clauses.append('n.type = ?')
+                params.append(notification_type)
+
+            if read_status in ('read', 'unread'):
+                clauses.append('n.is_read = ?')
+                params.append(read_status == 'read')
+
+            if keyword:
+                clauses.append('(n.title LIKE ? OR n.content LIKE ? OR p.project_name LIKE ?)')
+                pattern = f'%{keyword}%'
+                params.extend([pattern, pattern, pattern])
+
+            where_sql = ' AND '.join(clauses)
+            sql = DatabasePool.format_sql(f'''
                 SELECT n.*, p.project_name 
                 FROM notifications n 
                 LEFT JOIN projects p ON n.project_id = p.id
+                WHERE {where_sql}
                 ORDER BY n.created_at DESC LIMIT ?
             ''')
-            notifications = conn.execute(sql, (limit,)).fetchall()
-        return [dict(n) for n in notifications]
+            params.append(limit)
+            notifications = [dict(n) for n in conn.execute(sql, params).fetchall()]
+
+            summary_sql = DatabasePool.format_sql('''
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_read = ? THEN 1 ELSE 0 END) as unread_count,
+                    SUM(CASE WHEN type = 'danger' THEN 1 ELSE 0 END) as danger_count,
+                    SUM(CASE WHEN type = 'warning' THEN 1 ELSE 0 END) as warning_count,
+                    SUM(CASE WHEN type = 'info' THEN 1 ELSE 0 END) as info_count
+                FROM notifications
+            ''')
+            summary_row = dict(conn.execute(summary_sql, (False,)).fetchone())
+
+        return {
+            'items': notifications,
+            'summary': {
+                'total': summary_row.get('total') or 0,
+                'unread_count': summary_row.get('unread_count') or 0,
+                'danger_count': summary_row.get('danger_count') or 0,
+                'warning_count': summary_row.get('warning_count') or 0,
+                'info_count': summary_row.get('info_count') or 0,
+            }
+        }
 
     def create_notification(self, data):
         """创建通知"""

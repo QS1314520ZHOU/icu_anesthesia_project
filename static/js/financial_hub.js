@@ -30,21 +30,24 @@
         hideAllViews();
         document.getElementById('financialView').style.display = 'block';
         const container = document.getElementById('financialView');
-        container.innerHTML = '<div class="loading-spinner">加载经营看板中...</div>';
+        container.innerHTML = '<div class="loading-spinner">加载财务总览中...</div>';
 
         try {
             const data = await api.get('/financial/overview');
             const s = data.summary || {};
+            const forecast = data.forecast || {};
+            const anomalies = data.anomalies || [];
             const params = new URLSearchParams(window.location.search);
             const financialSummary = [params.get('financial_search'), params.get('financial_margin'), params.get('financial_focus')].filter(Boolean).join(' / ');
             container.innerHTML = `
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
-                        <h2 class="detail-title">💰 经营看板</h2>
-                        <p class="detail-meta">总览合同额、回款、报销、人力成本与项目毛利</p>
+                        <h2 class="detail-title">📉 财务总览</h2>
+                        <p class="detail-meta">聚焦合同、回款、报销、人力成本、毛利与财务异常</p>
                         ${financialSummary ? `<div style="margin-top:6px;font-size:12px;color:#64748b;">当前筛选：${financialSummary}</div>` : ''}
                     </div>
                     <div class="btn-group">
+                        <button class="btn btn-outline" onclick="showBusinessOverview()">💰 经营看板</button>
                         <button class="btn btn-outline" onclick="copyCurrentViewLink()">复制当前视图链接</button>
                         <button class="btn btn-outline" onclick="showFinancialOverview()">刷新</button>
                         <button class="btn btn-outline" onclick="showDashboard()">← 返回仪表盘</button>
@@ -61,7 +64,29 @@
                     <div class="stat-card"><div class="stat-icon ${s.loss_projects > 0 ? 'red' : 'green'}">⚠️</div><div class="stat-value">${s.loss_projects || 0}</div><div class="stat-label">亏损项目</div></div>
                 </div>
                 <div class="panel" style="margin-bottom:20px;">
-                    <div class="panel-header"><div class="panel-title">经营趋势</div></div>
+                    <div class="panel-header"><div class="panel-title">财务预测与异常提示</div></div>
+                    <div class="panel-body">
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px;">
+                            <div style="padding:14px;border-radius:12px;background:#ecfeff;border:1px solid #a5f3fc;">
+                                <div style="font-size:12px;color:#0f766e;">预测下月回款</div>
+                                <div style="font-size:24px;font-weight:800;color:#0f766e;">¥${Number(forecast.next_month_revenue || 0).toLocaleString()}</div>
+                            </div>
+                            <div style="padding:14px;border-radius:12px;background:#eef2ff;border:1px solid #c7d2fe;">
+                                <div style="font-size:12px;color:#4338ca;">预测下月毛利</div>
+                                <div style="font-size:24px;font-weight:800;color:${Number(forecast.next_month_gross_profit || 0) >= 0 ? '#4338ca' : '#dc2626'};">¥${Number(forecast.next_month_gross_profit || 0).toLocaleString()}</div>
+                            </div>
+                        </div>
+                        <div style="font-size:13px;color:#64748b;margin-bottom:12px;">以下异常根据当前财务数据自动识别，优先关注亏损、低毛利和大额未回款项目。</div>
+                        ${anomalies.length ? anomalies.map(item => `
+                            <div style="padding:12px 14px;border-radius:12px;border-left:4px solid ${item.type === 'loss' ? '#ef4444' : item.type === 'low_margin' ? '#f59e0b' : '#3b82f6'};background:#fff;margin-bottom:10px;box-shadow:0 4px 16px rgba(15,23,42,0.04);cursor:pointer;" onclick="loadProjectDetail(${item.project_id})">
+                                <div style="font-weight:700;color:#111827;margin-bottom:4px;">${item.project_name}</div>
+                                <div style="font-size:13px;color:#475569;">${item.message}</div>
+                            </div>
+                        `).join('') : '<div class="empty-state"><p>当前未发现明显财务异常</p></div>'}
+                    </div>
+                </div>
+                <div class="panel" style="margin-bottom:20px;">
+                    <div class="panel-header"><div class="panel-title">财务趋势</div></div>
                     <div class="panel-body">
                         <div style="margin-bottom:12px;font-size:13px;color:#64748b;">趋势图展示最近月份的回款、报销、人力成本和毛利变化，便于识别经营拐点。</div>
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
@@ -73,7 +98,7 @@
                 <div class="panel">
                     <div class="panel-header"><div class="panel-title">项目经营明细</div></div>
                     <div class="panel-body">
-                        <div style="margin-bottom:12px;font-size:13px;color:#64748b;">可按项目、医院、毛利率和经营风险快速筛选重点项目。</div>
+                        <div style="margin-bottom:12px;font-size:13px;color:#64748b;">可按项目、医院、毛利率和财务风险快速筛选重点项目。</div>
                         <div id="financialResultCount" style="margin-bottom:12px;font-size:12px;color:#64748b;">当前结果：${(data.projects || []).length} 条</div>
                         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
                             <input id="financialSearch" type="text" placeholder="搜索项目 / 医院" oninput="filterFinancialRows()" style="flex:1;min-width:240px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
@@ -130,7 +155,7 @@
                         { name: '报销', type: 'line', smooth: true, data: reimbursed, itemStyle: { color: '#f59e0b' } },
                         { name: '人力成本', type: 'line', smooth: true, data: labor, itemStyle: { color: '#ec4899' } }
                     ],
-                    graphic: !months.length ? [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无经营趋势数据', fill: '#94a3b8', fontSize: 16 } }] : []
+                    graphic: !months.length ? [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无财务趋势数据', fill: '#94a3b8', fontSize: 16 } }] : []
                 });
 
                 const profitChart = echarts.init(document.getElementById('financeProfitChart'));
@@ -157,16 +182,17 @@
             container.innerHTML = `
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
-                        <h2 class="detail-title">💰 经营看板</h2>
-                        <p class="detail-meta">总览合同额、回款、报销、人力成本与项目毛利</p>
+                        <h2 class="detail-title">📉 财务总览</h2>
+                        <p class="detail-meta">聚焦合同、回款、报销、人力成本、毛利与财务异常</p>
                     </div>
                     <div class="btn-group">
+                        <button class="btn btn-outline" onclick="showBusinessOverview()">💰 经营看板</button>
                         <button class="btn btn-outline" onclick="copyCurrentViewLink()">复制当前视图链接</button>
                         <button class="btn btn-outline" onclick="showFinancialOverview()">刷新</button>
                         <button class="btn btn-outline" onclick="showDashboard()">← 返回仪表盘</button>
                     </div>
                 </div>
-                <div class="empty-state"><p>加载经营看板失败: ${e.message}</p></div>
+                <div class="empty-state"><p>加载财务总览失败: ${e.message}</p></div>
             `;
         }
     };
@@ -199,7 +225,7 @@
         if (tbody) {
             if (!visibleCount && !emptyRow) {
                 const summary = [keyword, marginFilter, focusFilter].filter(Boolean).join(' / ');
-                tbody.insertAdjacentHTML('beforeend', `<tr id="financialEmpty"><td colspan="8" class="empty-state">未找到匹配的经营项目${summary ? `（当前筛选：${summary}）` : ''}</td></tr>`);
+                tbody.insertAdjacentHTML('beforeend', `<tr id="financialEmpty"><td colspan="8" class="empty-state">未找到匹配的财务项目${summary ? `（当前筛选：${summary}）` : ''}</td></tr>`);
             } else if (visibleCount && emptyRow) {
                 emptyRow.remove();
             }

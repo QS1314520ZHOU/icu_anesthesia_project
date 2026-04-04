@@ -1,5 +1,40 @@
 // Authentication and session helpers extracted from main.js
 
+function hasPermission(permission) {
+    if (!currentUser) return false;
+    const permissions = currentUser.permissions || [];
+    return permissions.includes('*') || permissions.includes(permission);
+}
+
+function applyPermissionGuards() {
+    const guarded = [
+        { selector: '#adminSettingsBtn', permission: '*', mode: 'show' },
+        { selector: 'button[onclick="showApprovalCenter()"]', permission: 'project:read', mode: 'disable' },
+        { selector: 'button[onclick="window.location.href=\'/alignment\'"]', permission: 'project:read', mode: 'disable' },
+        { selector: 'button[onclick="showBusinessOverview()"]', permission: 'report:read', mode: 'disable' },
+        { selector: 'button[onclick="showFinancialOverview()"]', permission: 'report:read', mode: 'disable' },
+        { selector: 'button[onclick="showResourceOverview()"]', permission: 'team:read', mode: 'disable' },
+        { selector: 'button[onclick="showDeliveryMap()"]', permission: 'project:read', mode: 'disable' },
+        { selector: 'button[onclick="showWarningCenter()"]', permission: 'project:read', mode: 'disable' },
+        { selector: 'button[onclick="showReminderCenter()"]', permission: 'project:read', mode: 'disable' },
+        { selector: 'button[onclick*="generateWeeklyReport"]', permission: 'report:write', mode: 'disable' },
+        { selector: 'button[onclick*="callAiAnalysis"]', permission: 'ai:use', mode: 'disable' }
+    ];
+
+    guarded.forEach(item => {
+        document.querySelectorAll(item.selector).forEach(el => {
+            const allowed = item.permission === '*' ? currentUser?.role === 'admin' : hasPermission(item.permission);
+            if (item.mode === 'show') {
+                el.style.display = allowed ? '' : 'none';
+            } else {
+                el.disabled = !allowed;
+                el.style.opacity = allowed ? '1' : '0.5';
+                el.title = allowed ? '' : '当前账号无权限使用此功能';
+            }
+        });
+    });
+}
+
 async function checkAuth() {
     const mainContainer = document.querySelector('.main-container');
     const header = document.querySelector('.header');
@@ -118,6 +153,7 @@ function showRegisterFromOverlay() {
 function updateUserUI() {
     const loginBtnText = document.getElementById('loginBtnText');
     const adminSettingsBtn = document.getElementById('adminSettingsBtn');
+    const userManagementBtn = document.getElementById('userManagementBtn');
 
     if (currentUser) {
         if (loginBtnText) loginBtnText.textContent = currentUser.display_name || currentUser.username;
@@ -144,9 +180,14 @@ function updateUserUI() {
         if (adminSettingsBtn) {
             adminSettingsBtn.style.display = currentUser.role === 'admin' ? 'block' : 'none';
         }
+        if (userManagementBtn) {
+            userManagementBtn.style.display = currentUser.role === 'admin' ? 'block' : 'none';
+        }
+        applyPermissionGuards();
     } else {
         if (loginBtnText) loginBtnText.textContent = '登录';
         if (adminSettingsBtn) adminSettingsBtn.style.display = 'none';
+        if (userManagementBtn) userManagementBtn.style.display = 'none';
     }
 }
 
@@ -232,6 +273,38 @@ async function doLogout() {
     currentUser = null;
     localStorage.removeItem('token');
     window.location.reload();
+}
+
+function showWecomLogin(containerId = 'overlayWecomContainer', loginFormId = 'overlayLoginForm') {
+    const container = document.getElementById(containerId);
+    const loginForm = document.getElementById(loginFormId);
+    if (!container) {
+        window.location.href = '/api/wecom/oauth/login';
+        return;
+    }
+
+    if (loginForm) {
+        loginForm.style.display = 'none';
+    }
+    container.style.display = 'block';
+    container.innerHTML = `
+        <div style="text-align:center;padding:12px;">
+            <div style="font-size:13px;color:#64748b;margin-bottom:10px;">点击下方按钮前往企业微信扫码登录</div>
+            <button class="btn btn-success btn-full" onclick="window.location.href='/api/wecom/oauth/login'">📱 前往企业微信登录</button>
+            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="showLoginForm(); document.getElementById('${containerId}').style.display='none'; document.getElementById('${loginFormId}').style.display='block';">返回账号登录</button>
+        </div>
+    `;
+}
+
+function startWecomBind() {
+    if (!currentUser) {
+        showToast('请先登录后再绑定企业微信', 'warning');
+        return;
+    }
+    const popup = window.open('/api/wecom/oauth/login?redirect_uri=bind', '_blank', 'width=900,height=780');
+    if (!popup) {
+        showToast('请允许浏览器弹窗后重试企业微信绑定', 'warning');
+    }
 }
 
 (function checkWecomLoginCallback() {

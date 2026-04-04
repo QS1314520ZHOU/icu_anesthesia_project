@@ -1,5 +1,16 @@
 // Report and archive operations extracted from main.js
 
+function formatArchiveDate(value, includeTime = false) {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return String(value);
+    }
+    return includeTime
+        ? date.toLocaleString('zh-CN', { hour12: false })
+        : date.toLocaleDateString('zh-CN');
+}
+
 function renderBeautifulReport(markdown, type) {
     if (!markdown) return '<div class="error-msg">无报告内容</div>';
     markdown = cleanAiMarkdown(markdown);
@@ -229,11 +240,14 @@ async function generateWeeklyReport(pid, forceRefresh = false) {
         const data = await api.post(endpoint);
 
         if (data.task_id) {
-            pollTask(data.task_id, 'reportLoading', 'reportContent', 'weekly', (result) => {
-                if (contentEl) contentEl.innerHTML = renderBeautifulReport(result, 'weekly');
-                if (loadingEl) loadingEl.style.display = 'none';
-                if (contentEl) contentEl.style.display = 'block';
-            });
+            const task = await pollTask(data.task_id, 'reportLoading', 'reportContent', 'weekly');
+            const result = task?.result || '';
+            if (!result) {
+                throw new Error('周报任务已完成，但未返回报告内容');
+            }
+            if (contentEl) contentEl.innerHTML = renderBeautifulReport(result, 'weekly');
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (contentEl) contentEl.style.display = 'block';
         } else {
             const cacheHint = data.cached ? `<div class="cache-hint"><span class="icon">💾</span><span>此周报为缓存版本 (${data.cached_at})。</span></div>` : '';
             if (contentEl) contentEl.innerHTML = cacheHint + renderBeautifulReport(data.report, 'weekly');
@@ -311,11 +325,14 @@ async function generateAllReport(forceRefresh = false) {
         const data = await api.post(endpoint);
 
         if (data.task_id) {
-            pollTask(data.task_id, 'reportLoading', 'reportContent', 'weekly', (result) => {
-                document.getElementById('reportContent').innerHTML = renderBeautifulReport(result, 'weekly');
-                document.getElementById('reportLoading').style.display = 'none';
-                document.getElementById('reportContent').style.display = 'block';
-            });
+            const task = await pollTask(data.task_id, 'reportLoading', 'reportContent', 'weekly');
+            const result = task?.result || '';
+            if (!result) {
+                throw new Error('全局周报任务已完成，但未返回报告内容');
+            }
+            document.getElementById('reportContent').innerHTML = renderBeautifulReport(result, 'weekly');
+            document.getElementById('reportLoading').style.display = 'none';
+            document.getElementById('reportContent').style.display = 'block';
         } else {
             const cacheHint = data.cached ? `<div class="cache-hint"><span class="icon">💾</span><span>此周报为缓存版本 (${data.cached_at})。</span></div>` : '';
             document.getElementById('reportContent').innerHTML = cacheHint + renderBeautifulReport(data.report, 'weekly');
@@ -343,6 +360,48 @@ async function exportProjectReport(pid) {
     } catch (e) {
         console.error('导出失败', e);
         showToast('导出失败，请重试', 'danger');
+    }
+}
+
+function exportCurrentReport(format) {
+    const content = document.getElementById('reportContent');
+    if (!content || content.style.display === 'none' || !content.innerHTML.trim()) {
+        showToast('当前没有可导出的报告内容', 'warning');
+        return;
+    }
+    const title = currentReportProjectId ? `项目报告_${currentReportProjectId}` : '全局周报';
+    let blob;
+    let filename;
+    if (format === 'markdown' || format === 'txt') {
+        const text = content.innerText || '';
+        blob = new Blob([text], { type: format === 'markdown' ? 'text/markdown;charset=utf-8;' : 'text/plain;charset=utf-8;' });
+        filename = `${title}.${format === 'markdown' ? 'md' : 'txt'}`;
+    } else {
+        blob = new Blob([content.innerHTML], { type: 'text/html;charset=utf-8;' });
+        filename = `${title}.html`;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`已导出 ${filename}`, 'success');
+}
+
+async function copyCurrentReportContent() {
+    const content = document.getElementById('reportContent');
+    if (!content || content.style.display === 'none' || !content.innerText.trim()) {
+        showToast('当前没有可复制的报告内容', 'warning');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(content.innerText);
+        showToast('报告内容已复制', 'success');
+    } catch (e) {
+        showToast('复制失败: ' + e.message, 'danger');
     }
 }
 
@@ -381,7 +440,7 @@ async function loadReportArchive(projectId) {
                 onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background=''">
                 <div style="display:flex;align-items:center;gap:10px;">
                     ${typeBadge}
-                    <span style="font-weight:500;">${a.report_date}</span>
+                    <span style="font-weight:500;">${formatArchiveDate(a.report_date)}</span>
                     ${genBadge}
                 </div>
                 <span style="color:var(--gray-400);font-size:12px;">点击查看 →</span>
@@ -411,15 +470,21 @@ async function viewArchiveDetail(archiveId) {
             <div style="background:white;border-radius:12px;width:90%;max-width:800px;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
                 <div style="padding:20px 24px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center;">
                     <div>
-                        <h3 style="margin:0;font-size:18px;">📂 ${typeLabel} - ${data.report_date}</h3>
+                        <h3 style="margin:0;font-size:18px;">📂 ${typeLabel} - ${formatArchiveDate(data.report_date)}</h3>
                         <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">
-                            生成方式: ${data.generated_by === 'auto' ? '自动' : '手动'} | ${data.created_at || ''}
+                            生成方式: ${data.generated_by === 'auto' ? '自动' : '手动'} | ${formatArchiveDate(data.created_at, true)}
                         </div>
                     </div>
                     <button onclick="this.closest('.modal').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:var(--gray-400);">✕</button>
                 </div>
                 <div style="padding:24px;overflow-y:auto;flex:1;line-height:1.8;font-size:14px;" class="report-detail-content">
                     ${htmlContent}
+                </div>
+                <div style="padding:16px 24px;border-top:1px solid var(--gray-200);display:flex;justify-content:flex-end;gap:10px;">
+                    <button class="btn btn-outline" onclick="downloadArchiveReport('html', ${archiveId}, \`${String(data.content || '').replace(/`/g, '\\`')}\`)">导出 HTML</button>
+                    <button class="btn btn-outline" onclick="downloadArchiveReport('markdown', ${archiveId}, \`${String(data.content || '').replace(/`/g, '\\`')}\`)">导出 Markdown</button>
+                    <button class="btn btn-outline" onclick="downloadArchiveReport('txt', ${archiveId}, \`${String(data.content || '').replace(/`/g, '\\`')}\`)">导出 TXT</button>
+                    <button class="btn btn-outline" onclick="copyArchiveReportContent(\`${String(data.content || '').replace(/`/g, '\\`')}\`)">复制内容</button>
                 </div>
             </div>
         `;
@@ -429,6 +494,35 @@ async function viewArchiveDetail(archiveId) {
         document.body.appendChild(modal);
     } catch (e) {
         showToast('加载报告失败: ' + e.message, 'danger');
+    }
+}
+
+function downloadArchiveReport(format, archiveId, content) {
+    const safeContent = content || '';
+    const filename = format === 'markdown' ? `report_archive_${archiveId}.md`
+        : format === 'txt' ? `report_archive_${archiveId}.txt`
+        : `report_archive_${archiveId}.html`;
+    const blob = new Blob(
+        [format === 'markdown' ? safeContent : format === 'txt' ? safeContent : renderAiMarkdown(safeContent)],
+        { type: format === 'markdown' ? 'text/markdown;charset=utf-8;' : format === 'txt' ? 'text/plain;charset=utf-8;' : 'text/html;charset=utf-8;' }
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`已导出 ${filename}`, 'success');
+}
+
+async function copyArchiveReportContent(content) {
+    try {
+        await navigator.clipboard.writeText(content || '');
+        showToast('归档报告内容已复制', 'success');
+    } catch (e) {
+        showToast('复制失败: ' + e.message, 'danger');
     }
 }
 

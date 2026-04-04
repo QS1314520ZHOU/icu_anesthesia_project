@@ -305,6 +305,19 @@ class ReportScheduler:
             sql_stages = DatabasePool.format_sql("SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order")
             stages = conn.execute(sql_stages, (project_id,)).fetchall()
 
+            sql_counts = DatabasePool.format_sql('''
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN t.is_completed = ? THEN 1 ELSE 0 END) as done
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+            ''')
+            task_counts = conn.execute(sql_counts, (True, project_id)).fetchone()
+
+        total_tasks = task_counts['total'] or 0
+        done_tasks = task_counts['done'] or 0
+        actual_progress = round(done_tasks / total_tasks * 100) if total_tasks > 0 else (project['progress'] or 0)
+
         # 明日计划
         tmr_plans = [l['tomorrow_plan'] for l in daily_logs if l['tomorrow_plan']]
 
@@ -313,7 +326,7 @@ class ReportScheduler:
             "project_name": project['project_name'],
             "hospital_name": project['hospital_name'],
             "status": project['status'],
-            "progress": project['progress'],
+            "progress": actual_progress,
             "date": report_date,
             "logs": [dict(l) for l in daily_logs],
             "completed_tasks": [dict(t) for t in completed_tasks],
@@ -331,7 +344,7 @@ class ReportScheduler:
 项目名称: {project['project_name']}
 医院: {project['hospital_name']}
 当前阶段: {project['status']}
-整体进度: {project['progress']}%
+整体进度: {actual_progress}%
 日期: {report_date}
 
 【今日工作内容 (来自团队日志)】
@@ -370,16 +383,17 @@ class ReportScheduler:
 
         except Exception as e:
             logger.warning("AI日报生成失败 (%s), 使用纯数据摘要", e)
-            return self._build_data_daily_summary(project, report_date, daily_logs, completed_tasks, active_issues, stages, tmr_plans)
+            return self._build_data_daily_summary(project, report_date, daily_logs, completed_tasks, active_issues, stages, tmr_plans, actual_progress)
 
-    def _build_data_daily_summary(self, project, date, logs, tasks, issues, stages, plans):
+    def _build_data_daily_summary(self, project, date, logs, tasks, issues, stages, plans, actual_progress=None):
         """AI 不可用时的纯数据日报摘要"""
+        progress_value = actual_progress if actual_progress is not None else (project['progress'] or 0)
         lines = [
             f"# 📋 {project['project_name']} 项目实施日报",
             f"",
             f"**日期**: {date}",
             f"**项目**: {project['project_name']} ({project['hospital_name']})",
-            f"**状态**: {project['status']} | **整体进度**: {project['progress']}%",
+            f"**状态**: {project['status']} | **整体进度**: {progress_value}%",
             f"**报告类型**: 系统自动生成（数据摘要）",
             f"",
             f"## 一、今日进展",
@@ -494,8 +508,21 @@ class ReportScheduler:
             sql_logs = DatabasePool.format_sql("SELECT * FROM work_logs WHERE project_id = ? AND log_date >= ? ORDER BY log_date")
             work_logs = [dict(w) for w in conn.execute(sql_logs, (project_id, week_ago)).fetchall()]
 
+            sql_counts = DatabasePool.format_sql('''
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN t.is_completed = ? THEN 1 ELSE 0 END) as done
+                FROM tasks t
+                JOIN project_stages s ON t.stage_id = s.id
+                WHERE s.project_id = ?
+            ''')
+            task_counts = conn.execute(sql_counts, (True, project_id)).fetchone()
+
+        total_tasks = task_counts['total'] or 0
+        done_tasks = task_counts['done'] or 0
+        actual_progress = round(done_tasks / total_tasks * 100) if total_tasks > 0 else (project['progress'] or 0)
+
         project_data = {
-            "project": dict(project),
+            "project": {**dict(project), "progress": actual_progress},
             "stages": stages,
             "completed_tasks_this_week": completed_tasks,
             "new_issues_this_week": new_issues,
@@ -552,14 +579,15 @@ Markdown格式示例：
             return self._build_data_weekly_summary(
                 project, today, week_ago, stages,
                 completed_tasks, new_issues, pending_issues,
-                interfaces, work_logs
+                interfaces, work_logs, actual_progress
             )
 
     def _build_data_weekly_summary(self, project, today, week_ago, stages,
                                     completed_tasks, new_issues, pending_issues,
-                                    interfaces, work_logs):
+                                    interfaces, work_logs, actual_progress=None):
         """AI 不可用时的纯数据周报摘要"""
         interface_done = len([i for i in interfaces if i['status'] == '已完成'])
+        progress_value = actual_progress if actual_progress is not None else (project['progress'] or 0)
 
         lines = [
             f"# 📋 {project['project_name']} 项目周报",
@@ -567,7 +595,7 @@ Markdown格式示例：
             f"**报告周期**: {week_ago} ~ {today}",
             f"**项目**: {project['project_name']} ({project['hospital_name']})",
             f"**项目经理**: {project['project_manager'] or '未指定'}",
-            f"**当前状态**: {project['status']} | **整体进度**: {project['progress']}%",
+            f"**当前状态**: {project['status']} | **整体进度**: {progress_value}%",
             f"**报告类型**: 系统自动生成（数据摘要）",
             f"",
             f"## 一、本周工作完成情况",

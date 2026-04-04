@@ -1,6 +1,7 @@
 // Project-detail tools extracted from project_detail_hub.js
 
 let interfaceTemplatesCache = null;
+window.interfaceTemplateFeedback = window.interfaceTemplateFeedback || JSON.parse(localStorage.getItem('interface_template_feedback') || '{}');
 
 function getProjectCategory() {
     if (!currentProject) return 'common';
@@ -99,6 +100,25 @@ async function applyInterfaceTemplate(templateId) {
     }
 }
 
+function saveTemplateFeedback(templateId, useful) {
+    window.interfaceTemplateFeedback[String(templateId)] = {
+        useful: !!useful,
+        updated_at: new Date().toISOString()
+    };
+    localStorage.setItem('interface_template_feedback', JSON.stringify(window.interfaceTemplateFeedback));
+    showToast(useful ? '已记录为有效模板' : '已记录为待优化模板', 'success');
+}
+
+function markCurrentTemplateFeedback(useful) {
+    const select = document.getElementById('interfaceTemplateSelect');
+    const templateId = select ? select.value : '';
+    if (!templateId) {
+        showToast('请先选择一个接口模板', 'warning');
+        return;
+    }
+    saveTemplateFeedback(templateId, useful);
+}
+
 async function batchAddRecommendedInterfaces() {
     if (!currentProjectId) {
         showToast('请先选择项目', 'warning');
@@ -151,7 +171,27 @@ async function saveDocument() {
     formData.append('version', document.getElementById('docVersion').value);
     formData.append('upload_by', document.getElementById('docUploadBy').value);
 
-    await fetch(`/api/projects/${currentProjectId}/documents`, { method: 'POST', body: formData });
-    closeModal('documentModal');
-    loadDocuments(currentProjectId);
+    const uploadBtn = Array.from(document.querySelectorAll('#documentModal .btn')).find(btn => btn.textContent.includes('上传'));
+    const originalText = uploadBtn ? uploadBtn.textContent : '';
+    if (uploadBtn) {
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '上传中...';
+    }
+    try {
+        const response = await fetch(`/api/projects/${currentProjectId}/documents`, { method: 'POST', body: formData });
+        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.message || data.error || '上传失败');
+        }
+        closeModal('documentModal');
+        await loadDocuments(currentProjectId);
+        showToast(`文档上传成功：${document.getElementById('docName').value || (fileInput.files[0] ? fileInput.files[0].name : '未命名')}`, 'success');
+    } catch (e) {
+        showToast(`文档上传失败: ${e.message}`, 'danger');
+    } finally {
+        if (uploadBtn) {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = originalText;
+        }
+    }
 }

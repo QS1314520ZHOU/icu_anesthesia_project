@@ -789,6 +789,26 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
+
+        # 17.6 月度经营指标表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS business_monthly_metrics (
+                id {PK_AUTO},
+                project_id INTEGER NOT NULL,
+                metric_month TEXT NOT NULL,
+                output_value {REAL_TYPE} DEFAULT 0,
+                collected_amount {REAL_TYPE} DEFAULT 0,
+                direct_cost {REAL_TYPE} DEFAULT 0,
+                labor_cost {REAL_TYPE} DEFAULT 0,
+                tax_amount {REAL_TYPE} DEFAULT 0,
+                management_cost {REAL_TYPE} DEFAULT 0,
+                notes TEXT,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(project_id, metric_month)
+            )
+        ''')
         try:
             cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_archive_project_type_date ON report_archive(project_id, report_type, report_date)")
         except:
@@ -1149,6 +1169,8 @@ def init_db():
             ("idx_task_deps_depends_on", "task_dependencies", "depends_on_task_id"),
             ("idx_snapshots_project_id", "progress_snapshots", "project_id"),
             ("idx_standup_project_id", "standup_minutes", "project_id"),
+            ("idx_business_metrics_project_id", "business_monthly_metrics", "project_id"),
+            ("idx_business_metrics_month", "business_monthly_metrics", "metric_month"),
             ("idx_kb_items_project_id", "kb_items", "project_id"),
             ("idx_kb_items_category", "kb_items", "category"),
             ("idx_interface_specs_project", "interface_specs", "project_id"),

@@ -12,20 +12,29 @@ def get_project_members(project_id):
 
 @member_bp.route('/projects/<int:project_id>/members', methods=['POST'])
 def add_project_member(project_id):
-    data = request.json or {}
-    member_service.add_project_member(project_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        member_service.add_project_member(project_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @member_bp.route('/members/<int:member_id>', methods=['PUT'])
 def update_project_member(member_id):
-    data = request.json or {}
-    member_service.update_project_member(member_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        member_service.update_project_member(member_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @member_bp.route('/members/<int:member_id>', methods=['DELETE'])
 def delete_project_member(member_id):
-    member_service.delete_project_member(member_id)
-    return api_response(True)
+    try:
+        member_service.delete_project_member(member_id)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 # --- Customer Contacts ---
 @member_bp.route('/projects/<int:project_id>/contacts', methods=['GET'])
@@ -35,17 +44,26 @@ def get_customer_contacts(project_id):
 
 @member_bp.route('/projects/<int:project_id>/contacts', methods=['POST'])
 def add_customer_contact(project_id):
-    data = request.json or {}
-    member_service.add_customer_contact(project_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        member_service.add_customer_contact(project_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @member_bp.route('/contacts/<int:contact_id>', methods=['PUT'])
 def update_customer_contact(contact_id):
-    data = request.json or {}
-    member_service.update_customer_contact(contact_id, data)
-    return api_response(True)
+    try:
+        data = request.json or {}
+        member_service.update_customer_contact(contact_id, data)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
 
 @member_bp.route('/contacts/<int:contact_id>', methods=['DELETE'])
 def delete_customer_contact(contact_id):
-    member_service.delete_customer_contact(contact_id)
-    return api_response(True)
+    try:
+        member_service.delete_customer_contact(contact_id)
+        return api_response(True)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)

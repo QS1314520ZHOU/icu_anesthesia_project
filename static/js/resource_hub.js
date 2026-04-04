@@ -4,23 +4,28 @@
         const keyword = params.get('resource_search') || '';
         const role = params.get('resource_role') || '';
         const load = params.get('resource_load') || '';
+        const sort = params.get('resource_sort') || '';
         const input = document.getElementById('resourceMemberSearch');
         const roleSel = document.getElementById('resourceRoleFilter');
         const loadSel = document.getElementById('resourceLoadFilter');
+        const sortSel = document.getElementById('resourceSortFilter');
         if (input) input.value = keyword;
         if (roleSel) roleSel.value = role;
         if (loadSel) loadSel.value = load;
+        if (sortSel) sortSel.value = sort;
     }
 
     function syncResourceFiltersToUrl() {
         const params = new URLSearchParams(window.location.search);
-        ['resource_search', 'resource_role', 'resource_load'].forEach(key => params.delete(key));
+        ['resource_search', 'resource_role', 'resource_load', 'resource_sort'].forEach(key => params.delete(key));
         const keyword = document.getElementById('resourceMemberSearch')?.value.trim() || '';
         const role = document.getElementById('resourceRoleFilter')?.value || '';
         const load = document.getElementById('resourceLoadFilter')?.value || '';
+        const sort = document.getElementById('resourceSortFilter')?.value || '';
         if (keyword) params.set('resource_search', keyword); else params.delete('resource_search');
         if (role) params.set('resource_role', role); else params.delete('resource_role');
         if (load) params.set('resource_load', load); else params.delete('resource_load');
+        if (sort) params.set('resource_sort', sort); else params.delete('resource_sort');
         const query = params.toString();
         window.history.replaceState({}, '', `${window.location.pathname}${query ? '?' + query : ''}`);
     }
@@ -35,7 +40,7 @@
         try {
             const data = await api.get('/resources/overview');
             const params = new URLSearchParams(window.location.search);
-            const resourceSummary = [params.get('resource_search'), params.get('resource_role'), params.get('resource_load')].filter(Boolean).join(' / ');
+            const resourceSummary = [params.get('resource_search'), params.get('resource_role'), params.get('resource_load'), params.get('resource_sort')].filter(Boolean).join(' / ');
             container.innerHTML = `
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
@@ -73,7 +78,7 @@
                 <div class="panel" style="margin-bottom:20px;">
                     <div class="panel-header"><div class="panel-title">建议调配</div></div>
                     <div class="panel-body">
-                    <div style="margin-bottom:12px;font-size:13px;color:#64748b;">根据当前负载高低自动给出人员调配建议，便于快速平衡资源。</div>
+                        <div style="margin-bottom:12px;font-size:13px;color:#64748b;">根据当前负载高低自动给出人员调配建议，便于快速平衡资源。</div>
                         ${(data.suggestions || []).length ? data.suggestions.map(s => `<div style="padding:12px 14px;border-radius:12px;border-left:4px solid #f59e0b;background:#fff;margin-bottom:10px;box-shadow:0 4px 16px rgba(15,23,42,0.04);"><div style="font-weight:700;color:#111827;margin-bottom:6px;">${s.from_member} → ${s.to_member}</div><div style="font-size:13px;color:#475569;margin-bottom:4px;">${s.from_city || '未定位'} / ${s.from_project || '未分配项目'} → ${s.to_city || '未定位'} / ${s.to_project || '未分配项目'}</div><div style="font-size:13px;color:#92400e;">${s.reason}</div></div>`).join('') : '<div class="empty-state"><p>当前暂无明显调配建议</p></div>'}
                     </div>
                 </div>
@@ -93,6 +98,13 @@
                                 <option value="medium">中负载</option>
                                 <option value="low">低负载</option>
                             </select>
+                            <select id="resourceSortFilter" onchange="sortResourceMembers()" style="width:180px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                <option value="">默认排序</option>
+                                <option value="load_desc">按负载从高到低</option>
+                                <option value="load_asc">按负载从低到高</option>
+                                <option value="task_desc">按待办任务从高到低</option>
+                                <option value="project_desc">按项目数从高到低</option>
+                            </select>
                             <button class="btn btn-outline btn-sm" onclick="resetResourceFilters()">清空筛选</button>
                         </div>
                         <div class="table-container">
@@ -108,6 +120,7 @@
                 <div id="resourceMemberDetail" class="panel" style="margin-top:20px;display:none;"></div>
             `;
             hydrateResourceFiltersFromUrl();
+            window.sortResourceMembers();
             window.filterResourceMembers();
         } catch (e) {
             container.innerHTML = `
@@ -162,6 +175,28 @@
         syncResourceFiltersToUrl();
     };
 
+    window.sortResourceMembers = function () {
+        const tbody = document.getElementById('resourceMembersBody');
+        if (!tbody) return;
+        const sort = document.getElementById('resourceSortFilter')?.value || '';
+        const rows = Array.from(tbody.querySelectorAll('.resource-member-row'));
+        rows.sort((a, b) => {
+            const loadA = Number(a.dataset.load || 0);
+            const loadB = Number(b.dataset.load || 0);
+            const taskA = Number(a.children[5]?.textContent || 0);
+            const taskB = Number(b.children[5]?.textContent || 0);
+            const projectA = Number(a.children[4]?.textContent || 0);
+            const projectB = Number(b.children[4]?.textContent || 0);
+            if (sort === 'load_desc') return loadB - loadA;
+            if (sort === 'load_asc') return loadA - loadB;
+            if (sort === 'task_desc') return taskB - taskA;
+            if (sort === 'project_desc') return projectB - projectA;
+            return loadB - loadA;
+        });
+        rows.forEach(row => tbody.appendChild(row));
+        syncResourceFiltersToUrl();
+    };
+
     window.filterResourceByCity = function (city) {
         const input = document.getElementById('resourceMemberSearch');
         if (input) {
@@ -174,9 +209,12 @@
         const input = document.getElementById('resourceMemberSearch');
         const role = document.getElementById('resourceRoleFilter');
         const load = document.getElementById('resourceLoadFilter');
+        const sort = document.getElementById('resourceSortFilter');
         if (input) input.value = '';
         if (role) role.value = '';
         if (load) load.value = '';
+        if (sort) sort.value = '';
+        window.sortResourceMembers();
         window.filterResourceMembers();
     };
 
@@ -190,6 +228,12 @@
             panel.innerHTML = `
                 <div class="panel-header"><div class="panel-title">成员详情 · ${data.name}</div></div>
                 <div class="panel-body">
+                    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px;">
+                        <div style="padding:12px;border-radius:10px;background:#eff6ff;"><div style="font-size:12px;color:#64748b;">项目数</div><div style="font-size:22px;font-weight:800;color:#2563eb;">${(data.projects || []).length}</div></div>
+                        <div style="padding:12px;border-radius:10px;background:#fff7ed;"><div style="font-size:12px;color:#64748b;">待办任务</div><div style="font-size:22px;font-weight:800;color:#d97706;">${(data.tasks || []).length}</div></div>
+                        <div style="padding:12px;border-radius:10px;background:#f0fdf4;"><div style="font-size:12px;color:#64748b;">近期日志</div><div style="font-size:22px;font-weight:800;color:#059669;">${(data.logs || []).length}</div></div>
+                        <div style="padding:12px;border-radius:10px;background:#fdf2f8;"><div style="font-size:12px;color:#64748b;">高负载提示</div><div style="font-size:22px;font-weight:800;color:#db2777;">${(data.tasks || []).length > 5 ? '是' : '否'}</div></div>
+                    </div>
                     <div style="margin-bottom:16px;font-weight:700;color:#334155;">关联项目</div>
                     <div class="table-container" style="margin-bottom:20px;">
                         <table class="table">

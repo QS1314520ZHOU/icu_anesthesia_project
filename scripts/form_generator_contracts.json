@@ -1,0 +1,128 @@
+{
+  "samples": [
+    {
+      "path": "表单/ICU机械通气患者误吸风险评估量表.docx",
+      "expected_strategy": "score_table",
+      "component_count": 51,
+      "overlay_count": 0,
+      "readonly_count": 0,
+      "type_counts": {
+        "label": 19,
+        "checkBox": 31,
+        "textField": 1
+      },
+      "required_values": [
+        "nian_ling_sui",
+        "nian_ling_sui",
+        "nian_ling_sui",
+        "yi_shi_zhuang_tai_ping_fen_fen",
+        "yi_shi_zhuang_tai_ping_fen_fen",
+        "yi_shi_zhuang_tai_ping_fen_fen",
+        "ji_chu_ji_bing_zhong",
+        "ji_chu_ji_bing_zhong"
+      ],
+      "required_codes": [
+        "lt_60",
+        "opt_60_to_74",
+        "gt_74",
+        "gcs_ping_fen_gt_11",
+        "gcs_ping_fen_9_to_11",
+        "gcs_ping_fen_lt_9",
+        "opt_1",
+        "opt_2"
+      ],
+      "required_labels": [
+        "ICU机械通气患者误吸风险评估量表",
+        "自身因素",
+        "年龄（岁）:",
+        "意识状态评分（分）:",
+        "基础疾病（种）:",
+        "体位:",
+        "气管导管气囊压力:",
+        "肠内营养途径:",
+        "胃残余量:",
+        "医源性因素"
+      ]
+    },
+    {
+      "path": "表单/普通表格示例.txt",
+      "expected_strategy": "text_table",
+      "component_count": 12,
+      "overlay_count": 6,
+      "readonly_count": 0,
+      "type_counts": {
+        "label": 5,
+        "table": 1,
+        "textField": 6
+      },
+      "required_values": [
+        "tbl_ti_wen_r2c2",
+        "tbl_ti_wen_r2c3",
+        "tbl_xue_ya_r3c2",
+        "tbl_xue_ya_r3c3",
+        "tbl_xue_tang_r4c2",
+        "tbl_xue_tang_r4c3"
+      ],
+      "required_codes": [
+        "ti_wen_r2c2",
+        "ti_wen_r2c3",
+        "xue_ya_r3c2",
+        "xue_ya_r3c3",
+        "xue_tang_r4c2",
+        "xue_tang_r4c3"
+      ],
+      "required_labels": [
+        "普通表格示例",
+        "普通护理记录表示例",
+        "科室 |  | 床号 |  | 姓名 |  | 住院号 |",
+        "诊断 |  | 入院日期 |  | 责任护士 |  | 日期 |",
+        "备注：此处为普通表格 smoke 样例"
+      ]
+    },
+    {
+      "path": "表单/2.已发压疮评估及护理措施记录单（2025年第4次修订）.doc",
+      "expected_strategy": "semantic",
+      "component_count": 42,
+      "overlay_count": 0,
+      "readonly_count": 7,
+      "type_counts": {
+        "label": 21,
+        "textField": 9,
+        "checkBox": 11,
+        "modalDatePicker": 1
+      },
+      "required_values": [
+        "patient.dept",
+        "patient.showBed",
+        "patient.name",
+        "patient.mrn",
+        "patient.clinicalDiagnosis",
+        "patient.admissionTime",
+        "cuo_shi_wan_quan_dao_wei",
+        "cuo_shi_wan_quan_dao_wei"
+      ],
+      "required_codes": [
+        "shi",
+        "fou",
+        "zhuan",
+        "chu_yuan",
+        "si_wang",
+        "zhi_yu",
+        "hao_zhuan",
+        "wei_yu"
+      ],
+      "required_labels": [
+        "2.已发压疮评估及护理措施记录单（2025年第4次修订）",
+        "已发压力性损伤评估及护理措施记录单",
+        "科室:",
+        "床号:",
+        "姓名:",
+        "住院号:",
+        "诊断:",
+        "入院日期:",
+        "1期：指压红斑不会消失，皮肤完整。",
+        "2期：部分真皮层缺损，伤口床有活力，基底呈粉红色或红色，出现完整或破裂血清性水疱，但不暴露脂肪层和更深的组织。"
+      ]
+    }
+  ]
+}

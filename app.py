@@ -95,6 +95,7 @@ from routes.form_generator_routes import form_generator_bp
 from routes.mobile_routes import mobile_bp
 from routes.hardware_routes import hardware_bp
 from routes.communication_routes import communication_bp
+from routes.business_routes import business_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from services.auth_service import auth_service
@@ -125,6 +126,7 @@ app.register_blueprint(form_generator_bp, url_prefix='/api/form-generator')
 app.register_blueprint(mobile_bp)
 app.register_blueprint(hardware_bp)
 app.register_blueprint(communication_bp)
+app.register_blueprint(business_bp)
 
 
 @app.before_request
@@ -132,7 +134,11 @@ def require_global_auth():
     path = request.path or '/'
     whitelist_prefixes = [
         '/static/',
+        '/api/force_static/',
         '/api/auth/login',
+        '/api/auth/register',
+        '/api/auth/me',
+        '/api/auth/logout',
         '/health',
         '/m',
         '/alignment',
@@ -141,6 +147,7 @@ def require_global_auth():
     whitelist_exact = {
         '/',
         '/api/force_static',
+        '/favicon.ico',
         '/WW_verify_qbEX7XXnUe5licTo.txt',
     }
 
@@ -364,6 +371,8 @@ def register_task(task_id, task_type, title, runner, *runner_args, **runner_kwar
 def update_task_status(task_id, status, result=None, error=None):
     """更新后台任务状态。"""
     current = task_results.get(task_id, {"task_id": task_id})
+    if current.get("status") == "cancelled" and status != "cancelled":
+        return
     current.update({
         "status": status,
         "updated_at": _now_iso(),
@@ -630,7 +639,7 @@ def analyze_communications(project_id):
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
         project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
-            return jsonify({'error': '项目不存在'}), 404
+            return api_response(False, message='项目不存在', code=404)
         
         # 获取所有沟通记录
         sql_comm = DatabasePool.format_sql('''
@@ -640,7 +649,7 @@ def analyze_communications(project_id):
         records = conn.execute(sql_comm, (project_id,)).fetchall()
         
         if not records:
-            return jsonify({'error': '暂无沟通记录，请先添加沟通记录再进行分析'}), 400
+            return api_response(False, message='暂无沟通记录，请先添加沟通记录再进行分析', code=400)
         
         # 获取项目阶段和进度
         sql_stage = DatabasePool.format_sql(
@@ -710,23 +719,23 @@ def analyze_communications(project_id):
     try:
         from ai_utils import call_ai
         analysis = call_ai(prompt, task_type='analysis')
-        return jsonify({'analysis': analysis})
+        return api_response(True, data={'analysis': analysis})
     except Exception as e:
-        return jsonify({'error': f'AI分析失败: {str(e)}'}), 500
+        return api_response(False, message=f'AI分析失败: {str(e)}', code=500)
 
 @app.route('/api/extract-text', methods=['POST'])
 def extract_text():
     """从上传的文件中提取文本内容（支持 PDF/Word/TXT 等）"""
     if 'file' not in request.files:
-        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+        return api_response(False, message='没有选择文件', code=400)
     
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'success': False, 'message': '没有选择文件'}), 400
+        return api_response(False, message='没有选择文件', code=400)
     
     from services.file_parser import is_supported, extract_text_from_file
     if not is_supported(file.filename):
-        return jsonify({'success': False, 'message': '不支持的文件格式'}), 400
+        return api_response(False, message='不支持的文件格式', code=400)
         
     # 保存到临时目录
     temp_dir = os.path.join(app.root_path, 'uploads', 'temp_extract')
@@ -741,32 +750,29 @@ def extract_text():
         if os.path.exists(filepath):
             os.remove(filepath)
             
-        return jsonify({
-            'success': True,
-            'data': {
-                'text': text,
-                'filename': file.filename,
-                'length': len(text)
-            }
+        return api_response(True, data={
+            'text': text,
+            'filename': file.filename,
+            'length': len(text)
         })
     except Exception as e:
         if os.path.exists(filepath):
             os.remove(filepath)
-        return jsonify({'success': False, 'message': f'文本提取失败: {str(e)}'}), 500
+        return api_response(False, message=f'文本提取失败: {str(e)}', code=500)
 
 @app.route('/api/projects/<int:project_id>/communications/analyze-file', methods=['POST'])
 def analyze_communication_file(project_id):
     """上传文件并进行AI分析 - 从项目管理/需求分析师视角"""
     if 'file' not in request.files:
-        return jsonify({'error': '没有选择文件'}), 400
+        return api_response(False, message='没有选择文件', code=400)
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({'error': '没有选择文件'}), 400
+        return api_response(False, message='没有选择文件', code=400)
 
     from services.file_parser import is_supported, extract_text_from_file
     if not is_supported(file.filename):
-        return jsonify({'error': f'不支持的文件格式。支持: Word(.docx), PDF, Excel(.xlsx), TXT, CSV, Markdown'}), 400
+        return api_response(False, message='不支持的文件格式。支持: Word(.docx), PDF, Excel(.xlsx), TXT, CSV, Markdown', code=400)
 
     # 保存文件
     import os
@@ -783,7 +789,7 @@ def analyze_communication_file(project_id):
     # 提取文本
     file_text = extract_text_from_file(filepath)
     if file_text.startswith('[') and file_text.endswith(']'):
-        return jsonify({'error': file_text}), 400
+        return api_response(False, message=file_text, code=400)
 
     # 截取前 8000 字符避免超出 AI token 限制
     if len(file_text) > 8000:
@@ -794,7 +800,7 @@ def analyze_communication_file(project_id):
         sql_pj = DatabasePool.format_sql('SELECT * FROM projects WHERE id = ?')
         project = conn.execute(sql_pj, (project_id,)).fetchone()
         if not project:
-            return jsonify({'error': '项目不存在'}), 404
+            return api_response(False, message='项目不存在', code=404)
     
         sql_stage = DatabasePool.format_sql(
             'SELECT stage_name, progress FROM project_stages WHERE project_id = ? ORDER BY stage_order'
@@ -855,9 +861,9 @@ def analyze_communication_file(project_id):
     try:
         from ai_utils import call_ai
         analysis = call_ai(prompt, task_type='analysis')
-        return jsonify({'analysis': analysis, 'filename': file.filename, 'text_length': len(file_text)})
+        return api_response(True, data={'analysis': analysis, 'filename': file.filename, 'text_length': len(file_text)})
     except Exception as e:
-        return jsonify({'error': f'AI分析失败: {str(e)}'}), 500
+        return api_response(False, message=f'AI分析失败: {str(e)}', code=500)
 
 # ========== AI项目复盘 API ==========
 @app.route('/api/projects/<int:project_id>/ai-retrospective', methods=['POST'])
@@ -1000,7 +1006,7 @@ def ai_task_suggestions(project_id):
                 suggestions = json.loads(json_str)
                 return api_response(True, {'suggestions': suggestions})
         except Exception as e:
-            logger.warning(f"AI Task Suggestions JSON parse failed: {e}")
+            logging.warning("AI Task Suggestions JSON parse failed: %s", e)
         
         return api_response(True, {'suggestions': [], 'raw_response': result})
     except Exception as e:
@@ -1290,9 +1296,62 @@ def user_logout():
 def get_users():
     """获取用户列表（管理员）"""
     try:
-        from services.auth_service import auth_service
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('auth_token')
+        current_user = auth_service.validate_token(token)
+
+        if not current_user or current_user['role'] != 'admin':
+            return api_response(False, message="仅管理员可操作", code=403)
+
         users = auth_service.get_all_users()
         return api_response(True, users)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/admin/roles', methods=['GET'])
+def get_admin_roles():
+    """获取系统角色与权限矩阵（管理员）"""
+    try:
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('auth_token')
+        current_user = auth_service.validate_token(token)
+
+        if not current_user or current_user['role'] != 'admin':
+            return api_response(False, message="仅管理员可操作", code=403)
+
+        role_matrix = auth_service.list_role_definitions(force_reload=True)
+        return api_response(True, role_matrix)
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
+@app.route('/api/admin/roles', methods=['POST'])
+def save_admin_roles():
+    """保存系统角色与权限矩阵（管理员）"""
+    try:
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('auth_token')
+        current_user = auth_service.validate_token(token)
+
+        if not current_user or current_user['role'] != 'admin':
+            return api_response(False, message="仅管理员可操作", code=403)
+
+        payload = request.json or {}
+        roles = payload.get('roles', payload)
+        old_roles = auth_service.list_role_definitions(force_reload=True)
+        result = auth_service.save_role_definitions(roles)
+        log_operation(
+            current_user.get('display_name') or current_user.get('username') or '系统',
+            '保存角色权限矩阵',
+            'auth',
+            0,
+            '角色权限矩阵',
+            old_roles,
+            result.get('roles', [])
+        )
+        return api_response(result.get('success', True), result.get('roles', []), message='角色权限矩阵已保存')
     except Exception as e:
         return api_response(False, message=str(e), code=500)
 
@@ -1318,7 +1377,6 @@ def migrate_auth_data():
 def update_user_status(user_id):
     """更新用户状态（仅管理员）"""
     try:
-        from services.auth_service import auth_service
         # 验证权限
         token = request.headers.get('Authorization', '').replace('Bearer ', '')
         if not token:
@@ -1327,7 +1385,11 @@ def update_user_status(user_id):
         
         if not current_user or current_user['role'] != 'admin':
             return api_response(False, message="仅管理员可操作", code=403)
-            
+
+        target_user = auth_service.get_user_by_id(user_id)
+        if not target_user:
+            return api_response(False, message="用户不存在", code=404)
+
         data = request.json or {}
         is_active = data.get('is_active', True)
         
@@ -1336,6 +1398,22 @@ def update_user_status(user_id):
              return api_response(False, message="不能禁用当前登录账号", code=400)
 
         result = auth_service.update_user_status(user_id, is_active)
+        updated_user = auth_service.get_user_by_id(user_id)
+        log_operation(
+            current_user.get('display_name') or current_user.get('username') or '系统',
+            '更新用户状态',
+            'auth',
+            user_id,
+            target_user.get('display_name') or target_user.get('username') or f'用户#{user_id}',
+            {
+                'role': target_user.get('role'),
+                'is_active': bool(target_user.get('is_active'))
+            },
+            {
+                'role': updated_user.get('role') if updated_user else target_user.get('role'),
+                'is_active': bool(updated_user.get('is_active')) if updated_user else bool(is_active)
+            }
+        )
         return api_response(result['success'], message=result.get('message'))
     except Exception as e:
         return api_response(False, message=str(e), code=500)
@@ -1344,7 +1422,6 @@ def update_user_status(user_id):
 def reset_user_password(user_id):
     """重置用户密码（仅管理员）"""
     try:
-        from services.auth_service import auth_service
         # 验证权限
         token = request.headers.get('Authorization', '').replace('Bearer ', '')
         if not token:
@@ -1353,13 +1430,26 @@ def reset_user_password(user_id):
         
         if not current_user or current_user['role'] != 'admin':
             return api_response(False, message="仅管理员可操作", code=403)
-            
+
+        target_user = auth_service.get_user_by_id(user_id)
+        if not target_user:
+             return api_response(False, message="用户不存在", code=404)
+
         data = request.json or {}
         new_password = data.get('password')
         if not new_password:
              return api_response(False, message="新密码不能为空", code=400)
 
         result = auth_service.reset_user_password(user_id, new_password)
+        log_operation(
+            current_user.get('display_name') or current_user.get('username') or '系统',
+            '重置用户密码',
+            'auth',
+            user_id,
+            target_user.get('display_name') or target_user.get('username') or f'用户#{user_id}',
+            None,
+            {'password_reset': True}
+        )
         return api_response(result['success'], message=result.get('message'))
     except Exception as e:
         return api_response(False, message=str(e), code=500)
@@ -1613,6 +1703,42 @@ def generate_ai_analysis(project_id):
     except Exception as e:
         return api_response(False, message=str(e), code=500)
 
+@app.route('/api/users/<int:user_id>/role', methods=['POST'])
+def update_user_role(user_id):
+    """更新用户角色（仅管理员）"""
+    try:
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('auth_token')
+        current_user = auth_service.validate_token(token)
+
+        if not current_user or current_user['role'] != 'admin':
+            return api_response(False, message="仅管理员可操作", code=403)
+
+        target_user = auth_service.get_user_by_id(user_id)
+        if not target_user:
+            return api_response(False, message="用户不存在", code=404)
+
+        data = request.json or {}
+        new_role = data.get('role')
+        if not new_role:
+            return api_response(False, message="缺少角色参数", code=400)
+
+        result = auth_service.update_user_role(user_id, new_role)
+        updated_user = auth_service.get_user_by_id(user_id)
+        log_operation(
+            current_user.get('display_name') or current_user.get('username') or '系统',
+            '更新用户角色',
+            'auth',
+            user_id,
+            target_user.get('display_name') or target_user.get('username') or f'用户#{user_id}',
+            {'role': target_user.get('role')},
+            {'role': updated_user.get('role') if updated_user else new_role}
+        )
+        return api_response(result['success'], message=result.get('message'))
+    except Exception as e:
+        return api_response(False, message=str(e), code=500)
+
 @app.route('/api/dashboard/today-focus', methods=['GET'])
 def get_today_focus_dashboard():
     """今日待办驾驶舱：聚合提醒、预警、审批与进行中后台任务。"""
@@ -1803,6 +1929,7 @@ def list_tasks():
     status = request.args.get('status', '').strip()
     task_type = request.args.get('task_type', '').strip()
     project_id = request.args.get('project_id', type=int)
+    keyword = request.args.get('q', '').strip().lower()
     limit = request.args.get('limit', 50, type=int)
     limit = max(1, min(limit or 50, 200))
 
@@ -1819,6 +1946,17 @@ def list_tasks():
         rows_by_id[row['task_id']] = dict(row)
 
     rows = enrich_task_rows(list(rows_by_id.values()))
+    if keyword:
+        rows = [
+            row for row in rows
+            if keyword in str(row.get('task_id', '')).lower()
+            or keyword in str(row.get('title', '')).lower()
+            or keyword in str(row.get('task_type', '')).lower()
+            or keyword in str(row.get('status', '')).lower()
+            or keyword in str(row.get('project_name', '')).lower()
+            or keyword in str(row.get('hospital_name', '')).lower()
+            or keyword in str(row.get('payload_summary', '')).lower()
+        ]
     rows.sort(key=lambda x: (x.get('updated_at') or '', x.get('created_at') or ''), reverse=True)
 
     items = []
@@ -1834,6 +1972,7 @@ def list_tasks():
         'processing': sum(1 for row in rows if row.get('status') == 'processing'),
         'completed': sum(1 for row in rows if row.get('status') == 'completed'),
         'failed': sum(1 for row in rows if row.get('status') == 'failed'),
+        'cancelled': sum(1 for row in rows if row.get('status') == 'cancelled'),
         'total': len(rows),
     }
     return api_response(True, {'items': items, 'summary': summary})
@@ -1886,6 +2025,18 @@ def retry_task(task_id):
     register_task(new_task_id, task_meta['task_type'], task_meta['title'], task_meta['runner'], *task_meta['args'], **retry_kwargs)
     launch_registered_task(new_task_id)
     return api_response(True, {"task_id": new_task_id, "status": "processing"})
+
+@app.route('/api/tasks/<task_id>/cancel', methods=['POST'])
+def cancel_task(task_id):
+    task = task_results.get(task_id) or fetch_task_record(task_id)
+    if task is None:
+        return api_response(False, message="任务不存在", code=404)
+    if task.get('status') != 'processing':
+        return api_response(False, message="仅处理中任务可取消", code=400)
+
+    update_task_status(task_id, "cancelled", error="任务已手动取消")
+    task_registry.pop(task_id, None)
+    return api_response(True, {"task_id": task_id, "status": "cancelled"}, message="任务已取消")
 
 @app.route('/api/tasks/cleanup-completed', methods=['POST'])
 def cleanup_completed_tasks():
@@ -2603,6 +2754,160 @@ def get_approval_tracking():
     rows.sort(key=lambda x: str(x.get('created_at') or ''), reverse=True)
     return api_response(True, rows[:limit])
 
+@app.route('/api/approvals/remind', methods=['POST'])
+def remind_pending_approvals():
+    """批量催办待审批事项，生成系统通知"""
+    data = request.json or {}
+    items = data.get('items', [])
+    if not items:
+        return api_response(False, message='缺少待催办审批项', code=400)
+
+    from services.monitor_service import monitor_service
+
+    reminded = 0
+    with DatabasePool.get_connection() as conn:
+        for item in items:
+            biz_type = item.get('biz_type')
+            biz_id = item.get('biz_id')
+            if not biz_type or not biz_id:
+                continue
+
+            if biz_type == 'change':
+                sql_text = '''
+                    SELECT c.project_id, p.project_name, c.change_title as title
+                    FROM project_changes c
+                    JOIN projects p ON c.project_id = p.id
+                    WHERE c.id = ?
+                '''
+            elif biz_type == 'expense':
+                sql_text = '''
+                    SELECT e.project_id, p.project_name, e.description as title
+                    FROM project_expenses e
+                    JOIN projects p ON e.project_id = p.id
+                    WHERE e.id = ?
+                '''
+            elif biz_type == 'departure':
+                sql_text = '''
+                    SELECT d.project_id, p.project_name, d.reason as title
+                    FROM project_departures d
+                    JOIN projects p ON d.project_id = p.id
+                    WHERE d.id = ?
+                '''
+            else:
+                continue
+
+            row = conn.execute(DatabasePool.format_sql(sql_text), (biz_id,)).fetchone()
+            if not row:
+                continue
+
+            monitor_service.create_notification({
+                'project_id': row['project_id'],
+                'title': f"⏰ 审批催办：{biz_type}",
+                'content': f"项目【{row['project_name']}】的审批事项待跟进：{row['title'] or '未命名事项'}",
+                'type': 'warning'
+            })
+            reminded += 1
+
+    return api_response(True, {'reminded': reminded}, message=f'已催办 {reminded} 条审批')
+
+@app.route('/api/approvals/<biz_type>/<int:biz_id>', methods=['GET'])
+def get_approval_detail(biz_type, biz_id):
+    """获取审批详情与时间线"""
+    type_mapping = {
+        'change': {
+            'table': 'project_changes',
+            'title_field': 'change_title',
+            'sub_type_field': 'change_type',
+            'applicant_field': 'requested_by',
+            'content_field': 'change_desc',
+            'approved_field': 'approved_date',
+        },
+        'expense': {
+            'table': 'project_expenses',
+            'title_field': 'description',
+            'sub_type_field': 'expense_type',
+            'applicant_field': 'applicant',
+            'content_field': 'description',
+            'approved_field': 'approved_at',
+        },
+        'departure': {
+            'table': 'project_departures',
+            'title_field': 'reason',
+            'sub_type_field': 'departure_type',
+            'applicant_field': 'handover_person',
+            'content_field': 'reason',
+            'approved_field': 'approved_at',
+        },
+    }
+    config = type_mapping.get(biz_type)
+    if not config:
+        return api_response(False, message='不支持的审批类型', code=400)
+
+    with DatabasePool.get_connection() as conn:
+        sql_detail = DatabasePool.format_sql(f'''
+            SELECT
+                t.*,
+                p.project_name,
+                p.hospital_name
+            FROM {config["table"]} t
+            JOIN projects p ON t.project_id = p.id
+            WHERE t.id = ?
+        ''')
+        row = conn.execute(sql_detail, (biz_id,)).fetchone()
+        if not row:
+            return api_response(False, message='审批记录不存在', code=404)
+
+        detail = dict(row)
+        approval_detail = {}
+        approval_nodes = []
+        approval_error = None
+        approval_sp_no = detail.get('approval_sp_no')
+
+        if approval_sp_no:
+            try:
+                from services.wecom_service import wecom_service
+                approval_detail = wecom_service.get_approval_detail(approval_sp_no) or {}
+                if approval_detail.get('errcode') == 0:
+                    approve_nodes = (((approval_detail.get('info') or {}).get('apply_data') or {}).get('contents') or [])
+                    approval_nodes = approve_nodes
+                elif approval_detail.get('errmsg'):
+                    approval_error = approval_detail.get('errmsg')
+            except Exception as e:
+                approval_error = str(e)
+
+        timeline = []
+        created_at = detail.get('created_at')
+        if created_at:
+            timeline.append({'label': '提交申请', 'time': str(created_at), 'status': 'done'})
+        if detail.get('approval_sp_no'):
+            timeline.append({'label': '已发起审批', 'time': str(detail.get('created_at') or ''), 'status': 'done', 'extra': detail.get('approval_sp_no')})
+        if detail.get('status') == '审批中':
+            timeline.append({'label': '审批中', 'time': '', 'status': 'processing'})
+        if detail.get(config['approved_field']):
+            timeline.append({'label': detail.get('status') or '审批完成', 'time': str(detail.get(config['approved_field'])), 'status': 'done'})
+        elif detail.get('status') in ('已驳回', '已撤销'):
+            timeline.append({'label': detail.get('status'), 'time': str(detail.get(config['approved_field']) or ''), 'status': 'failed'})
+
+        result = {
+            'biz_type': biz_type,
+            'biz_id': biz_id,
+            'project_id': detail.get('project_id'),
+            'project_name': detail.get('project_name'),
+            'hospital_name': detail.get('hospital_name'),
+            'title': detail.get(config['title_field']) or f'{biz_type} 审批',
+            'sub_type': detail.get(config['sub_type_field']),
+            'applicant': detail.get(config['applicant_field']),
+            'status': detail.get('status'),
+            'approval_sp_no': detail.get('approval_sp_no'),
+            'content': detail.get(config['content_field']) or '',
+            'detail': detail,
+            'timeline': timeline,
+            'wecom_detail': approval_detail,
+            'wecom_nodes': approval_nodes,
+            'wecom_error': approval_error,
+        }
+        return api_response(True, data=result)
+
 @app.route('/api/resources/overview', methods=['GET'])
 def get_resource_overview():
     """资源排班总览：成员、城市、项目占用、待办任务、负载评分。"""
@@ -2832,13 +3137,35 @@ def get_financial_overview():
 
         projects = []
         loss_projects = 0
+        anomaly_projects = []
         for row in project_rows:
             item = dict(row)
             gross_profit = (item.get('collected_amount') or 0) - (item.get('reimbursed_amount') or 0) - (item.get('labor_cost') or 0)
             item['gross_profit'] = round(gross_profit, 2)
             item['margin'] = round((gross_profit / item['collected_amount'] * 100), 2) if item.get('collected_amount') else 0
+            item['uncollected_amount'] = round((item.get('contract_amount') or 0) - (item.get('collected_amount') or 0), 2)
             if gross_profit < 0:
                 loss_projects += 1
+                anomaly_projects.append({
+                    'project_id': item.get('id'),
+                    'project_name': item.get('project_name'),
+                    'type': 'loss',
+                    'message': f"项目毛利为负：{round(gross_profit, 2)} 元"
+                })
+            elif item['margin'] < 10 and item.get('collected_amount'):
+                anomaly_projects.append({
+                    'project_id': item.get('id'),
+                    'project_name': item.get('project_name'),
+                    'type': 'low_margin',
+                    'message': f"项目毛利率偏低：{item['margin']}%"
+                })
+            if item['uncollected_amount'] > 0:
+                anomaly_projects.append({
+                    'project_id': item.get('id'),
+                    'project_name': item.get('project_name'),
+                    'type': 'uncollected',
+                    'message': f"仍有未回款：{item['uncollected_amount']} 元"
+                })
             projects.append(item)
 
         revenue_map = {row['month']: float(row['total'] or 0) for row in revenue_rows if row.get('month')}
@@ -2859,6 +3186,15 @@ def get_financial_overview():
                 'gross_profit': round(collected - reimbursed - labor_cost, 2),
             })
 
+        forecast = {
+            'next_month_revenue': 0,
+            'next_month_gross_profit': 0,
+        }
+        if monthly_trend:
+            recent = monthly_trend[-3:]
+            forecast['next_month_revenue'] = round(sum(item['collected'] for item in recent) / len(recent), 2)
+            forecast['next_month_gross_profit'] = round(sum(item['gross_profit'] for item in recent) / len(recent), 2)
+
         gross_profit_total = revenue - expenses - labor
         return api_response(True, {
             'summary': {
@@ -2874,6 +3210,8 @@ def get_financial_overview():
             },
             'projects': projects,
             'monthly_trend': monthly_trend,
+            'forecast': forecast,
+            'anomalies': anomaly_projects[:10],
         })
     except Exception as e:
         return api_response(False, message=str(e), code=500)
@@ -3533,11 +3871,12 @@ def add_ai_config():
     
     try:
         with DatabasePool.get_connection() as conn:
+            is_active_value = bool(data.get('is_active', True)) if DatabasePool.is_postgres() else (1 if data.get('is_active', True) else 0)
             conn.execute(DatabasePool.format_sql('''
                 INSERT INTO ai_configs (name, api_key, base_url, models, priority, is_active, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             '''), (data['name'], data['api_key'], data['base_url'], models_json, 
-                  data.get('priority', 1), 1 if data.get('is_active', True) else 0))
+                  data.get('priority', 1), is_active_value))
             conn.commit()
         return jsonify({'success': True, 'message': '配置已添加'})
     except DB_INTEGRITY_ERRORS:
@@ -3565,12 +3904,13 @@ def update_ai_config(config_id):
                 models_json = json.dumps(models)
             else:
                 models_json = models
+            is_active_value = bool(data.get('is_active', True)) if DatabasePool.is_postgres() else (1 if data.get('is_active', True) else 0)
 
             conn.execute(DatabasePool.format_sql('''
                 UPDATE ai_configs SET name=?, api_key=?, base_url=?, models=?, priority=?, is_active=?, updated_at=CURRENT_TIMESTAMP
                 WHERE id=?
             '''), (data.get('name'), api_key, data.get('base_url'), models_json,
-                  data.get('priority', 1), 1 if data.get('is_active', True) else 0, config_id))
+                  data.get('priority', 1), is_active_value, config_id))
             conn.commit()
         return jsonify({'success': True, 'message': '配置已更新'})
     except Exception as e:

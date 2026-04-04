@@ -3,6 +3,8 @@
 所有 API 挂载在 /api 前缀下
 """
 import os
+import json
+import hashlib
 import logging
 from flask import Blueprint, request, current_app
 from werkzeug.utils import secure_filename
@@ -15,6 +17,100 @@ from api_utils import api_response
 logger = logging.getLogger(__name__)
 
 spec_bp = Blueprint('interface_spec', __name__, url_prefix='/api')
+
+BUILTIN_STANDARD_DOCS = {
+    '手麻标准': '3_2.手术麻醉信息系统对外接口标准文档Ver1.4(1)(1).pdf',
+    '重症标准': '深医重症信息系统接口说明V2.6(1)(1).pdf',
+}
+BUILTIN_STANDARD_CACHE_VERSION = 'v1'
+
+
+def _extract_text_from_path(file_path: str) -> str:
+    ext = os.path.splitext(file_path)[1].lower()
+    text = ''
+
+    if ext == '.txt':
+        for encoding in ['utf-8', 'gbk', 'gb2312', 'latin-1']:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    text = f.read()
+                break
+            except UnicodeDecodeError:
+                continue
+    elif ext == '.pdf':
+        import pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            pages = []
+            for page in pdf.pages:
+                page_text = page.extract_text() or ''
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        if row:
+                            page_text += '\n' + '\t'.join([str(cell or '') for cell in row])
+                pages.append(page_text)
+            text = '\n\n'.join(pages)
+    elif ext in ('.doc', '.docx'):
+        from docx import Document
+        doc = Document(file_path)
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = '\t'.join([cell.text.strip() for cell in row.cells])
+                if row_text.strip():
+                    paragraphs.append(row_text)
+        text = '\n'.join(paragraphs)
+    elif ext in ('.xml', '.wsdl', '.json'):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read()
+    else:
+        raise ValueError(f'不支持的文件格式: {ext}')
+
+    return text.strip()
+
+
+def _builtin_standard_signature(file_path: str) -> str:
+    stat = os.stat(file_path)
+    raw = f"{BUILTIN_STANDARD_CACHE_VERSION}|{os.path.basename(file_path)}|{stat.st_size}|{int(stat.st_mtime)}"
+    return hashlib.sha1(raw.encode('utf-8')).hexdigest()
+
+
+def _builtin_standard_cache_path(category: str) -> str:
+    upload_folder = current_app.config.get('UPLOAD_FOLDER', 'uploads')
+    cache_dir = os.path.join(upload_folder, 'spec_cache')
+    os.makedirs(cache_dir, exist_ok=True)
+    safe_category = secure_filename(category or 'standard') or 'standard'
+    return os.path.join(cache_dir, f'builtin_{safe_category}.json')
+
+
+def _load_builtin_standard_cache(category: str, file_path: str):
+    cache_path = _builtin_standard_cache_path(category)
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        if payload.get('signature') != _builtin_standard_signature(file_path):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _save_builtin_standard_cache(category: str, file_path: str, doc_text: str, parsed: list):
+    cache_path = _builtin_standard_cache_path(category)
+    payload = {
+        'version': BUILTIN_STANDARD_CACHE_VERSION,
+        'signature': _builtin_standard_signature(file_path),
+        'filename': os.path.basename(file_path),
+        'category': category,
+        'text_length': len(doc_text or ''),
+        'parsed_count': len(parsed or []),
+        'parsed': parsed or [],
+    }
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return payload
 
 
 # ========== 0. 文件文本提取（修复前端 404）==========
@@ -193,6 +289,103 @@ def parse_our_standard():
             'fields_count': len(p.get('fields', []))
         } for p in parsed]
     })
+
+
+@spec_bp.route('/interface-specs/load-builtin-standard', methods=['POST'])
+def load_builtin_standard():
+    """从项目根目录预置 PDF 中直接导入我方标准文档。"""
+    data = request.json or {}
+    category = (data.get('category') or '').strip() or '手麻标准'
+    overwrite = bool(data.get('overwrite', True))
+
+    filename = BUILTIN_STANDARD_DOCS.get(category)
+    if not filename:
+        return api_response(False, message=f'未配置该分类的内置标准文档: {category}', code=400)
+
+    file_path = os.path.join(current_app.root_path, filename)
+    if not os.path.exists(file_path):
+        return api_response(False, message=f'未找到内置标准文档: {filename}', code=404)
+
+    try:
+        cache_payload = _load_builtin_standard_cache(category, file_path)
+
+        with DatabasePool.get_connection() as conn:
+            existing_rows = conn.execute(
+                DatabasePool.format_sql('''
+                    SELECT id FROM interface_specs
+                    WHERE project_id IS NULL
+                      AND spec_source IN ('our_standard', 'our', 'standard')
+                      AND category = ?
+                '''),
+                (category,)
+            ).fetchall()
+        existing_ids = [row['id'] for row in existing_rows]
+
+        if cache_payload and existing_ids:
+            return api_response(True, {
+                'category': category,
+                'filename': filename,
+                'text_length': cache_payload.get('text_length', 0),
+                'parsed_count': len(existing_ids),
+                'spec_ids': existing_ids,
+                'cache_hit': True,
+                'db_reused': True,
+            })
+
+        if cache_payload:
+            doc_text = ''
+            parsed = cache_payload.get('parsed') or []
+        else:
+            doc_text = _extract_text_from_path(file_path)
+            if not doc_text:
+                return api_response(False, message='内置标准文档未提取到文本内容', code=400)
+
+            parsed = interface_parser.parse_document_with_ai(doc_text, 'our_standard')
+            if not parsed:
+                return api_response(False, message='AI 未从内置标准文档中提取到接口定义', code=400)
+            cache_payload = _save_builtin_standard_cache(category, file_path, doc_text, parsed)
+
+        if overwrite:
+            with DatabasePool.get_connection() as conn:
+                old_rows = conn.execute(
+                    DatabasePool.format_sql('''
+                        SELECT id FROM interface_specs
+                        WHERE project_id IS NULL
+                          AND spec_source IN ('our_standard', 'our', 'standard')
+                          AND category = ?
+                    '''),
+                    (category,)
+                ).fetchall()
+                for row in old_rows:
+                    conn.execute(DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_id = ?'), (row['id'],))
+                conn.execute(
+                    DatabasePool.format_sql('''
+                        DELETE FROM interface_specs
+                        WHERE project_id IS NULL
+                          AND spec_source IN ('our_standard', 'our', 'standard')
+                          AND category = ?
+                    '''),
+                    (category,)
+                )
+                conn.commit()
+
+        created_ids = interface_parser.save_parsed_specs(
+            None, None, parsed, 'our_standard', category=category, raw_text=doc_text
+        )
+        return api_response(True, {
+            'category': category,
+            'filename': filename,
+            'text_length': cache_payload.get('text_length', len(doc_text)),
+            'parsed_count': len(parsed),
+            'spec_ids': created_ids,
+            'cache_hit': bool(cache_payload),
+            'db_reused': False,
+        })
+    except ImportError as e:
+        return api_response(False, message=f'缺少解析依赖: {str(e)}', code=500)
+    except Exception as e:
+        logger.error("加载内置标准文档失败: %s", e, exc_info=True)
+        return api_response(False, message=f'加载内置标准文档失败: {str(e)}', code=500)
 
 
 # ========== 2. 接口规范查询 ==========

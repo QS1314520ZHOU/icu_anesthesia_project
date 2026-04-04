@@ -7,24 +7,90 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
-            --bg: #f4f6f8;
+            --bg: #f6f8ff;
             --card: #ffffff;
             --text: #1f2937;
-            --muted: #6b7280;
-            --line: #dbe1e8;
-            --primary: #166534;
-            --primary-soft: #dcfce7;
-            --warn: #b45309;
+            --muted: #64748b;
+            --line: #dbe3f2;
+            --primary: #4f46e5;
+            --primary-soft: #ede9fe;
+            --warn: #d97706;
             --warn-soft: #fef3c7;
-            --danger: #b91c1c;
+            --danger: #dc2626;
             --danger-soft: #fee2e2;
+            --header-bg: linear-gradient(135deg, #4f46e5 0%, #4338ca 52%, #2563eb 100%);
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
             font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
             color: var(--text);
-            background: linear-gradient(180deg, #eef6f1 0%, var(--bg) 35%, #f7f7f7 100%);
+            background:
+                radial-gradient(circle at top left, rgba(99,102,241,0.12), transparent 24%),
+                linear-gradient(180deg, #eef2ff 0%, var(--bg) 38%, #f8fafc 100%);
+        }
+        .page-header {
+            background: var(--header-bg);
+            color: #fff;
+            padding: 22px 0 26px;
+            box-shadow: 0 18px 48px rgba(79, 70, 229, 0.2);
+        }
+        .page-header .wrap {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .brand-icon {
+            width: 58px;
+            height: 58px;
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            background: rgba(255,255,255,0.18);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .page-title {
+            margin: 0 0 6px;
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: 0.2px;
+        }
+        .page-subtitle {
+            margin: 0;
+            color: rgba(224,231,255,0.92);
+            font-size: 14px;
+        }
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .header-actions a,
+        .header-actions button {
+            width: auto;
+            min-width: 140px;
+            padding: 11px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-weight: 700;
+            text-decoration: none;
+            box-shadow: none;
+        }
+        .header-actions a:hover,
+        .header-actions button:hover {
+            background: rgba(255,255,255,0.22);
         }
         .wrap {
             max-width: 1180px;
@@ -48,8 +114,8 @@
         .stat, .panel {
             background: var(--card);
             border: 1px solid var(--line);
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+            border-radius: 22px;
+            box-shadow: 0 16px 40px rgba(37, 99, 235, 0.06);
         }
         .stat {
             padding: 18px;
@@ -90,13 +156,17 @@
         }
         button {
             cursor: pointer;
-            background: #0f766e;
+            background: linear-gradient(135deg, #4f46e5, #2563eb);
             color: #fff;
             border: none;
             font-weight: 600;
+            box-shadow: 0 12px 28px rgba(79, 70, 229, 0.18);
         }
         button.secondary {
-            background: #475569;
+            background: #fff;
+            color: #334155;
+            border: 1px solid var(--line);
+            box-shadow: none;
         }
         table {
             width: 100%;
@@ -124,6 +194,7 @@
         .processing { color: var(--warn); background: var(--warn-soft); }
         .completed { color: var(--primary); background: var(--primary-soft); }
         .failed { color: var(--danger); background: var(--danger-soft); }
+        .cancelled { color: #475569; background: #e2e8f0; }
         .task-type {
             display: inline-block;
             padding: 3px 9px;
@@ -335,6 +406,17 @@
             .stats, .toolbar, .quick-actions, .helper-grid { grid-template-columns: 1fr 1fr; }
         }
         @media (max-width: 640px) {
+            .page-header .wrap {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .header-actions {
+                width: 100%;
+            }
+            .header-actions a,
+            .header-actions button {
+                width: 100%;
+            }
             .stats, .toolbar, .quick-actions, .helper-grid { grid-template-columns: 1fr; }
             th:nth-child(5), td:nth-child(5),
             th:nth-child(6), td:nth-child(6),
@@ -343,15 +425,26 @@
     </style>
 </head>
 <body>
+    <div class="page-header">
+        <div class="wrap">
+            <div class="brand">
+                <div class="brand-icon">🗂️</div>
+                <div>
+                    <h1 class="page-title">任务中心</h1>
+                    <p class="page-subtitle">统一查看 AI 分析、周报、归档与后台任务状态，保持和主系统一致的工作流</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/">← 返回主系统</a>
+                <button type="button" onclick="copyViewLink()">复制当前视图</button>
+            </div>
+        </div>
+    </div>
     <div class="wrap">
-        <h1>任务中心</h1>
         <div class="sub">查看 AI 分析、项目周报、全局周报等后台任务的运行状态，并支持失败后重试。</div>
         <div style="margin-bottom:18px; display:flex; gap:10px; flex-wrap:wrap;">
-            <a href="/" style="text-decoration:none;">
-                <button type="button" class="secondary" style="width:auto;">← 返回主仪表盘</button>
-            </a>
             <button type="button" onclick="loadTasks()" style="width:auto;">刷新任务</button>
-            <button type="button" class="secondary" onclick="copyViewLink()" style="width:auto;">复制当前视图链接</button>
+            <button type="button" class="secondary" onclick="cleanupCompletedTasks()" style="width:auto;">清理已完成</button>
         </div>
 
         <div class="stats">
@@ -364,6 +457,7 @@
         <div id="taskResultCount" class="sub" style="margin-top:-8px;margin-bottom:16px;">当前结果：0 条</div>
 
         <div class="panel toolbar">
+            <input id="taskSearch" placeholder="搜索任务ID / 标题 / 项目 / 参数">
             <select id="projectId">
                 <option value="">全部项目</option>
             </select>
@@ -372,6 +466,7 @@
                 <option value="processing">处理中</option>
                 <option value="completed">已完成</option>
                 <option value="failed">失败</option>
+                <option value="cancelled">已取消</option>
             </select>
             <select id="taskType">
                 <option value="">全部类型</option>
@@ -385,7 +480,7 @@
             </select>
             <button onclick="loadTasks()">查询</button>
             <button class="secondary" onclick="resetFilters()">重置</button>
-            <button class="secondary" onclick="cleanupCompletedTasks()">清理已完成</button>
+            <button class="secondary" onclick="copyViewLink()">复制当前视图链接</button>
         </div>
 
         <div class="panel helper-grid">
@@ -478,6 +573,24 @@
         let projectOptions = [];
         let projectMap = {};
 
+        async function taskCenterFetch(url, options = {}) {
+            const token = localStorage.getItem('token');
+            const headers = { ...(options.headers || {}) };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            if (options.body && !headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
+
+            const response = await fetch(url, { ...options, headers });
+            const data = await response.json();
+            if (!response.ok && !data.success) {
+                throw new Error(data.message || data.error || `请求失败 (${response.status})`);
+            }
+            return data;
+        }
+
         function escapeHtml(value) {
             return String(value ?? '')
                 .replace(/&/g, '&amp;')
@@ -491,7 +604,8 @@
             const labelMap = {
                 processing: '处理中',
                 completed: '已完成',
-                failed: '失败'
+                failed: '失败',
+                cancelled: '已取消'
             };
             return `<span class="badge ${status}">${labelMap[status] || status}</span>`;
         }
@@ -607,10 +721,11 @@
         }
 
         async function retryTask(taskId) {
-            const res = await fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
-            const data = await res.json();
-            if (!data.success) {
-                showToast(data.message || '重试失败', 'error');
+            let data;
+            try {
+                data = await taskCenterFetch(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+            } catch (err) {
+                showToast(err.message || '重试失败', 'error');
                 return;
             }
             if (data.data?.task_id) {
@@ -622,15 +737,28 @@
             }
         }
 
+        async function cancelTask(taskId) {
+            if (!confirm('确定取消这个处理中任务吗？')) return;
+            let data;
+            try {
+                data = await taskCenterFetch(`/api/tasks/${taskId}/cancel`, { method: 'POST' });
+            } catch (err) {
+                showToast(err.message || '取消失败', 'error');
+                return;
+            }
+            await loadTasks();
+            showToast('任务已取消');
+        }
+
         async function triggerQuickTask(url, body) {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: body ? JSON.stringify(body) : '{}'
-            });
-            const data = await res.json();
-            if (!data.success) {
-                showToast(data.message || data.error || '触发失败', 'error');
+            let data;
+            try {
+                data = await taskCenterFetch(url, {
+                    method: 'POST',
+                    body: JSON.stringify(body || {})
+                });
+            } catch (err) {
+                showToast(err.message || '触发失败', 'error');
                 return;
             }
             await loadTasks();
@@ -736,9 +864,7 @@
             const previousQuick = quickProject.value;
 
             try {
-                const res = await fetch('/api/projects');
-                const data = await res.json();
-                if (!data.success) throw new Error(data.message || data.error || '项目加载失败');
+                const data = await taskCenterFetch('/api/projects');
 
                 projectOptions = data.data || [];
                 projectMap = {};
@@ -783,9 +909,7 @@
             issueHint.textContent = `正在读取 ${getProjectLabel(projectId)} 的问题列表...`;
 
             try {
-                const res = await fetch(`/api/projects/${projectId}/issues`);
-                const data = await res.json();
-                if (!data.success) throw new Error(data.message || data.error || '问题加载失败');
+                const data = await taskCenterFetch(`/api/projects/${projectId}/issues`);
 
                 const issues = (data.data || []).filter(issue => issue.status !== '已解决');
                 if (!issues.length) {
@@ -814,32 +938,59 @@
             const projectId = document.getElementById('projectId').value.trim();
             const params = new URLSearchParams();
             if (projectId) params.set('project_id', projectId);
-            const res = await fetch(`/api/tasks/cleanup-completed?${params.toString()}`, { method: 'POST' });
-            const data = await res.json();
-            if (!data.success) {
-                showToast(data.message || '清理失败', 'error');
+            try {
+                await taskCenterFetch(`/api/tasks/cleanup-completed?${params.toString()}`, { method: 'POST' });
+            } catch (err) {
+                showToast(err.message || '清理失败', 'error');
                 return;
             }
             loadTasks();
             showToast('已清理完成任务');
         }
 
+        async function copyTextWithFallback(text) {
+            const value = String(text || '');
+            if (!value) {
+                throw new Error('没有可复制的内容');
+            }
+
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                await navigator.clipboard.writeText(value);
+                return;
+            }
+
+            const input = document.createElement('textarea');
+            input.value = value;
+            input.setAttribute('readonly', 'readonly');
+            input.style.position = 'fixed';
+            input.style.opacity = '0';
+            input.style.pointerEvents = 'none';
+            document.body.appendChild(input);
+            input.focus();
+            input.select();
+            const copied = document.execCommand('copy');
+            document.body.removeChild(input);
+            if (!copied) {
+                throw new Error('当前环境不支持自动复制');
+            }
+        }
+
         async function copyTaskText(elementId) {
             const text = document.getElementById(elementId).textContent || '';
             try {
-                await navigator.clipboard.writeText(text);
+                await copyTextWithFallback(text);
                 showToast('已复制到剪贴板');
             } catch (err) {
-                showToast('复制失败，请手动复制', 'error');
+                showToast('复制失败: ' + err.message, 'error');
             }
         }
 
         async function copyViewLink() {
             try {
-                await navigator.clipboard.writeText(window.location.href);
+                await copyTextWithFallback(window.location.href);
                 showToast('当前视图链接已复制');
             } catch (err) {
-                showToast('复制链接失败，请手动复制', 'error');
+                showToast('复制链接失败: ' + err.message, 'error');
             }
         }
 
@@ -859,10 +1010,11 @@
         }
 
         async function showTaskDetail(taskId) {
-            const res = await fetch(`/api/tasks/${taskId}`);
-            const data = await res.json();
-            if (!data.success) {
-                showToast(data.message || '加载任务详情失败', 'error');
+            let data;
+            try {
+                data = await taskCenterFetch(`/api/tasks/${taskId}`);
+            } catch (err) {
+                showToast(err.message || '加载任务详情失败', 'error');
                 return;
             }
             const item = data.data || {};
@@ -884,6 +1036,7 @@
         }
 
         function resetFilters() {
+            document.getElementById('taskSearch').value = '';
             document.getElementById('projectId').value = '';
             document.getElementById('status').value = '';
             document.getElementById('taskType').value = '';
@@ -893,9 +1046,11 @@
 
         function syncUrlFilters() {
             const params = new URLSearchParams();
+            const keyword = document.getElementById('taskSearch').value.trim();
             const projectId = document.getElementById('projectId').value.trim();
             const status = document.getElementById('status').value;
             const taskType = document.getElementById('taskType').value;
+            if (keyword) params.set('q', keyword);
             if (projectId) params.set('project_id', projectId);
             if (status) params.set('status', status);
             if (taskType) params.set('task_type', taskType);
@@ -906,16 +1061,18 @@
 
         async function loadTasks() {
             const params = new URLSearchParams();
+            const keyword = document.getElementById('taskSearch').value.trim();
             const projectId = document.getElementById('projectId').value.trim();
             const status = document.getElementById('status').value;
             const taskType = document.getElementById('taskType').value;
+            if (keyword) params.set('q', keyword);
             if (projectId) params.set('project_id', projectId);
             if (status) params.set('status', status);
             if (taskType) params.set('task_type', taskType);
             params.set('limit', '100');
             syncUrlFilters();
 
-            const filterSummary = [projectId ? getProjectLabel(projectId) : '', status || '', taskType || ''].filter(Boolean).join(' / ');
+            const filterSummary = [keyword || '', projectId ? getProjectLabel(projectId) : '', status || '', taskType || ''].filter(Boolean).join(' / ');
             const sub = document.querySelector('.sub');
             if (sub) {
                 sub.textContent = filterSummary
@@ -923,12 +1080,12 @@
                     : '查看 AI 分析、项目周报、全局周报等后台任务的运行状态，并支持失败后重试。';
             }
 
-            const res = await fetch(`/api/tasks?${params.toString()}`);
-            const data = await res.json();
             const tbody = document.getElementById('taskTable');
-
-            if (!data.success) {
-                tbody.innerHTML = `<tr><td colspan="7" class="muted">${escapeHtml(data.message || '加载失败')}</td></tr>`;
+            let data;
+            try {
+                data = await taskCenterFetch(`/api/tasks?${params.toString()}`);
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="8" class="muted">${escapeHtml(err.message || '加载失败')}</td></tr>`;
                 return;
             }
 
@@ -953,6 +1110,9 @@
                 const retryBtn = item.status === 'failed'
                     ? `<button onclick="retryTask('${escapeHtml(item.task_id)}')">重试</button>`
                     : '';
+                const cancelBtn = item.status === 'processing'
+                    ? `<button class="secondary" onclick="cancelTask('${escapeHtml(item.task_id)}')">取消</button>`
+                    : '';
                 return `
                     <tr class="${item.status === 'failed' ? 'failed-row' : ''}">
                         <td>
@@ -967,7 +1127,7 @@
                         <td>${escapeHtml(formatDateTime(item.created_at))}</td>
                         <td>${escapeHtml(formatDuration(item.created_at, item.updated_at || item.created_at, item.status))}</td>
                         <td><div class="preview">${escapeHtml(preview || '-')}</div></td>
-                        <td><div class="actions">${retryBtn}</div></td>
+                        <td><div class="actions">${retryBtn}${cancelBtn}</div></td>
                     </tr>
                 `;
             }).join('');
@@ -979,14 +1139,19 @@
 
         function hydrateFiltersFromUrl() {
             const params = new URLSearchParams(window.location.search);
+            const keyword = params.get('q');
             const projectId = params.get('project_id');
             const status = params.get('status');
             const taskType = params.get('task_type');
+            if (keyword) document.getElementById('taskSearch').value = keyword;
             if (projectId) document.getElementById('projectId').value = projectId;
             if (status) document.getElementById('status').value = status;
             if (taskType) document.getElementById('taskType').value = taskType;
         }
 
+        document.getElementById('taskSearch').addEventListener('input', function () {
+            loadTasks();
+        });
         document.getElementById('quickProjectId').addEventListener('change', function () {
             loadIssuesForProject(this.value);
         });

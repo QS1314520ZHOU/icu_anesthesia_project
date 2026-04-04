@@ -19,10 +19,13 @@ def _json_safe(value):
         return value.isoformat()
     return value
 
-def api_response(success=True, data=None, message="", code=200):
+def api_response(success=True, data=None, message="", error=None, code=200):
     """
     统一API响应格式
     """
+    if message == "" and error is not None:
+        message = error
+
     return jsonify({
         "success": success,
         "code": code,

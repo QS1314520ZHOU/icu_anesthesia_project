@@ -2,6 +2,15 @@
     window.warningSeverityFilter = window.warningSeverityFilter || '';
     window.warningSearch = window.warningSearch || '';
     window.warningCount = window.warningCount || 0;
+    window.warningActionState = window.warningActionState || JSON.parse(localStorage.getItem('warning_action_state') || '{}');
+
+    function warningKey(item) {
+        return `${item.type}:${item.project_id || 0}:${item.milestone_id || item.interface_id || 0}:${item.message || ''}`;
+    }
+
+    function persistWarningState() {
+        localStorage.setItem('warning_action_state', JSON.stringify(window.warningActionState || {}));
+    }
 
     function syncWarningFiltersToUrl() {
         const params = new URLSearchParams(window.location.search);
@@ -44,7 +53,10 @@
         if (!container) return;
 
         const { summary, warnings } = data;
-        let filtered = warnings || [];
+        let filtered = (warnings || []).filter(w => {
+            const state = window.warningActionState[warningKey(w)];
+            return !state || state.status !== 'ignored';
+        });
         if (window.warningSeverityFilter) {
             filtered = filtered.filter(w => w.severity === window.warningSeverityFilter);
         }
@@ -106,6 +118,10 @@
                         <span style="font-size:12px;">${severityIcon}</span>
                     </div>
                     <div style="font-size:12px;color:var(--gray-500);">${w.project_name}</div>
+                    <div style="margin-top:8px;display:flex;gap:8px;" onclick="event.stopPropagation();">
+                        <button class="btn btn-outline btn-xs" onclick='acknowledgeWarning(${JSON.stringify(w)})'>确认</button>
+                        <button class="btn btn-outline btn-xs" onclick='ignoreWarning(${JSON.stringify(w)})'>忽略</button>
+                    </div>
                 </div>
             `;
         }
@@ -146,5 +162,21 @@
         } catch (e) {
             console.warn('加载预警数量失败', e);
         }
+    };
+
+    window.acknowledgeWarning = function (warning) {
+        const key = warningKey(warning);
+        window.warningActionState[key] = { status: 'acknowledged', updated_at: new Date().toISOString() };
+        persistWarningState();
+        showToast('预警已确认', 'success');
+        window.loadWarnings();
+    };
+
+    window.ignoreWarning = function (warning) {
+        const key = warningKey(warning);
+        window.warningActionState[key] = { status: 'ignored', updated_at: new Date().toISOString() };
+        persistWarningState();
+        showToast('预警已忽略', 'success');
+        window.loadWarnings();
     };
 })();

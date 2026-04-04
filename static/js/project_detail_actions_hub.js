@@ -7,6 +7,19 @@ function getRiskColor(score) {
     return '#ef4444';
 }
 
+async function executeProjectAction(action, successMessage, onSuccess) {
+    try {
+        await action();
+        if (typeof onSuccess === 'function') {
+            await onSuccess();
+        }
+        if (successMessage) showToast(successMessage, 'success');
+    } catch (e) {
+        showToast('操作失败: ' + e.message, 'danger');
+        throw e;
+    }
+}
+
 async function refreshProjectRisk(projectId) {
     openModal('riskModal');
     const loadingEl = document.getElementById('riskLoading');
@@ -67,7 +80,7 @@ function refreshRiskAnalysis() {
 function showDepartureModal() {
     document.getElementById('departureForm').reset();
     document.getElementById('departureDate').value = new Date().toISOString().split('T')[0];
-    showModal('departureModal');
+    showModal('departureModal', { reset: false });
 }
 
 function showWorklogModal() {
@@ -75,7 +88,7 @@ function showWorklogModal() {
     document.getElementById('worklogModalTitle').textContent = '📝 填写工作日志';
     document.getElementById('worklogForm').reset();
     document.getElementById('logDate').value = new Date().toISOString().split('T')[0];
-    showModal('worklogModal');
+    showModal('worklogModal', { reset: false });
 }
 
 function showAcceptanceModal() {
@@ -88,7 +101,7 @@ function showAcceptanceModal() {
             stageSelect.innerHTML += `<option value="${s.stage_name}">${s.stage_name}</option>`;
         });
     }
-    showModal('acceptanceModal');
+    showModal('acceptanceModal', { reset: false });
 }
 
 function showStatusModal() {
@@ -190,7 +203,7 @@ async function saveMember() {
     }
     await api.post(`/projects/${currentProjectId}/members`, data);
     closeModal('memberModal');
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['members']);
     showToast('成员已保存', 'success');
 }
 
@@ -209,7 +222,7 @@ async function saveContact() {
     }
     await api.post(`/projects/${currentProjectId}/contacts`, data);
     closeModal('contactModal');
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['contacts']);
     showToast('联系人已保存', 'success');
 }
 
@@ -228,19 +241,16 @@ async function saveWorklog() {
         return;
     }
 
-    try {
+    await executeProjectAction(async () => {
         if (currentEditingLogId) {
             await api.put(`/worklogs/${currentEditingLogId}`, data);
-            showToast('日志已更新', 'success');
         } else {
             await api.post(`/projects/${currentProjectId}/worklogs`, data);
-            showToast('日志已保存', 'success');
         }
         closeModal('worklogModal');
-        loadWorklogs(currentProjectId);
-    } catch (e) {
-        showToast('保存失败: ' + e.message, 'danger');
-    }
+    }, currentEditingLogId ? '日志已更新' : '日志已保存', async () => {
+        await loadWorklogs(currentProjectId);
+    });
 }
 
 async function saveExpense() {
@@ -255,10 +265,12 @@ async function saveExpense() {
         showToast('请填写金额', 'warning');
         return;
     }
-    await api.post(`/projects/${currentProjectId}/expenses`, data);
-    closeModal('expenseModal');
-    loadExpenses(currentProjectId);
-    showToast('费用已保存', 'success');
+    await executeProjectAction(async () => {
+        await api.post(`/projects/${currentProjectId}/expenses`, data);
+        closeModal('expenseModal');
+    }, '费用已保存', async () => {
+        await loadExpenses(currentProjectId);
+    });
 }
 
 async function saveChange() {
@@ -273,10 +285,12 @@ async function saveChange() {
         showToast('请填写变更标题', 'warning');
         return;
     }
-    await api.post(`/projects/${currentProjectId}/changes`, data);
-    closeModal('changeModal');
-    loadChanges(currentProjectId);
-    showToast('变更已保存', 'success');
+    await executeProjectAction(async () => {
+        await api.post(`/projects/${currentProjectId}/changes`, data);
+        closeModal('changeModal');
+    }, '变更已保存', async () => {
+        await loadChanges(currentProjectId);
+    });
 }
 
 async function saveAcceptance() {
@@ -340,7 +354,7 @@ async function saveInterface() {
     };
     await api.post(`/projects/${currentProjectId}/interfaces`, data);
     closeModal('interfaceModal');
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['interfaces']);
 }
 
 // Document upload helper migrated to static/js/project_detail_tools_hub.js
@@ -361,11 +375,13 @@ async function saveIssue() {
 
     isSavingIssue = true;
     try {
-        await api.post(`/projects/${currentProjectId}/issues`, data);
-        closeModal('issueModal');
-        document.getElementById('issueDesc').value = '';
-        loadProjectDetail(currentProjectId, true);
-        showToast('问题已保存', 'success');
+        await executeProjectAction(async () => {
+            await api.post(`/projects/${currentProjectId}/issues`, data);
+            closeModal('issueModal');
+            document.getElementById('issueDesc').value = '';
+        }, '问题已保存', async () => {
+            await syncCurrentProjectDetailState(['issues']);
+        });
     } finally {
         isSavingIssue = false;
     }
@@ -394,56 +410,128 @@ async function saveMilestone() {
         showToast('请填写完整', 'warning');
         return;
     }
-    await api.post(`/projects/${currentProjectId}/milestones`, data);
-    closeModal('milestoneModal');
-    loadProjectDetail(currentProjectId, true);
-    showToast('里程碑已保存', 'success');
+    await executeProjectAction(async () => {
+        await api.post(`/projects/${currentProjectId}/milestones`, data);
+        closeModal('milestoneModal');
+    }, '里程碑已保存', async () => {
+        await syncCurrentProjectDetailState(['milestones']);
+    });
 }
 
 async function toggleTask(taskId, event) {
     event.stopPropagation();
     const checkbox = event.target;
     const taskItem = checkbox.closest('.task-item');
-    const taskName = taskItem.querySelector('.task-name');
+    const taskName = taskItem ? taskItem.querySelector('.task-name') : null;
+    if (checkbox.dataset.loading === '1') return;
+    checkbox.dataset.loading = '1';
 
-    checkbox.classList.toggle('checked');
-    taskName.classList.toggle('completed');
+    try {
+        await api.post(`/tasks/${taskId}/toggle`, {});
 
-    await fetch(`/api/tasks/${taskId}/toggle`, { method: 'POST' });
+        const willBeChecked = !checkbox.classList.contains('checked');
+        checkbox.classList.toggle('checked', willBeChecked);
+        if (taskName) {
+            taskName.classList.toggle('completed', willBeChecked);
+        }
 
-    const stageItem = checkbox.closest('.stage-item');
-    if (stageItem) {
-        const allTasks = stageItem.querySelectorAll('.task-checkbox');
-        const completedTasks = stageItem.querySelectorAll('.task-checkbox.checked');
-        const progress = allTasks.length > 0 ? Math.round(completedTasks.length / allTasks.length * 100) : 0;
-        const progressBar = stageItem.querySelector('.stage-progress-mini-bar');
-        const progressText = stageItem.querySelector('.stage-info > span:last-of-type');
-        if (progressBar) progressBar.style.width = `${progress}%`;
-        if (progressText && progressText.textContent.includes('%')) progressText.textContent = `${progress}%`;
+        const stageItem = checkbox.closest('.stage-item');
+        if (stageItem) {
+            const allTasks = stageItem.querySelectorAll('.task-checkbox');
+            const completedTasks = stageItem.querySelectorAll('.task-checkbox.checked');
+            const progress = allTasks.length > 0 ? Math.round(completedTasks.length / allTasks.length * 100) : 0;
+            const progressColor = progress >= 100 ? '#10b981' : progress >= 70 ? '#2563eb' : progress >= 30 ? '#f59e0b' : '#94a3b8';
+            const statusBg = progress >= 100 ? '#ecfdf5' : progress >= 30 ? '#eff6ff' : '#f8fafc';
+            const statusColor = progress >= 100 ? '#059669' : progress >= 30 ? '#2563eb' : '#94a3b8';
 
-        const statusBadge = stageItem.querySelector('.stage-status-badge');
-        if (statusBadge) {
-            if (progress === 100) {
-                statusBadge.outerHTML = '<span class="stage-status-badge" style="background:#ecfdf5;color:#059669;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">✅ 已完成</span>';
-            } else if (progress > 0) {
-                statusBadge.outerHTML = '<span class="stage-status-badge" style="background:#eff6ff;color:#2563eb;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">⏳ 进行中</span>';
-            } else {
-                statusBadge.outerHTML = '<span class="stage-status-badge" style="background:#f8fafc;color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;">⏸ 待开始</span>';
+            const progressBar = stageItem.querySelector('.stage-progress-mini-bar');
+            const progressText = stageItem.querySelector('.stage-info > span:nth-child(2)');
+            const statusBadge = stageItem.querySelector('.stage-status-badge');
+
+            if (progressBar) {
+                progressBar.style.width = `${progress}%`;
+                progressBar.style.background = progressColor;
+            }
+            if (progressText) {
+                progressText.textContent = `${progress}%`;
+                progressText.style.color = progressColor;
+                progressText.style.fontWeight = '700';
+            }
+            if (statusBadge) {
+                statusBadge.style.background = statusBg;
+                statusBadge.style.color = statusColor;
+                statusBadge.textContent = progress >= 100 ? '✅ 已完成' : progress >= 30 ? '⏳ 进行中' : '⏸ 待开始';
+            }
+
+            if (currentProject && Array.isArray(currentProject.stages)) {
+                const localStage = currentProject.stages.find(item => String(item.id) === stageItem.id.replace('stage-', ''));
+                if (localStage) {
+                    localStage.progress = progress;
+                    if (Array.isArray(localStage.tasks)) {
+                        const localTask = localStage.tasks.find(item => Number(item.id) === Number(taskId));
+                        if (localTask) {
+                            localTask.is_completed = willBeChecked;
+                            localTask.completed_date = willBeChecked ? new Date().toISOString().slice(0, 10) : null;
+                        }
+                    }
+                }
             }
         }
+
+        const project = await api.get(`/projects/${currentProjectId}`);
+        currentProject = project;
+        if (Array.isArray(allProjects)) {
+            const cached = allProjects.find(item => Number(item.id) === Number(currentProjectId));
+            if (cached) {
+                cached.progress = project.progress;
+                cached.status = project.status;
+            }
+            renderProjectList();
+        }
+        await updateOverallProgress(project);
+    } catch (e) {
+        showToast('任务切换失败: ' + e.message, 'danger');
+    } finally {
+        checkbox.dataset.loading = '0';
     }
-    updateOverallProgress();
 }
 
 async function toggleMilestone(mid) {
-    await fetch(`/api/milestones/${mid}/toggle`, { method: 'POST' });
-    loadProjectDetail(currentProjectId, true);
+    try {
+        await api.post(`/projects/milestones/${mid}/toggle`, {});
+        const milestone = document.querySelector(`.milestone-item .milestone-diamond[onclick="toggleMilestone(${mid})"]`);
+        if (milestone) {
+            milestone.classList.toggle('completed');
+        }
+
+        if (currentProject && Array.isArray(currentProject.milestones)) {
+            const localMilestone = currentProject.milestones.find(item => Number(item.id) === Number(mid));
+            if (localMilestone) {
+                localMilestone.is_completed = !localMilestone.is_completed;
+                localMilestone.completed_date = localMilestone.is_completed ? new Date().toISOString().slice(0, 10) : null;
+            }
+        }
+
+        const project = await api.get(`/projects/${currentProjectId}`);
+        currentProject = project;
+        if (Array.isArray(allProjects)) {
+            const cached = allProjects.find(item => Number(item.id) === Number(currentProjectId));
+            if (cached) {
+                cached.progress = project.progress;
+                cached.status = project.status;
+            }
+            renderProjectList();
+        }
+        await updateOverallProgress(project);
+    } catch (e) {
+        showToast('里程碑切换失败: ' + e.message, 'danger');
+    }
 }
 
-async function updateOverallProgress() {
-    if (!currentProjectId) return;
+async function updateOverallProgress(projectData = null) {
+    if (!currentProjectId && !projectData) return;
     try {
-        const project = await api.get(`/projects/${currentProjectId}`);
+        const project = projectData || await api.get(`/projects/${currentProjectId}`);
         const progressCard = document.querySelector('.overview-card-value.progress-text');
         if (progressCard) progressCard.textContent = `${project.progress || 0}%`;
         currentProject = project;
@@ -459,28 +547,36 @@ async function updateOverallProgress() {
 
         const activeCard = document.querySelector('.project-card.active');
         if (activeCard) {
-            const progressBar = activeCard.querySelector('.project-progress-bar');
-            if (!progressBar) {
-                const miniBar = activeCard.querySelector('.progress-mini-bar');
-                if (miniBar) miniBar.style.width = `${project.progress || 0}%`;
-            } else {
-                progressBar.style.width = `${project.progress || 0}%`;
+            const progress = Number(project.progress || 0);
+            const progressColor = progress >= 100 ? '#10b981' : progress >= 70 ? '#3b82f6' : progress >= 30 ? '#f59e0b' : '#94a3b8';
+            const miniBar = activeCard.querySelector('.progress-mini-bar');
+            if (miniBar) {
+                miniBar.style.width = `${progress}%`;
+                miniBar.style.background = progressColor;
             }
-            const progressText = activeCard.querySelector('.project-progress-text span:first-child') || activeCard.querySelector('.project-card-footer span');
-            if (progressText) {
-                if (progressText.textContent.includes('进度')) {
-                    progressText.textContent = `进度 ${project.progress || 0}%`;
-                } else {
-                    progressText.textContent = `${project.progress || 0}%`;
-                }
-            }
-
-            const statusList = activeCard.querySelector('.project-list-status');
-            if (statusList) {
+            const statusBadge = activeCard.querySelector('.badge');
+            if (statusBadge) {
                 const statusColor = STATUS_COLORS[project.status] || '#9ca3af';
-                statusList.style.backgroundColor = `${statusColor}20`;
-                statusList.style.color = statusColor;
-                statusList.textContent = project.status;
+                statusBadge.style.backgroundColor = `${statusColor}20`;
+                statusBadge.style.color = statusColor;
+                statusBadge.textContent = project.status;
+            }
+            const spans = activeCard.querySelectorAll('div[style*="justify-content:space-between"] span');
+            if (spans.length >= 2) {
+                spans[1].textContent = `${progress}%`;
+                spans[1].style.color = progressColor;
+                spans[1].style.fontWeight = '700';
+            }
+        }
+
+        if (Array.isArray(allProjects)) {
+            const cached = allProjects.find(item => Number(item.id) === Number(currentProjectId));
+            if (cached) {
+                cached.progress = project.progress || 0;
+                cached.status = project.status || cached.status;
+            }
+            if (typeof renderProjectList === 'function') {
+                renderProjectList();
             }
         }
     } catch (e) {
@@ -508,25 +604,25 @@ async function deleteProject(pid) {
 async function deleteMember(mid) {
     if (!confirm('确定删除？')) return;
     await api.delete(`/members/${mid}`);
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['members']);
 }
 
 async function deleteContact(cid) {
     if (!confirm('确定删除？')) return;
     await api.delete(`/contacts/${cid}`);
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['contacts']);
 }
 
 async function deleteInterface(iid) {
     if (!confirm('确定删除？')) return;
     await api.delete(`/projects/interfaces/${iid}`);
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['interfaces']);
 }
 
 async function deleteIssue(iid) {
     if (!confirm('确定删除？')) return;
     await api.delete(`/issues/${iid}`);
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['issues']);
 }
 
 async function deleteDevice(did) {
@@ -538,7 +634,7 @@ async function deleteDevice(did) {
 async function deleteMilestone(mid) {
     if (!confirm('确定删除？')) return;
     await api.delete(`/milestones/${mid}`);
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['milestones']);
 }
 
 async function deleteDocument(did) {
@@ -571,12 +667,12 @@ function downloadDocument(did) {
 
 async function updateIssueStatus(issueId, newStatus) {
     await api.put(`/issues/${issueId}`, { status: newStatus });
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['issues']);
 }
 
 async function updateInterfaceStatus(interfaceId, newStatus) {
     await api.put(`/projects/interfaces/${interfaceId}`, { status: newStatus });
-    loadProjectDetail(currentProjectId, true);
+    await syncCurrentProjectDetailState(['interfaces']);
 }
 
 async function updateAcceptanceStatus(acceptanceId, newStatus) {
@@ -601,7 +697,7 @@ async function loadWorklogs(pid) {
     const container = document.getElementById('worklogsContainer');
     if (!container) return;
     if (!logs || !logs.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无工作日志</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无工作日志</p><div class="empty-state-hint">可填写日志或使用 AI 智能填报补齐今日工作内容。</div></div>';
         return;
     }
     container.innerHTML = logs.slice(0, 20).map(l => `
@@ -650,7 +746,7 @@ async function editWorklog(id, pid) {
     document.getElementById('issuesEncountered').value = log.issues_encountered || '';
     document.getElementById('tomorrowPlan').value = log.tomorrow_plan || '';
 
-    showModal('worklogModal');
+    showModal('worklogModal', { reset: false });
 }
 
 async function loadDocuments(pid) {
@@ -658,7 +754,7 @@ async function loadDocuments(pid) {
     const container = document.getElementById('documentsContainer');
     if (!container) return;
     if (!docs || !docs.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无文档</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无文档</p><div class="empty-state-hint">可上传需求、接口、部署等文档，后续会联动知识库与对照中心。</div></div>';
         return;
     }
     container.innerHTML = `
@@ -690,7 +786,7 @@ async function loadExpenses(pid) {
     const container = document.getElementById('expensesContainer');
     if (!container) return;
     if (!expenses || !expenses.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无费用记录</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无费用记录</p><div class="empty-state-hint">录入费用后可进入审批、财务看板和经营分析。</div></div>';
         return;
     }
     const icons = { '差旅': '✈️', '住宿': '🏨', '餐饮': '🍽️', '交通': '🚗', '采购': '🛒', '其他': '📦' };
@@ -719,7 +815,7 @@ async function loadChanges(pid) {
     const container = document.getElementById('changesContainer');
     if (!container) return;
     if (!changes || !changes.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无变更记录</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无变更记录</p><div class="empty-state-hint">当需求、范围、人员或时间调整时，可在此登记变更并进入审批流。</div></div>';
         return;
     }
     const statusMap = { '待审批': 'badge-warning', '已批准': 'badge-success', '已驳回': 'badge-danger', '已执行': 'badge-info' };
@@ -749,7 +845,7 @@ async function loadAcceptances(pid) {
     const container = document.getElementById('acceptancesContainer');
     if (!container) return;
     if (!acceptances || !acceptances.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无验收记录</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无验收记录</p><div class="empty-state-hint">建议在阶段验收和上线节点录入验收结果，便于项目收尾追踪。</div></div>';
         return;
     }
     const statusMap = { '待验收': 'badge-warning', '验收中': 'badge-info', '已通过': 'badge-success', '未通过': 'badge-danger' };
@@ -806,7 +902,7 @@ async function loadSatisfaction(pid) {
     }
 
     if (!records.length) {
-        html += '<div class="empty-state"><p>暂无满意度记录</p></div>';
+        html += '<div class="empty-state"><p>暂无满意度记录</p><div class="empty-state-hint">可在交付、试运行和验收阶段记录客户反馈，形成长期满意度画像。</div></div>';
     } else {
         html += records.map(r => `
             <div style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:10px;">
@@ -834,7 +930,7 @@ async function loadDevices(pid) {
     const container = document.getElementById('devicesContainer');
     if (!container) return;
     if (!devices || !devices.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无设备数据</p></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无设备数据</p><div class="empty-state-hint">录入设备后可持续跟踪连接状态、协议类型和现场运行情况。</div></div>';
         return;
     }
 
@@ -892,10 +988,337 @@ async function changeDeviceStatus(deviceId, newStatus) {
 }
 
 async function loadDependencies(pid) {
-    const deps = await api.get(`/projects/${pid}/dependencies`);
     const container = document.getElementById('dependenciesContainer');
     if (!container) return;
-    renderDependencies(deps, pid);
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在加载依赖关系...</p></div>';
+    try {
+        const deps = await api.get(`/projects/${pid}/dependencies`);
+        container.innerHTML = renderDependencies(deps, pid);
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><p>依赖关系加载失败</p><div class="empty-state-hint">${e.message}</div></div>`;
+    }
+}
+
+async function showCriticalPath(projectId = currentProjectId) {
+    if (!projectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    const panel = document.getElementById('criticalPathPanel');
+    if (panel) {
+        panel.style.display = 'block';
+        panel.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在计算关键路径...</p></div>';
+    }
+
+    try {
+        const result = await api.get(`/projects/${projectId}/critical-path`);
+        const criticalPath = result.critical_path || [];
+        const summary = result.summary || '暂无关键路径数据';
+        const allTasks = result.all_tasks || [];
+
+        const html = `
+            <div class="panel" style="margin-top:16px;">
+                <div class="panel-header">
+                    <div class="panel-title">🎯 关键路径分析</div>
+                </div>
+                <div class="panel-body">
+                    <div style="margin-bottom:12px;padding:12px;border-radius:10px;background:#f8fafc;color:#475569;font-size:13px;">${summary}</div>
+                    ${criticalPath.length ? `
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+                            ${criticalPath.map((task, index) => `
+                                <span style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:${task.completed ? '#ecfdf5' : '#eff6ff'};color:${task.completed ? '#059669' : '#2563eb'};font-size:12px;font-weight:600;">
+                                    ${index + 1}. ${task.task_name}
+                                </span>
+                            `).join('')}
+                        </div>
+                    ` : '<div class="empty-state"><p>暂无关键路径任务</p></div>'}
+                    ${allTasks.length ? `
+                        <div class="table-container">
+                            <table class="table">
+                                <thead><tr><th>任务</th><th>阶段</th><th>状态</th><th>关键</th></tr></thead>
+                                <tbody>
+                                    ${allTasks.map(task => `
+                                        <tr>
+                                            <td>${task.task_name || '-'}</td>
+                                            <td>${task.stage_name || '-'}</td>
+                                            <td>${task.completed ? '已完成' : '进行中'}</td>
+                                            <td>${task.is_critical ? '是' : '否'}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+
+        if (panel) {
+            panel.innerHTML = html;
+        } else {
+            showGenericModal('🎯 关键路径分析', html);
+        }
+    } catch (e) {
+        const message = `关键路径加载失败: ${e.message}`;
+        if (panel) {
+            panel.innerHTML = `<div style="color:var(--danger);padding:16px;text-align:center;">${message}</div>`;
+        } else {
+            showToast(message, 'danger');
+        }
+    }
+}
+
+async function showProjectSnapshot(projectId = currentProjectId) {
+    if (!projectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        const content = await api.get(`/collab/snapshot/${projectId}`);
+        window.latestProjectSnapshotContent = String(content || '');
+        const html = `
+            <div style="padding:20px;">
+                <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+                    <button class="btn btn-outline btn-sm" onclick="copyProjectSnapshotContent()">📋 复制快照</button>
+                </div>
+                <div class="markdown-content">${renderAiMarkdown(content || '暂无项目快照')}</div>
+            </div>
+        `;
+        showGenericModal('👤 新人快照', html);
+    } catch (e) {
+        showToast('加载新人快照失败: ' + e.message, 'danger');
+    }
+}
+
+async function copyProjectSnapshotContent() {
+    if (!window.latestProjectSnapshotContent) {
+        showToast('暂无可复制的项目快照', 'warning');
+        return;
+    }
+    try {
+        await writeTextToClipboard(window.latestProjectSnapshotContent);
+        showToast('项目快照已复制', 'success');
+    } catch (e) {
+        showToast('复制失败: ' + e.message, 'danger');
+    }
+}
+
+async function loadWorklogStats() {
+    if (!currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        const stats = await api.get(`/projects/${currentProjectId}/worklogs/stats`);
+        document.getElementById('statsTotalHours').textContent = `${stats.total_hours || 0}h`;
+        const memberCount = (stats.by_member || []).length || 0;
+        const avgHours = memberCount ? ((stats.total_hours || 0) / memberCount).toFixed(1) : '0.0';
+        document.getElementById('statsAvgHours').textContent = `${avgHours}h`;
+
+        openModal('worklogStatsModal');
+
+        const memberChartEl = document.getElementById('worklogMemberChart');
+        const trendChartEl = document.getElementById('worklogTrendChart');
+        if (memberChartEl) {
+            const chart = echarts.getInstanceByDom(memberChartEl) || echarts.init(memberChartEl);
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                xAxis: { type: 'category', data: (stats.by_member || []).map(item => item.member_name || '未命名') },
+                yAxis: { type: 'value', name: '工时' },
+                series: [{
+                    type: 'bar',
+                    data: (stats.by_member || []).map(item => Number(item.hours || 0)),
+                    itemStyle: { color: '#4f46e5', borderRadius: [6, 6, 0, 0] }
+                }]
+            });
+        }
+        if (trendChartEl) {
+            const chart = echarts.getInstanceByDom(trendChartEl) || echarts.init(trendChartEl);
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                xAxis: { type: 'category', data: (stats.by_month || []).map(item => item.month || '-') },
+                yAxis: { type: 'value', name: '工时' },
+                series: [{
+                    type: 'line',
+                    smooth: true,
+                    data: (stats.by_month || []).map(item => Number(item.hours || 0)),
+                    lineStyle: { color: '#10b981', width: 3 },
+                    areaStyle: { color: 'rgba(16, 185, 129, 0.12)' },
+                    itemStyle: { color: '#10b981' }
+                }]
+            });
+        }
+    } catch (e) {
+        showToast('加载日志统计失败: ' + e.message, 'danger');
+    }
+}
+
+async function loadExpenseStats() {
+    if (!currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        const stats = await api.get(`/projects/${currentProjectId}/expenses/stats`);
+        document.getElementById('statsTotalExpense').textContent = `¥${Number(stats.total || 0).toFixed(2)}`;
+        const pending = (stats.by_status || []).find(item => item.status === '待报销');
+        document.getElementById('statsPendingExpense').textContent = `¥${Number(pending?.amount || 0).toFixed(2)}`;
+
+        openModal('expenseStatsModal');
+
+        const typeChartEl = document.getElementById('expenseTypeChart');
+        const trendChartEl = document.getElementById('expenseTrendChart');
+        if (typeChartEl) {
+            const chart = echarts.getInstanceByDom(typeChartEl) || echarts.init(typeChartEl);
+            chart.setOption({
+                tooltip: { trigger: 'item' },
+                legend: { bottom: 0 },
+                series: [{
+                    type: 'pie',
+                    radius: ['42%', '68%'],
+                    data: (stats.by_type || []).map(item => ({
+                        name: item.expense_type || '未分类',
+                        value: Number(item.amount || 0)
+                    }))
+                }]
+            });
+        }
+        if (trendChartEl) {
+            const chart = echarts.getInstanceByDom(trendChartEl) || echarts.init(trendChartEl);
+            chart.setOption({
+                tooltip: { trigger: 'axis' },
+                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                xAxis: { type: 'category', data: (stats.by_month || []).map(item => item.month || '-') },
+                yAxis: { type: 'value', name: '金额' },
+                series: [{
+                    type: 'bar',
+                    data: (stats.by_month || []).map(item => Number(item.amount || 0)),
+                    itemStyle: { color: '#f59e0b', borderRadius: [6, 6, 0, 0] }
+                }]
+            });
+        }
+    } catch (e) {
+        showToast('加载费用统计失败: ' + e.message, 'danger');
+    }
+}
+
+async function loadDeviationAnalysis(projectId = currentProjectId) {
+    if (!projectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    const container = document.getElementById('deviationContainer');
+    if (container) {
+        container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>正在分析项目偏差...</p></div>';
+    }
+
+    try {
+        const result = await api.get(`/projects/${projectId}/deviation`);
+        if (!container) return;
+
+        if (!result.has_data) {
+            container.innerHTML = `<div class="empty-state"><p>${result.message || '暂无偏差分析数据'}</p></div>`;
+            return;
+        }
+
+        const stageRows = (result.stage_deviations || []).map(item => `
+            <tr>
+                <td>${item.trend || ''} ${item.stage_name}</td>
+                <td>${item.previous_progress}%</td>
+                <td>${item.current_progress}%</td>
+                <td style="color:${item.delta > 0 ? '#059669' : item.delta < 0 ? '#dc2626' : '#64748b'};">${item.delta > 0 ? '+' : ''}${item.delta}%</td>
+            </tr>
+        `).join('');
+        const weeklyRows = (result.weekly_deltas || []).slice(-6).map(item => `
+            <tr>
+                <td>${item.from_date} → ${item.to_date}</td>
+                <td>${item.progress_from}%</td>
+                <td>${item.progress_to}%</td>
+                <td>${item.delta > 0 ? '+' : ''}${item.delta}%</td>
+                <td>${item.daily_rate}</td>
+            </tr>
+        `).join('');
+
+        container.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+                <div class="overview-card"><div class="overview-card-label">当前进度</div><div class="overview-card-value">${result.current_progress || 0}%</div></div>
+                <div class="overview-card"><div class="overview-card-label">平均日增速</div><div class="overview-card-value">${result.avg_daily_rate || 0}%</div></div>
+                <div class="overview-card"><div class="overview-card-label">停滞阶段</div><div class="overview-card-value">${(result.stagnant_stages || []).length}</div></div>
+            </div>
+            <div style="margin-bottom:12px;padding:12px;border-radius:10px;background:#f8fafc;color:#475569;font-size:13px;">${result.prediction || '暂无预测'}</div>
+            <div class="table-container" style="margin-bottom:16px;">
+                <table class="table">
+                    <thead><tr><th>阶段</th><th>上次</th><th>当前</th><th>变化</th></tr></thead>
+                    <tbody>${stageRows || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">暂无阶段偏差</td></tr>'}</tbody>
+                </table>
+            </div>
+            <div class="table-container">
+                <table class="table">
+                    <thead><tr><th>时间段</th><th>起始</th><th>结束</th><th>变化</th><th>日均</th></tr></thead>
+                    <tbody>${weeklyRows || '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">暂无快照趋势</td></tr>'}</tbody>
+                </table>
+            </div>
+        `;
+    } catch (e) {
+        if (container) {
+            container.innerHTML = `<div style="color:var(--danger);padding:16px;text-align:center;">偏差分析加载失败: ${e.message}</div>`;
+        } else {
+            showToast('偏差分析加载失败: ' + e.message, 'danger');
+        }
+    }
+}
+
+async function captureSnapshot(projectId = currentProjectId) {
+    if (!projectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        await api.post(`/projects/${projectId}/snapshots`, {});
+        showToast('项目快照已拍摄', 'success');
+        await loadDeviationAnalysis(projectId);
+    } catch (e) {
+        showToast('拍摄快照失败: ' + e.message, 'danger');
+    }
+}
+
+async function generateDeviationReport(projectId = currentProjectId) {
+    if (!projectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    const panel = document.getElementById('deviationAiReport');
+    if (panel) {
+        panel.style.display = 'block';
+        panel.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>AI 正在生成偏差诊断...</p></div>';
+    }
+
+    try {
+        const result = await api.post(`/projects/${projectId}/deviation/ai-report`, {});
+        const content = result.ai_report || result.report || result.message || '暂无 AI 偏差分析报告';
+        const html = `<div class="panel"><div class="panel-header"><div class="panel-title">🤖 AI 偏差诊断</div></div><div class="panel-body markdown-content">${renderAiMarkdown(content)}</div></div>`;
+        if (panel) {
+            panel.innerHTML = html;
+        } else {
+            showGenericModal('🤖 AI 偏差诊断', html);
+        }
+    } catch (e) {
+        const message = `AI 偏差诊断失败: ${e.message}`;
+        if (panel) {
+            panel.innerHTML = `<div style="color:var(--danger);padding:16px;text-align:center;">${message}</div>`;
+        } else {
+            showToast(message, 'danger');
+        }
+    }
 }
 
 function showAddDependencyModal() {
@@ -996,44 +1419,149 @@ async function renderBurndownInDetail(pid) {
 
 function renderInterfaceFlow() {
     const chartDom = document.getElementById('interfaceFlowChart');
-    if (!chartDom) return;
-    const myChart = echarts.init(chartDom);
+    const sidebar = document.getElementById('interfaceFlowSidebar');
+    if (!chartDom || !sidebar || !currentProject) return;
 
-    const interfaces = currentProject.interfaces || [];
-    const hospitalNode = { name: currentProject.hospital_name, category: 0, draggable: true };
-    const nodes = [hospitalNode];
+    const interfaces = Array.isArray(currentProject.interfaces) ? currentProject.interfaces : [];
+    const hospitalName = currentProject.hospital_name || currentProject.project_name || '当前项目';
+    const systems = [...new Set(interfaces.map(item => item.system_name).filter(Boolean))];
+    const completedCount = interfaces.filter(item => item.status === '已完成').length;
+    const inProgressCount = interfaces.filter(item => item.status === '开发中' || item.status === '联调中').length;
+
+    sidebar.innerHTML = `
+        <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #dbeafe;">
+            <div style="font-size:12px;color:#64748b;">接口总数</div>
+            <div style="margin-top:6px;font-size:30px;font-weight:800;color:#1d4ed8;">${interfaces.length}</div>
+        </div>
+        <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#ecfdf5,#ffffff);border:1px solid #d1fae5;">
+            <div style="font-size:12px;color:#64748b;">已完成接口</div>
+            <div style="margin-top:6px;font-size:30px;font-weight:800;color:#15803d;">${completedCount}</div>
+        </div>
+        <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#fff7ed,#ffffff);border:1px solid #fed7aa;">
+            <div style="font-size:12px;color:#64748b;">联调中 / 开发中</div>
+            <div style="margin-top:6px;font-size:30px;font-weight:800;color:#ea580c;">${inProgressCount}</div>
+        </div>
+        <div style="padding:16px;border-radius:16px;background:#ffffff;border:1px solid #e2e8f0;">
+            <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px;">这页现在能做什么</div>
+            <div style="display:grid;gap:8px;font-size:12px;color:#64748b;line-height:1.7;">
+                <div>1. 看医院到各系统、各接口的连接关系</div>
+                <div>2. 快速识别是否还没录接口，避免联调前信息缺口</div>
+                <div>3. 给交付、汇报、交接场景提供一张可讲清楚的图</div>
+            </div>
+        </div>
+        <div style="padding:16px;border-radius:16px;background:#ffffff;border:1px solid #e2e8f0;">
+            <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px;">涉及系统</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${systems.length ? systems.map(system => `<span style="padding:6px 10px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;font-size:12px;color:#475569;">${system}</span>`).join('') : '<span style="font-size:12px;color:#94a3b8;">暂无系统数据</span>'}
+            </div>
+        </div>
+    `;
+
+    if (!interfaces.length) {
+        try {
+            const prev = echarts.getInstanceByDom(chartDom);
+            if (prev) echarts.dispose(chartDom);
+        } catch (e) {}
+        chartDom.innerHTML = `
+            <div style="min-height:540px;display:flex;align-items:center;justify-content:center;padding:32px;">
+                <div style="max-width:520px;text-align:center;">
+                    <div style="width:88px;height:88px;border-radius:28px;margin:0 auto 18px auto;background:linear-gradient(135deg,#dbeafe,#eff6ff);display:flex;align-items:center;justify-content:center;font-size:40px;">🕸️</div>
+                    <div style="font-size:24px;font-weight:800;color:#0f172a;margin-bottom:10px;">这页需要接口数据才能真正用起来</div>
+                    <div style="font-size:14px;color:#64748b;line-height:1.9;margin-bottom:18px;">
+                        现在还没有接口清单，所以拓扑图无法生成。建议先到“接口状态”录入接口，或者去“智能对照”上传文档做自动梳理。
+                    </div>
+                    <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+                        <button class="btn btn-primary" onclick="batchAddRecommendedInterfaces()" style="background:linear-gradient(135deg,#2563eb,#1d4ed8);border:none;">先导入推荐接口</button>
+                        <button class="btn btn-outline" onclick="switchTab(document.querySelector('#projectDetailView .tabs .tab[onclick*=&quot;\\'interfaces\\'&quot;]'), 'interfaces')">去接口状态页</button>
+                        <button class="btn btn-outline" onclick="switchTab(document.querySelector('#projectDetailView .tabs .tab[onclick*=&quot;\\'interfaceSpec\\'&quot;]'), 'interfaceSpec'); if (window.InterfaceSpec) InterfaceSpec.renderTab(currentProjectId);">去智能对照</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    chartDom.innerHTML = '';
+    let myChart = echarts.getInstanceByDom(chartDom);
+    if (myChart) echarts.dispose(chartDom);
+    myChart = echarts.init(chartDom);
+
+    const nodes = [{
+        name: hospitalName,
+        category: 0,
+        draggable: true,
+        symbolSize: 72,
+        itemStyle: { color: '#1d4ed8' }
+    }];
     const links = [];
 
-    interfaces.forEach(i => {
-        const sysNode = { name: i.system_name, category: 1, draggable: true };
-        if (!nodes.find(n => n.name === sysNode.name)) {
-            nodes.push(sysNode);
-            links.push({ source: currentProject.hospital_name, target: i.system_name });
-        }
+    systems.forEach(systemName => {
+        nodes.push({
+            name: systemName,
+            category: 1,
+            draggable: true,
+            symbolSize: 56,
+            itemStyle: { color: '#0ea5e9' }
+        });
+        links.push({ source: hospitalName, target: systemName });
+    });
 
-        const intNode = { name: i.interface_name, category: 2, draggable: true };
-        nodes.push(intNode);
-        links.push({ source: i.system_name, target: i.interface_name });
+    interfaces.forEach(item => {
+        const interfaceName = item.interface_name || '未命名接口';
+        nodes.push({
+            name: `${interfaceName}#${item.id}`,
+            value: interfaceName,
+            category: 2,
+            draggable: true,
+            symbolSize: 42,
+            itemStyle: { color: item.status === '已完成' ? '#10b981' : item.status === '联调中' ? '#f59e0b' : '#94a3b8' }
+        });
+        links.push({ source: item.system_name, target: `${interfaceName}#${item.id}` });
     });
 
     myChart.setOption({
-        title: { text: '接口数据流向拓扑' },
-        tooltip: {},
-        legend: [{ data: ['核心系统', '第三方系统', '接口明细'] }],
+        tooltip: {
+            formatter(params) {
+                if (params.dataType === 'node') {
+                    return params.data.value || params.data.name;
+                }
+                return `${params.data.source} → ${params.data.target}`;
+            }
+        },
+        legend: [{ bottom: 0, data: ['医院/项目', '系统', '接口'] }],
         series: [{
             type: 'graph',
             layout: 'force',
             data: nodes,
-            links: links,
-            categories: [{ name: '核心系统' }, { name: '第三方系统' }, { name: '接口明细' }],
+            links,
             roam: true,
-            label: { show: true, position: 'right' },
-            force: { repulsion: 200, edgeLength: 100 },
-            lineStyle: { color: 'source', curveness: 0.3 }
+            draggable: true,
+            categories: [{ name: '医院/项目' }, { name: '系统' }, { name: '接口' }],
+            force: { repulsion: 260, edgeLength: 120, gravity: 0.08 },
+            label: {
+                show: true,
+                formatter(node) {
+                    return node.data.value || node.data.name;
+                },
+                color: '#334155',
+                fontSize: 12
+            },
+            lineStyle: {
+                color: '#94a3b8',
+                width: 1.4,
+                curveness: 0.18,
+                opacity: 0.85
+            }
         }]
     });
 
-    window.addEventListener('resize', () => myChart.resize());
+    if (!window.__interfaceFlowResizeBound) {
+        window.addEventListener('resize', () => {
+            const chart = echarts.getInstanceByDom(document.getElementById('interfaceFlowChart'));
+            if (chart) chart.resize();
+        });
+        window.__interfaceFlowResizeBound = true;
+    }
 }
 
 async function showBurndownChart(pid) {
@@ -1097,4 +1625,253 @@ async function showBurndownChart(pid) {
         console.error('Burndown Chart Error:', e);
         chartDom.innerHTML = `<div style="display:flex;justify-content:center;align-items:center;height:100%;color:red;">加载失败: ${e.message}</div>`;
     }
+}
+
+function showMultiLogImportModal() {
+    const source = document.getElementById('multiLogSource');
+    const preview = document.getElementById('multiLogPreview');
+    const items = document.getElementById('multiLogItems');
+    const status = document.getElementById('multiLogStatus');
+    if (source) source.value = '';
+    if (preview) preview.style.display = 'none';
+    if (items) items.innerHTML = '';
+    if (status) {
+        status.style.display = 'none';
+        status.textContent = '';
+    }
+    window.latestParsedMultiLogs = [];
+    openModal('multiLogImportModal');
+}
+
+function escapeMultiLogValue(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeParsedMultiLogItem(item, index) {
+    const today = new Date().toISOString().slice(0, 10);
+    const parsedHours = Number(item?.work_hours ?? item?.hours ?? 8);
+    return {
+        member_name: String(item?.member_name || currentUser?.display_name || currentUser?.username || `成员${index + 1}`).trim(),
+        log_date: String(item?.log_date || item?.date || today).slice(0, 10),
+        work_content: String(item?.work_content || item?.content || item?.summary || '').trim(),
+        issues_encountered: String(item?.issues_encountered || item?.issues || '').trim(),
+        tomorrow_plan: String(item?.tomorrow_plan || item?.plan || item?.next_plan || '').trim(),
+        work_hours: Number.isFinite(parsedHours) && parsedHours > 0 ? parsedHours : 8,
+        work_type: String(item?.work_type || '现场').trim() || '现场'
+    };
+}
+
+function renderParsedMultiLogs(logs) {
+    const items = document.getElementById('multiLogItems');
+    const status = document.getElementById('multiLogStatus');
+    const importBtn = document.getElementById('importParsedLogsBtn');
+    if (!items) return;
+
+    if (!Array.isArray(logs) || !logs.length) {
+        items.innerHTML = '<div class="empty-state"><p>未识别到可导入的日志条目</p></div>';
+        if (status) {
+            status.style.display = 'block';
+            status.style.color = 'var(--gray-500)';
+            status.textContent = 'AI 未识别出结构化日志，请调整原文后重试。';
+        }
+        if (importBtn) importBtn.disabled = true;
+        return;
+    }
+
+    if (status) {
+        status.style.display = 'block';
+        status.style.color = '#475569';
+        status.textContent = `共识别 ${logs.length} 条日志，可在导入前逐条调整。`;
+    }
+    if (importBtn) importBtn.disabled = false;
+
+    items.innerHTML = logs.map((log, index) => `
+        <div class="multi-log-import-card" data-index="${index}" style="border:1px solid #dbeafe;border-radius:14px;background:#f8fbff;padding:14px 14px 12px 14px;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;font-weight:700;color:#0f172a;cursor:pointer;">
+                    <input type="checkbox" class="multi-log-select" checked>
+                    <span>日志 ${index + 1}</span>
+                </label>
+                <div style="font-size:12px;color:#64748b;">导入后会写入当前项目工作日志</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px;">
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">成员</label>
+                    <input type="text" class="multi-log-member" value="${escapeMultiLogValue(log.member_name)}" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">日期</label>
+                    <input type="date" class="multi-log-date" value="${escapeMultiLogValue(log.log_date)}" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">工时</label>
+                    <input type="number" min="0.5" step="0.5" class="multi-log-hours" value="${escapeMultiLogValue(log.work_hours)}" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;">
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">类型</label>
+                    <select class="multi-log-type" style="width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;background:white;">
+                        ${['现场', '远程', '培训', '沟通', '测试', '文档', '其他'].map(type => `<option value="${type}" ${type === log.work_type ? 'selected' : ''}>${type}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+            <div style="margin-bottom:10px;">
+                <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">工作内容</label>
+                <textarea class="multi-log-content" rows="3" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;">${escapeMultiLogValue(log.work_content)}</textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">问题</label>
+                    <textarea class="multi-log-issues" rows="2" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;">${escapeMultiLogValue(log.issues_encountered)}</textarea>
+                </div>
+                <div>
+                    <label style="display:block;font-size:12px;color:#64748b;margin-bottom:4px;">明日计划</label>
+                    <textarea class="multi-log-plan" rows="2" style="width:100%;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;resize:vertical;">${escapeMultiLogValue(log.tomorrow_plan)}</textarea>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function parseMultiLogs() {
+    const source = document.getElementById('multiLogSource')?.value?.trim() || '';
+    const preview = document.getElementById('multiLogPreview');
+    const items = document.getElementById('multiLogItems');
+    const status = document.getElementById('multiLogStatus');
+    const importBtn = document.getElementById('importParsedLogsBtn');
+    if (!source) {
+        showToast('请先粘贴待拆解内容', 'warning');
+        return;
+    }
+    if (!preview || !items) return;
+    preview.style.display = 'block';
+    items.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>AI 正在拆解日志...</p></div>';
+    if (status) {
+        status.style.display = 'none';
+        status.textContent = '';
+    }
+    if (importBtn) importBtn.disabled = true;
+
+    try {
+        const response = await api.post('/collab/parse-multi-logs', { raw_text: source });
+        const parsedLogs = Array.isArray(response)
+            ? response.map((item, index) => normalizeParsedMultiLogItem(item, index))
+            : [];
+        window.latestParsedMultiLogs = parsedLogs;
+        if (parsedLogs.length) {
+            renderParsedMultiLogs(parsedLogs);
+        } else {
+            if (importBtn) importBtn.disabled = true;
+            items.innerHTML = `<div class="markdown-content" style="padding:12px;border:1px dashed #cbd5e1;border-radius:12px;background:#fff;">${renderAiMarkdown(typeof response === 'string' ? response : JSON.stringify(response, null, 2))}</div>`;
+            if (status) {
+                status.style.display = 'block';
+                status.style.color = '#d97706';
+                status.textContent = 'AI 已返回结果，但未能识别为可导入的结构化日志，请手动检查。';
+            }
+        }
+    } catch (e) {
+        window.latestParsedMultiLogs = [];
+        items.innerHTML = `<div style="color:var(--danger);">拆解失败: ${escapeMultiLogValue(e.message)}</div>`;
+        if (status) {
+            status.style.display = 'block';
+            status.style.color = 'var(--danger)';
+            status.textContent = '拆解失败，请检查输入内容或稍后重试。';
+        }
+    }
+}
+
+function toggleAllParsedMultiLogs(checked) {
+    document.querySelectorAll('#multiLogItems .multi-log-select').forEach(input => {
+        input.checked = !!checked;
+    });
+}
+
+async function importParsedMultiLogs() {
+    if (!currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    const cards = Array.from(document.querySelectorAll('#multiLogItems .multi-log-import-card'));
+    const selectedCards = cards.filter(card => card.querySelector('.multi-log-select')?.checked);
+    const status = document.getElementById('multiLogStatus');
+    const importBtn = document.getElementById('importParsedLogsBtn');
+
+    if (!selectedCards.length) {
+        showToast('请至少选择一条日志', 'warning');
+        return;
+    }
+
+    const payloads = selectedCards.map(card => {
+        const read = selector => card.querySelector(selector)?.value?.trim() || '';
+        const hoursValue = Number(read('.multi-log-hours'));
+        return {
+            member_name: read('.multi-log-member') || currentUser?.display_name || currentUser?.username || '未知',
+            log_date: read('.multi-log-date') || new Date().toISOString().slice(0, 10),
+            work_hours: Number.isFinite(hoursValue) && hoursValue > 0 ? hoursValue : 8,
+            work_type: read('.multi-log-type') || '现场',
+            work_content: read('.multi-log-content'),
+            issues_encountered: read('.multi-log-issues'),
+            tomorrow_plan: read('.multi-log-plan')
+        };
+    }).filter(item => item.work_content);
+
+    if (!payloads.length) {
+        showToast('选中的日志缺少工作内容，无法导入', 'warning');
+        return;
+    }
+
+    if (importBtn) {
+        importBtn.disabled = true;
+        importBtn.textContent = '导入中...';
+    }
+    if (status) {
+        status.style.display = 'block';
+        status.style.color = '#475569';
+        status.textContent = `正在导入 ${payloads.length} 条日志...`;
+    }
+
+    let successCount = 0;
+    const failures = [];
+    for (const payload of payloads) {
+        try {
+            await api.post(`/projects/${currentProjectId}/worklogs`, payload, { silent: true });
+            successCount += 1;
+        } catch (e) {
+            failures.push(`${payload.member_name} ${payload.log_date}: ${e.message}`);
+        }
+    }
+
+    if (importBtn) {
+        importBtn.disabled = false;
+        importBtn.textContent = '导入选中日志';
+    }
+
+    if (successCount > 0 && typeof loadWorklogs === 'function') {
+        await loadWorklogs(currentProjectId);
+    }
+
+    if (!failures.length) {
+        if (status) {
+            status.style.display = 'block';
+            status.style.color = '#0f766e';
+            status.textContent = `已成功导入 ${successCount} 条日志。`;
+        }
+        showToast(`已导入 ${successCount} 条日志`, 'success');
+        closeModal('multiLogImportModal');
+        return;
+    }
+
+    if (status) {
+        status.style.display = 'block';
+        status.style.color = successCount > 0 ? '#d97706' : 'var(--danger)';
+        status.textContent = successCount > 0
+            ? `成功导入 ${successCount} 条，失败 ${failures.length} 条。请检查后重试。`
+            : `导入失败，共 ${failures.length} 条未写入。`;
+    }
+    showToast(successCount > 0 ? '部分日志导入失败，请查看提示' : '日志导入失败', successCount > 0 ? 'warning' : 'danger');
 }

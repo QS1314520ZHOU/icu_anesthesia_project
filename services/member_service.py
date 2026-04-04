@@ -11,13 +11,14 @@ class MemberService:
     @staticmethod
     def add_project_member(project_id, data):
         with DatabasePool.get_connection() as conn:
+            onsite_value = bool(data.get('is_onsite')) if DatabasePool.is_postgres() else (1 if data.get('is_onsite') else 0)
             conn.execute(DatabasePool.format_sql('''
                 INSERT INTO project_members (project_id, name, role, phone, email, daily_rate, join_date, current_city, is_onsite, remark)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             '''), (project_id, data['name'], data.get('role', '实施工程师'), data.get('phone'),
                   data.get('email'), data.get('daily_rate', 0),
                   data.get('join_date', datetime.now().strftime('%Y-%m-%d')),
-                  data.get('current_city'), 1 if data.get('is_onsite') else 0, data.get('remark')))
+                  data.get('current_city'), onsite_value, data.get('remark')))
             conn.commit()
             return True
 
@@ -31,6 +32,11 @@ class MemberService:
             if not existing:
                 return False
             existing = dict(existing)
+            onsite_value = data.get('is_onsite', existing.get('is_onsite'))
+            if DatabasePool.is_postgres():
+                onsite_value = bool(onsite_value)
+            else:
+                onsite_value = 1 if onsite_value else 0
             conn.execute(DatabasePool.format_sql('''
                 UPDATE project_members SET name=?, role=?, phone=?, email=?, daily_rate=?,
                 join_date=?, leave_date=?, current_city=?, is_onsite=?, 
@@ -44,7 +50,7 @@ class MemberService:
                 data.get('join_date', existing.get('join_date')),
                 data.get('leave_date', existing.get('leave_date')),
                 data.get('current_city', existing.get('current_city')),
-                data.get('is_onsite', existing.get('is_onsite')),
+                onsite_value,
                 data.get('status', existing.get('status', '在岗')),
                 data.get('remark', existing.get('remark')),
                 member_id
@@ -70,12 +76,13 @@ class MemberService:
         with DatabasePool.get_connection() as conn:
             if data.get('is_primary'):
                 conn.execute(DatabasePool.format_sql('UPDATE customer_contacts SET is_primary = FALSE WHERE project_id = ?'), (project_id,))
-            
+
+            primary_value = bool(data.get('is_primary')) if DatabasePool.is_postgres() else (1 if data.get('is_primary') else 0)
             conn.execute(DatabasePool.format_sql('''
                 INSERT INTO customer_contacts (project_id, name, department, position, phone, email, is_primary, remark)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             '''), (project_id, data['name'], data.get('department'), data.get('position'),
-                  data.get('phone'), data.get('email'), 1 if data.get('is_primary') else 0, data.get('remark')))
+                  data.get('phone'), data.get('email'), primary_value, data.get('remark')))
             conn.commit()
             return True
 
@@ -93,7 +100,12 @@ class MemberService:
                 contact = conn.execute(DatabasePool.format_sql('SELECT project_id FROM customer_contacts WHERE id = ?'), (contact_id,)).fetchone()
                 if contact:
                     conn.execute(DatabasePool.format_sql('UPDATE customer_contacts SET is_primary = FALSE WHERE project_id = ?'), (contact['project_id'],))
-            
+
+            primary_value = data.get('is_primary', existing.get('is_primary'))
+            if DatabasePool.is_postgres():
+                primary_value = bool(primary_value)
+            else:
+                primary_value = 1 if primary_value else 0
             conn.execute(DatabasePool.format_sql('''
                 UPDATE customer_contacts SET name=?, department=?, position=?, phone=?, 
                 email=?, is_primary=?, remark=?
@@ -104,7 +116,7 @@ class MemberService:
                 data.get('position', existing.get('position')),
                 data.get('phone', existing.get('phone')),
                 data.get('email', existing.get('email')),
-                data.get('is_primary', existing.get('is_primary')),
+                primary_value,
                 data.get('remark', existing.get('remark')),
                 contact_id
             ))

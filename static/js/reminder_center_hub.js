@@ -1,6 +1,23 @@
 (function () {
     window.reminderData = window.reminderData || null;
     window.reminderSearch = window.reminderSearch || '';
+    window.reminderActionState = window.reminderActionState || JSON.parse(localStorage.getItem('reminder_action_state') || '{}');
+
+    function reminderKey(item) {
+        return `${item.type}:${item.project_id || 0}:${item.id || 0}:${item.name || item.project_name || item.description || ''}`;
+    }
+
+    function persistReminderState() {
+        localStorage.setItem('reminder_action_state', JSON.stringify(window.reminderActionState || {}));
+    }
+
+    function isReminderVisible(item) {
+        const state = window.reminderActionState[reminderKey(item)];
+        if (!state) return true;
+        if (state.status === 'ignored') return false;
+        if (state.status === 'snoozed' && state.until && new Date(state.until).getTime() > Date.now()) return false;
+        return true;
+    }
 
     function syncReminderTabToUrl(type) {
         const params = new URLSearchParams(window.location.search);
@@ -113,6 +130,8 @@
                 items = res?.idle_projects || [];
             }
 
+            items = items.filter(isReminderVisible);
+
             if (items.length === 0) {
                 container.innerHTML = '<div style="text-align:center; color:#6b7280; padding:40px;">🎉 暂无待处理项</div>';
                 return;
@@ -161,6 +180,10 @@
                                 ${item.severity ? `<span class="badge ${item.severity === '高' ? 'badge-danger' : 'badge-warning'}">${item.severity}</span>` : ''}
                             </div>
                         </div>
+                        <div class="btn-group" onclick="event.stopPropagation();">
+                            <button class="btn btn-sm btn-outline" onclick='snoozeReminder(${JSON.stringify(item)})'>延后1天</button>
+                            <button class="btn btn-sm btn-outline" onclick='ignoreReminder(${JSON.stringify(item)})'>忽略</button>
+                        </div>
                     </div>
                 `;
             }).join('');
@@ -179,6 +202,21 @@
     window.resetReminderSearch = function () {
         window.reminderSearch = '';
         syncReminderSearchToUrl();
+        window.switchReminderTab(getReminderTabFromUrl());
+    };
+
+    window.snoozeReminder = function (item) {
+        const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+        window.reminderActionState[reminderKey(item)] = { status: 'snoozed', until };
+        persistReminderState();
+        showToast('提醒已延后 1 天', 'success');
+        window.switchReminderTab(getReminderTabFromUrl());
+    };
+
+    window.ignoreReminder = function (item) {
+        window.reminderActionState[reminderKey(item)] = { status: 'ignored', until: null };
+        persistReminderState();
+        showToast('提醒已忽略', 'success');
         window.switchReminderTab(getReminderTabFromUrl());
     };
 })();
