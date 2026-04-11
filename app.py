@@ -145,6 +145,7 @@ def require_global_auth():
         '/m',
         '/alignment',
         '/api/alignment',
+        '/api/wecom/',
     ]
     whitelist_exact = {
         '/',
