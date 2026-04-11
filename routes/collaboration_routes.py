@@ -30,6 +30,13 @@ def extract_meeting_actions():
     transcript = data.get('transcript')
     if not transcript:
         return api_response(False, error="Missing transcript")
+    transcript = str(transcript)
+    # 避免超长会议全文直接塞进 prompt 导致 token 爆炸
+    max_chars = 12000
+    if len(transcript) > max_chars:
+        head = transcript[:8000]
+        tail = transcript[-3500:]
+        transcript = f"{head}\n\n...[内容过长，已截断中间部分]...\n\n{tail}"
 
     prompt = f"""请将以下会议记录整理为 Markdown 格式，输出 3 个部分：
 

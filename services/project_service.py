@@ -3,8 +3,78 @@ from database import DatabasePool
 from services.monitor_service import monitor_service
 from services.ai_service import ai_service
 from utils.geo_service import geo_service
+from services.kb_service import kb_service
 
 class ProjectService:
+    @staticmethod
+    def _evaluate_payment_milestones(project_id, conn):
+        """根据床位验收进度自动推进回款节点状态，并触发提醒。"""
+        accepted_count = conn.execute(
+            DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE project_id = ? AND status = '已验收'"),
+            (project_id,)
+        ).fetchone()['c'] or 0
+        total_count = conn.execute(
+            DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE project_id = ?"),
+            (project_id,)
+        ).fetchone()['c'] or 0
+        accepted_rate = (accepted_count / total_count * 100) if total_count else 0
+
+        milestones = conn.execute(DatabasePool.format_sql('''
+            SELECT * FROM contract_payment_milestones
+            WHERE project_id = ? AND status = '待满足条件'
+            ORDER BY id ASC
+        '''), (project_id,)).fetchall()
+        project = conn.execute(
+            DatabasePool.format_sql('SELECT project_name FROM projects WHERE id = ?'),
+            (project_id,)
+        ).fetchone()
+        project_name = project['project_name'] if project else f'项目{project_id}'
+
+        for ms in milestones:
+            trigger_count = int(ms.get('trigger_bed_unit_count') or 0)
+            trigger_percentage = float(ms.get('trigger_percentage') or 0)
+            condition_met = False
+            if trigger_count > 0 and accepted_count >= trigger_count:
+                condition_met = True
+            if trigger_percentage > 0 and accepted_rate >= trigger_percentage:
+                condition_met = True
+            if not condition_met:
+                continue
+
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE contract_payment_milestones
+                SET status = '待收款', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            '''), (ms['id'],))
+
+            # 触发通知（避免重复）
+            warning_key = f"payment_milestone:{ms['id']}"
+            exists = conn.execute(DatabasePool.format_sql('''
+                SELECT id FROM warning_dismissals WHERE warning_key = ?
+            '''), (warning_key,)).fetchone()
+            if exists:
+                continue
+            conn.execute(DatabasePool.format_sql('''
+                INSERT INTO notifications (project_id, title, content, type, remind_type)
+                VALUES (?, ?, ?, ?, ?)
+            '''), (
+                project_id,
+                f"💰 回款节点已触发：{ms['milestone_name']}",
+                f"项目【{project_name}】已满足回款条件，当前已验收 {accepted_count}/{total_count}（{accepted_rate:.1f}%），计划金额 {ms.get('plan_amount', 0)}。",
+                'warning',
+                'once'
+            ))
+
+    @staticmethod
+    def reevaluate_all_payment_milestones():
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(
+                DatabasePool.format_sql('SELECT DISTINCT project_id FROM contract_payment_milestones')
+            ).fetchall()
+            for row in rows:
+                ProjectService._evaluate_payment_milestones(row['project_id'], conn)
+            conn.commit()
+            return len(rows)
     @staticmethod
     def _update_project_auto_status(project_id, cursor):
         """根据阶段进度自动计算项目状态和总体进度"""
@@ -158,10 +228,39 @@ class ProjectService:
                     cursor.execute(sql_up, (False, milestone['id'],))
 
     @staticmethod
-    def get_all_projects(user_id=None, is_admin=False):
+    def get_all_projects(user_id=None, is_admin=False, keyword=None, status=None, page=1, page_size=20, sort_by='created_at', sort_order='desc'):
         with DatabasePool.get_connection() as conn:
+            page = max(1, int(page or 1))
+            page_size = max(1, min(200, int(page_size or 20)))
+            offset = (page - 1) * page_size
+            allowed_sort_fields = {
+                'created_at': 'created_at',
+                'updated_at': 'updated_at',
+                'progress': 'progress',
+                'risk_score': 'risk_score',
+                'plan_end_date': 'plan_end_date',
+                'project_name': 'project_name'
+            }
+            order_field = allowed_sort_fields.get((sort_by or '').strip(), 'created_at')
+            order_direction = 'ASC' if str(sort_order or '').lower() == 'asc' else 'DESC'
+            clauses = ['1=1']
+            params = []
+            if keyword:
+                clauses.append('(project_name LIKE ? OR hospital_name LIKE ? OR project_manager LIKE ?)')
+                kw = f'%{keyword.strip()}%'
+                params.extend([kw, kw, kw])
+            if status:
+                clauses.append('status = ?')
+                params.append(status)
+
             if is_admin:
-                rows = conn.execute(DatabasePool.format_sql('SELECT * FROM projects ORDER BY created_at DESC')).fetchall()
+                sql = DatabasePool.format_sql(f'''
+                    SELECT * FROM projects
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY {order_field} {order_direction}
+                    LIMIT ? OFFSET ?
+                ''')
+                rows = conn.execute(sql, (*params, page_size, offset)).fetchall()
             else:
                 # Assuming a helper for user projects exists or is integrated
                 from services.auth_service import auth_service
@@ -169,8 +268,14 @@ class ProjectService:
                 if not user_project_ids:
                     return []
                 placeholders = ','.join(['?' for _ in user_project_ids])
-                sql_in = DatabasePool.format_sql(f'SELECT * FROM projects WHERE id IN ({placeholders}) ORDER BY created_at DESC')
-                rows = conn.execute(sql_in, user_project_ids).fetchall()
+                sql_in = DatabasePool.format_sql(f'''
+                    SELECT * FROM projects
+                    WHERE id IN ({placeholders})
+                      AND {' AND '.join(clauses)}
+                    ORDER BY {order_field} {order_direction}
+                    LIMIT ? OFFSET ?
+                ''')
+                rows = conn.execute(sql_in, (*user_project_ids, *params, page_size, offset)).fetchall()
             
             projects = []
             for row in rows:
@@ -230,7 +335,9 @@ class ProjectService:
     @staticmethod
     def create_project(data, creator_id=None):
         with DatabasePool.get_connection() as conn:
-            project_no = f"PRJ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            import random
+            suffix = random.randint(100, 999)
+            project_no = f"PRJ-{datetime.now().strftime('%Y%m%d%H%M%S%f')[:-3]}{suffix}"
             is_postgres = DatabasePool.is_postgres()
             
             insert_sql = '''
@@ -288,8 +395,11 @@ class ProjectService:
                 stage_id = DatabasePool.get_inserted_id(stage_cursor)
                 
                 for task_name in stage['tasks']:
-                    sql_tk = DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name, is_completed) VALUES (?, ?, ?)')
-                    conn.execute(sql_tk, (stage_id, task_name, False))
+                    sql_tk = DatabasePool.format_sql('''
+                        INSERT INTO tasks (stage_id, task_name, is_completed, assigned_to, estimated_duration, updated_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''')
+                    conn.execute(sql_tk, (stage_id, task_name, False, data.get('project_manager', ''), 1))
             
             conn.commit()
             return project_id
@@ -409,8 +519,15 @@ class ProjectService:
     @staticmethod
     def add_issue(project_id, data):
         with DatabasePool.get_connection() as conn:
-            sql = DatabasePool.format_sql('INSERT INTO issues (project_id, issue_type, description, severity, status) VALUES (?, ?, ?, ?, ?)')
-            conn.execute(sql, (project_id, data['issue_type'], data['description'], data['severity'], data.get('status', '待处理')))
+            is_postgres = DatabasePool.is_postgres()
+            sql = 'INSERT INTO issues (project_id, issue_type, description, severity, status) VALUES (?, ?, ?, ?, ?)'
+            if is_postgres:
+                sql += ' RETURNING id'
+            cursor = conn.execute(
+                DatabasePool.format_sql(sql),
+                (project_id, data['issue_type'], data['description'], data['severity'], data.get('status', '待处理'))
+            )
+            issue_id = DatabasePool.get_inserted_id(cursor)
             
             if data.get('severity') == '高':
                 sql_p = DatabasePool.format_sql('SELECT project_name FROM projects WHERE id = ?')
@@ -420,8 +537,14 @@ class ProjectService:
                     f"项目: {project['project_name']}\n类型: {data['issue_type']}\n描述: {data['description']}",
                     'danger'
                 )
+
+            suggestions = kb_service.suggest_for_issue(project_id, data.get('description', ''), limit=3)
             conn.commit()
-            return True
+            return {
+                'success': True,
+                'issue_id': issue_id,
+                'knowledge_suggestions': suggestions
+            }
 
     @staticmethod
     def update_issue(issue_id, data):
@@ -473,14 +596,29 @@ class ProjectService:
             if not existing:
                 return False
             existing = dict(existing)
-            sql = DatabasePool.format_sql('UPDATE project_stages SET plan_start_date=?, plan_end_date=?, actual_start_date=?, actual_end_date=? WHERE id=?')
+            sql = DatabasePool.format_sql('''
+                UPDATE project_stages
+                SET plan_start_date=?, plan_end_date=?, actual_start_date=?, actual_end_date=?,
+                    progress=?, status=?, responsible_person=?
+                WHERE id=?
+            ''')
             conn.execute(sql, (
                 data.get('plan_start_date', existing.get('plan_start_date')),
                 data.get('plan_end_date', existing.get('plan_end_date')),
                 data.get('actual_start_date', existing.get('actual_start_date')),
                 data.get('actual_end_date', existing.get('actual_end_date')),
+                data.get('progress', existing.get('progress', 0)),
+                data.get('status', existing.get('status', '待开始')),
+                data.get('responsible_person', existing.get('responsible_person')),
                 stage_id
             ))
+            stage_row = conn.execute(
+                DatabasePool.format_sql('SELECT project_id FROM project_stages WHERE id = ?'),
+                (stage_id,)
+            ).fetchone()
+            if stage_row:
+                ProjectService._update_project_auto_status(stage_row['project_id'], conn)
+                ProjectService.sync_project_milestones(stage_row['project_id'], conn)
             conn.commit()
             return True
 
@@ -503,7 +641,7 @@ class ProjectService:
             today = datetime.now().strftime('%Y-%m-%d')
             completed_date = today if new_status else None
             
-            sql_upd = DatabasePool.format_sql('UPDATE tasks SET is_completed = ?, completed_date = ? WHERE id = ?')
+            sql_upd = DatabasePool.format_sql('UPDATE tasks SET is_completed = ?, completed_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
             conn.execute(sql_upd, (new_status, completed_date, task_id))
             
             # 更新阶段的实际开始时间
@@ -577,8 +715,17 @@ class ProjectService:
     @staticmethod
     def add_task(stage_id, data):
         with DatabasePool.get_connection() as conn:
-            sql_ins_t = DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name, remark) VALUES (?, ?, ?)')
-            conn.execute(sql_ins_t, (stage_id, data['task_name'], data.get('remark', '')))
+            sql_ins_t = DatabasePool.format_sql('''
+                INSERT INTO tasks (stage_id, task_name, remark, assigned_to, estimated_duration, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''')
+            conn.execute(sql_ins_t, (
+                stage_id,
+                data['task_name'],
+                data.get('remark', ''),
+                data.get('assigned_to', ''),
+                int(data.get('estimated_duration') or 1)
+            ))
             
             # 联动更新状态
             stage = conn.execute(DatabasePool.format_sql('SELECT project_id FROM project_stages WHERE id = ?'), (stage_id,)).fetchone()
@@ -652,6 +799,371 @@ class ProjectService:
                 data.get('remark', existing.get('remark')),
                 device_id
             ))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def update_task(task_id, data):
+        with DatabasePool.get_connection() as conn:
+            task = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM tasks WHERE id = ?'),
+                (task_id,)
+            ).fetchone()
+            if not task:
+                return False
+            task = dict(task)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE tasks
+                SET task_name=?, remark=?, assigned_to=?, estimated_duration=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            '''), (
+                data.get('task_name', task.get('task_name')),
+                data.get('remark', task.get('remark')),
+                data.get('assigned_to', task.get('assigned_to')),
+                int(data.get('estimated_duration') or task.get('estimated_duration') or 1),
+                task_id
+            ))
+            stage = conn.execute(
+                DatabasePool.format_sql('SELECT project_id FROM project_stages WHERE id = ?'),
+                (task['stage_id'],)
+            ).fetchone()
+            if stage:
+                ProjectService._update_project_auto_status(stage['project_id'], conn)
+            conn.commit()
+            return True
+
+    @staticmethod
+    def create_project_from_template(template_id, overrides=None, creator_id=None):
+        overrides = overrides or {}
+        with DatabasePool.get_connection() as conn:
+            tpl_sql = DatabasePool.format_sql('SELECT * FROM project_templates_custom WHERE id = ?')
+            template = conn.execute(tpl_sql, (template_id,)).fetchone()
+            if not template:
+                return {'error': '模板不存在'}
+
+            import json
+            tpl_data = {}
+            try:
+                tpl_data = json.loads(template['template_data'] or '{}')
+            except Exception:
+                tpl_data = {}
+
+            project_data = dict(tpl_data.get('project', {}) or {})
+            project_data.update({
+                'project_name': overrides.get('project_name') or project_data.get('project_name') or f"模板项目-{datetime.now().strftime('%m%d%H%M')}",
+                'hospital_name': overrides.get('hospital_name') or project_data.get('hospital_name') or '',
+                'plan_start_date': overrides.get('plan_start_date') or project_data.get('plan_start_date') or datetime.now().strftime('%Y-%m-%d'),
+                'plan_end_date': overrides.get('plan_end_date') or project_data.get('plan_end_date') or '',
+                'project_manager': overrides.get('project_manager') or project_data.get('project_manager') or '',
+            })
+
+            project_id = ProjectService.create_project(project_data, creator_id=creator_id)
+
+            # 覆盖默认阶段/任务，使用模板结构重建
+            stage_rows = conn.execute(
+                DatabasePool.format_sql('SELECT id FROM project_stages WHERE project_id = ?'),
+                (project_id,)
+            ).fetchall()
+            for row in stage_rows:
+                conn.execute(DatabasePool.format_sql('DELETE FROM tasks WHERE stage_id = ?'), (row['id'],))
+            conn.execute(DatabasePool.format_sql('DELETE FROM project_stages WHERE project_id = ?'), (project_id,))
+
+            stages = tpl_data.get('stages', []) or []
+            milestones = tpl_data.get('milestones', []) or []
+            for idx, stage in enumerate(stages, start=1):
+                stage_sql = DatabasePool.format_sql('''
+                    INSERT INTO project_stages (project_id, stage_name, stage_order, plan_start_date, plan_end_date, status, progress, responsible_person)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''')
+                st_cur = conn.execute(stage_sql, (
+                    project_id,
+                    stage.get('stage_name', f'阶段{idx}'),
+                    stage.get('stage_order', idx),
+                    stage.get('plan_start_date'),
+                    stage.get('plan_end_date'),
+                    stage.get('status', '待开始'),
+                    int(stage.get('progress') or 0),
+                    stage.get('responsible_person')
+                ))
+                stage_id = DatabasePool.get_inserted_id(st_cur)
+                for task in (stage.get('tasks') or []):
+                    conn.execute(DatabasePool.format_sql('''
+                        INSERT INTO tasks (stage_id, task_name, is_completed, completed_date, remark, assigned_to, estimated_duration, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    '''), (
+                        stage_id,
+                        task.get('task_name', ''),
+                        bool(task.get('is_completed')),
+                        task.get('completed_date'),
+                        task.get('remark', ''),
+                        task.get('assigned_to', ''),
+                        int(task.get('estimated_duration') or 1)
+                    ))
+
+            for milestone in milestones:
+                conn.execute(DatabasePool.format_sql('''
+                    INSERT INTO milestones (project_id, name, target_date, is_completed, completed_date, remark)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                '''), (
+                    project_id,
+                    milestone.get('name', ''),
+                    milestone.get('target_date'),
+                    bool(milestone.get('is_completed')),
+                    milestone.get('completed_date'),
+                    milestone.get('remark')
+                ))
+
+            ProjectService._update_project_auto_status(project_id, conn)
+            ProjectService.sync_project_milestones(project_id, conn)
+            conn.commit()
+            return {'project_id': project_id}
+
+    @staticmethod
+    def list_bed_units(project_id):
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM bed_units WHERE project_id = ? ORDER BY unit_type, unit_code'),
+                (project_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def create_bed_unit(project_id, data):
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                INSERT INTO bed_units (
+                    project_id, unit_type, unit_code, location_desc, status, plan_finish_date,
+                    actual_finish_date, acceptance_owner, acceptance_date, remark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''')
+            cur = conn.execute(sql, (
+                project_id,
+                data.get('unit_type', 'ICU床位'),
+                data.get('unit_code', ''),
+                data.get('location_desc', ''),
+                data.get('status', '未开始'),
+                data.get('plan_finish_date'),
+                data.get('actual_finish_date'),
+                data.get('acceptance_owner', ''),
+                data.get('acceptance_date'),
+                data.get('remark', '')
+            ))
+            bed_unit_id = DatabasePool.get_inserted_id(cur)
+            ProjectService._evaluate_payment_milestones(project_id, conn)
+            conn.commit()
+            return bed_unit_id
+
+    @staticmethod
+    def update_bed_unit(bed_unit_id, data):
+        with DatabasePool.get_connection() as conn:
+            old = conn.execute(DatabasePool.format_sql('SELECT * FROM bed_units WHERE id = ?'), (bed_unit_id,)).fetchone()
+            if not old:
+                return False
+            old = dict(old)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE bed_units
+                SET unit_type=?, unit_code=?, location_desc=?, status=?, plan_finish_date=?, actual_finish_date=?,
+                    acceptance_owner=?, acceptance_date=?, remark=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            '''), (
+                data.get('unit_type', old.get('unit_type')),
+                data.get('unit_code', old.get('unit_code')),
+                data.get('location_desc', old.get('location_desc')),
+                data.get('status', old.get('status')),
+                data.get('plan_finish_date', old.get('plan_finish_date')),
+                data.get('actual_finish_date', old.get('actual_finish_date')),
+                data.get('acceptance_owner', old.get('acceptance_owner')),
+                data.get('acceptance_date', old.get('acceptance_date')),
+                data.get('remark', old.get('remark')),
+                bed_unit_id
+            ))
+            project_id = old.get('project_id')
+            if project_id:
+                ProjectService._evaluate_payment_milestones(project_id, conn)
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete_bed_unit(bed_unit_id):
+        with DatabasePool.get_connection() as conn:
+            old = conn.execute(DatabasePool.format_sql('SELECT project_id FROM bed_units WHERE id = ?'), (bed_unit_id,)).fetchone()
+            conn.execute(DatabasePool.format_sql('DELETE FROM bed_units WHERE id = ?'), (bed_unit_id,))
+            if old and old.get('project_id'):
+                ProjectService._evaluate_payment_milestones(old['project_id'], conn)
+            conn.commit()
+            return True
+
+    @staticmethod
+    def list_bed_unit_devices(bed_unit_id):
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM bed_unit_devices WHERE bed_unit_id = ? ORDER BY id DESC'),
+                (bed_unit_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def create_bed_unit_device(bed_unit_id, data):
+        with DatabasePool.get_connection() as conn:
+            sql = DatabasePool.format_sql('''
+                INSERT INTO bed_unit_devices (
+                    bed_unit_id, medical_device_id, device_type, brand_model, device_serial_no,
+                    protocol_type, data_status, last_data_at, issue_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''')
+            cur = conn.execute(sql, (
+                bed_unit_id,
+                data.get('medical_device_id'),
+                data.get('device_type', ''),
+                data.get('brand_model', ''),
+                data.get('device_serial_no', ''),
+                data.get('protocol_type', ''),
+                data.get('data_status', '未对接'),
+                data.get('last_data_at'),
+                data.get('issue_note', '')
+            ))
+            device_id = DatabasePool.get_inserted_id(cur)
+            conn.commit()
+            return device_id
+
+    @staticmethod
+    def update_bed_unit_device(device_id, data):
+        with DatabasePool.get_connection() as conn:
+            old = conn.execute(DatabasePool.format_sql('SELECT * FROM bed_unit_devices WHERE id = ?'), (device_id,)).fetchone()
+            if not old:
+                return False
+            old = dict(old)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE bed_unit_devices
+                SET medical_device_id=?, device_type=?, brand_model=?, device_serial_no=?, protocol_type=?,
+                    data_status=?, last_data_at=?, issue_note=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            '''), (
+                data.get('medical_device_id', old.get('medical_device_id')),
+                data.get('device_type', old.get('device_type')),
+                data.get('brand_model', old.get('brand_model')),
+                data.get('device_serial_no', old.get('device_serial_no')),
+                data.get('protocol_type', old.get('protocol_type')),
+                data.get('data_status', old.get('data_status')),
+                data.get('last_data_at', old.get('last_data_at')),
+                data.get('issue_note', old.get('issue_note')),
+                device_id
+            ))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete_bed_unit_device(device_id):
+        with DatabasePool.get_connection() as conn:
+            conn.execute(DatabasePool.format_sql('DELETE FROM bed_unit_devices WHERE id = ?'), (device_id,))
+            conn.commit()
+            return True
+
+    @staticmethod
+    def get_bed_unit_progress_summary():
+        with DatabasePool.get_connection() as conn:
+            total = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units")).fetchone()['c'] or 0
+            icu_total = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = 'ICU床位'")).fetchone()['c'] or 0
+            icu_done = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = 'ICU床位' AND status = '已验收'")).fetchone()['c'] or 0
+            or_total = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = '手术间'")).fetchone()['c'] or 0
+            or_done = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = '手术间' AND status = '已验收'")).fetchone()['c'] or 0
+            pacu_total = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = 'PACU床位'")).fetchone()['c'] or 0
+            pacu_done = conn.execute(DatabasePool.format_sql("SELECT COUNT(*) as c FROM bed_units WHERE unit_type = 'PACU床位' AND status = '已验收'")).fetchone()['c'] or 0
+            status_dist = conn.execute(DatabasePool.format_sql('''
+                SELECT status, COUNT(*) as count FROM bed_units GROUP BY status ORDER BY count DESC
+            ''')).fetchall()
+            current_month = datetime.now().strftime('%Y-%m')
+            prev_month = (datetime.now().replace(day=1) - timedelta(days=1)).strftime('%Y-%m')
+            month_done = conn.execute(DatabasePool.format_sql('''
+                SELECT COUNT(*) as c FROM bed_units WHERE status = '已验收' AND acceptance_date LIKE ?
+            '''), (f'{current_month}%',)).fetchone()['c'] or 0
+            prev_done = conn.execute(DatabasePool.format_sql('''
+                SELECT COUNT(*) as c FROM bed_units WHERE status = '已验收' AND acceptance_date LIKE ?
+            '''), (f'{prev_month}%',)).fetchone()['c'] or 0
+            mom = round(((month_done - prev_done) / prev_done) * 100, 2) if prev_done else (100.0 if month_done else 0.0)
+            return {
+                'total_units': total,
+                'icu_total': icu_total,
+                'icu_accepted': icu_done,
+                'icu_acceptance_rate': round((icu_done / icu_total) * 100, 2) if icu_total else 0,
+                'operating_room_total': or_total,
+                'operating_room_accepted': or_done,
+                'pacu_total': pacu_total,
+                'pacu_accepted': pacu_done,
+                'status_distribution': [dict(r) for r in status_dist],
+                'month_delivered': month_done,
+                'delivery_mom': mom
+            }
+
+    @staticmethod
+    def list_contract_payment_milestones(project_id):
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(DatabasePool.format_sql('''
+                SELECT * FROM contract_payment_milestones
+                WHERE project_id = ?
+                ORDER BY plan_date ASC, id ASC
+            '''), (project_id,)).fetchall()
+            return [dict(r) for r in rows]
+
+    @staticmethod
+    def create_contract_payment_milestone(project_id, data):
+        with DatabasePool.get_connection() as conn:
+            cur = conn.execute(DatabasePool.format_sql('''
+                INSERT INTO contract_payment_milestones (
+                    project_id, milestone_name, payment_condition, plan_amount, plan_date,
+                    actual_amount, actual_date, trigger_bed_unit_count, trigger_percentage, status, remark
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''), (
+                project_id,
+                data.get('milestone_name', ''),
+                data.get('payment_condition', ''),
+                float(data.get('plan_amount') or 0),
+                data.get('plan_date'),
+                float(data.get('actual_amount') or 0),
+                data.get('actual_date'),
+                int(data.get('trigger_bed_unit_count') or 0),
+                float(data.get('trigger_percentage') or 0),
+                data.get('status', '待满足条件'),
+                data.get('remark', '')
+            ))
+            milestone_id = DatabasePool.get_inserted_id(cur)
+            ProjectService._evaluate_payment_milestones(project_id, conn)
+            conn.commit()
+            return milestone_id
+
+    @staticmethod
+    def update_contract_payment_milestone(milestone_id, data):
+        with DatabasePool.get_connection() as conn:
+            old = conn.execute(DatabasePool.format_sql('SELECT * FROM contract_payment_milestones WHERE id = ?'), (milestone_id,)).fetchone()
+            if not old:
+                return False
+            old = dict(old)
+            conn.execute(DatabasePool.format_sql('''
+                UPDATE contract_payment_milestones
+                SET milestone_name=?, payment_condition=?, plan_amount=?, plan_date=?, actual_amount=?, actual_date=?,
+                    trigger_bed_unit_count=?, trigger_percentage=?, status=?, remark=?, updated_at=CURRENT_TIMESTAMP
+                WHERE id=?
+            '''), (
+                data.get('milestone_name', old.get('milestone_name')),
+                data.get('payment_condition', old.get('payment_condition')),
+                float(data.get('plan_amount') if data.get('plan_amount') is not None else old.get('plan_amount') or 0),
+                data.get('plan_date', old.get('plan_date')),
+                float(data.get('actual_amount') if data.get('actual_amount') is not None else old.get('actual_amount') or 0),
+                data.get('actual_date', old.get('actual_date')),
+                int(data.get('trigger_bed_unit_count') if data.get('trigger_bed_unit_count') is not None else old.get('trigger_bed_unit_count') or 0),
+                float(data.get('trigger_percentage') if data.get('trigger_percentage') is not None else old.get('trigger_percentage') or 0),
+                data.get('status', old.get('status')),
+                data.get('remark', old.get('remark')),
+                milestone_id
+            ))
+            ProjectService._evaluate_payment_milestones(old['project_id'], conn)
+            conn.commit()
+            return True
+
+    @staticmethod
+    def delete_contract_payment_milestone(milestone_id):
+        with DatabasePool.get_connection() as conn:
+            conn.execute(DatabasePool.format_sql('DELETE FROM contract_payment_milestones WHERE id = ?'), (milestone_id,))
             conn.commit()
             return True
 
@@ -883,8 +1395,17 @@ class ProjectService:
             
             for task_name in task_list:
                 if isinstance(task_name, str) and task_name.strip():
-                    sql_tk = DatabasePool.format_sql('INSERT INTO tasks (stage_id, task_name, is_completed) VALUES (?, ?, ?)')
-                    conn.execute(sql_tk, (stage_id, task_name.strip(), False if DatabasePool.is_postgres() else 0))
+                    sql_tk = DatabasePool.format_sql('''
+                        INSERT INTO tasks (stage_id, task_name, is_completed, assigned_to, estimated_duration, updated_at)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''')
+                    conn.execute(sql_tk, (
+                        stage_id,
+                        task_name.strip(),
+                        False if DatabasePool.is_postgres() else 0,
+                        data.get('responsible_person', ''),
+                        1
+                    ))
             
             # 触发状态更新
             ProjectService._update_project_auto_status(project_id, conn)

@@ -26,6 +26,12 @@ def delete_task(task_id):
     project_service.delete_task(task_id)
     return api_response(True)
 
+@task_bp.route('/tasks/<int:task_id>', methods=['PUT'])
+def update_task(task_id):
+    data = request.json or {}
+    success = project_service.update_task(task_id, data)
+    return api_response(bool(success))
+
 @task_bp.route('/issues/<int:issue_id>', methods=['PUT', 'DELETE'])
 def update_issue(issue_id):
     if request.method == 'DELETE':

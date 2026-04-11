@@ -131,6 +131,7 @@ const FormGenerator = {
         const components = form.pages?.[0]?.components || [];
         let businessRows = 0;
         let specialCells = 0;
+        const patchedCount = (payload.patched_labels || []).length;
         components.forEach(comp => {
             if (comp.type === 'table') {
                 (comp.rows || []).forEach(row => {
@@ -165,9 +166,11 @@ const FormGenerator = {
                 <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">视觉OCR单元格：<strong style="color:#fff;">${(payload.vision_analysis?.table_cells || []).length}</strong></div>
                 <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">业务行角色：<strong style="color:#fff;">${businessRows}</strong></div>
                 <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">特殊控件格：<strong style="color:#fff;">${specialCells}</strong></div>
+                <div style="padding:10px;border-radius:10px;background:rgba(255,255,255,0.04);">参考补齐项：<strong style="color:#fff;">${patchedCount}</strong></div>
             </div>
             ${payload.reference_match ? `<div style="margin-top:10px;font-size:12px;color:#cbd5e1;">命中本地参考：<strong style="color:#fff;">${this._escapeHtml(payload.reference_match.form_name || payload.reference_match.filename || '')}</strong></div>` : ''}
             ${payload.structure_only ? `<div style="margin-top:10px;font-size:12px;color:#fcd34d;">当前结果为表格骨架占位版，单元格中的“单元格X-Y”仅用于辅助还原布局，不代表真实业务字段。</div>` : ''}
+            ${patchedCount ? `<div style="margin-top:10px;font-size:12px;color:#fef3c7;">参考补齐字段：${payload.patched_labels.slice(0, 15).map(item => this._escapeHtml(item)).join('、')}</div>` : ''}
         `;
     },
 
@@ -278,6 +281,12 @@ const FormGenerator = {
 
     _normalizeBindingLabel: function (text) {
         return String(text || '').replace(/[:：\s]/g, '').trim();
+    },
+
+    _isPatchedLabel: function (label) {
+        const normalized = this._normalizeBindingLabel(label || '');
+        const patched = this._lastDocumentData?.patched_labels || [];
+        return patched.some(item => this._normalizeBindingLabel(item) === normalized);
     },
 
     _recommendBindingFromLabel: function (text) {

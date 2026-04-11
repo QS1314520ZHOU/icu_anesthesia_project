@@ -113,7 +113,25 @@ python scripts/form_generator_smoke.py
 如果希望一次性执行 Python 编译校验、前端语法校验和 smoke 回归，可在 PowerShell 中运行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1
+```
+
+在 Bash / Linux / macOS 环境也可以直接运行：
+
+```bash
+bash scripts/run_regression_suite.sh
+```
+
+查看可选 smoke suite：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1 -ListSuites
+```
+
+只运行指定 suite：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1 -Suite core_workbench,project_detail
 ```
 
 这条脚本当前会同时检查：
@@ -121,6 +139,8 @@ powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1
 - Core workbench
 - Insight / reporting surfaces
 - Advanced governance surfaces
+- Delivery data domains
+- Auth / async task / WeCom surfaces
 - Form Generator
 - Project Detail
 - Alignment Center
@@ -129,10 +149,46 @@ powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1
 - Platform Admin / Share surfaces
 - Collaboration center
 
+如果希望直接从 Python 侧运行统一回归套件，可执行：
+
+```bash
+python scripts/regression_suite.py
+```
+
+如需查看当前可选的 smoke suite 名称：
+
+```bash
+python scripts/regression_suite.py --list-suites
+```
+
+如需只跑某几条：
+
+```bash
+python scripts/regression_suite.py --suite core_workbench --suite project_detail
+```
+
+如需输出机器可读结果：
+
+```bash
+python scripts/regression_suite.py --json-out regression_report.json
+```
+
+如需同时输出人类可读的 Markdown 摘要：
+
+```bash
+python scripts/regression_suite.py --json-out regression_report.json --markdown-out regression_report.md
+```
+
+或通过 shell 包装脚本：
+
+```bash
+bash scripts/run_regression_suite.sh --json-out regression_report.json --markdown-out regression_report.md
+```
+
 如果经过人工确认后需要刷新契约基线，可执行：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1 -UpdateContracts
+powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1 -UpdateContracts
 ```
 
 或直接运行：
@@ -140,6 +196,16 @@ powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1 -
 ```bash
 python scripts/form_generator_smoke.py --write-contracts
 ```
+
+兼容别名仍保留：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1
+```
+
+仓库也已提供 GitHub Actions 工作流：
+
+- `.github/workflows/regression-suite.yml`
 
 当前 smoke 覆盖：
 
@@ -154,8 +220,11 @@ python scripts/form_generator_smoke.py --write-contracts
 
 - `FEATURE_COMPLETION_AUDIT.md`
 - `FEATURE_SUGGESTIONS_ROADMAP.md`
+- `REGRESSION_SUITE.md`
 - `INSIGHT_REPORTING_REGRESSION.md`
 - `ADVANCED_GOVERNANCE_REGRESSION.md`
+- `DELIVERY_DATA_DOMAINS_REGRESSION.md`
+- `AUTH_ASYNC_WECOM_REGRESSION.md`
 - `COLLABORATION_REGRESSION.md`
 - `CORE_WORKBENCH_REGRESSION.md`
 - `AUXILIARY_SURFACES_REGRESSION.md`

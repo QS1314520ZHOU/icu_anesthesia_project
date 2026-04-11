@@ -162,7 +162,7 @@
   - run `python scripts/form_generator_smoke.py --write-contracts`
   - review the diff in `scripts/form_generator_contracts.json`
 - Or run one-click check in PowerShell:
-  - `powershell -ExecutionPolicy Bypass -File scripts/run_form_generator_checks.ps1`
+  - `powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1`
   - verify all steps return `OK`
 
 ## Knowledge Base
@@ -204,6 +204,19 @@
   - `python scripts/alignment_center_smoke.py`
   - verify all sections return `OK`
 
+## Interface Spec Workbench
+
+- Open project detail -> 智能对照 tab
+- Verify:
+  - built-in standard can load
+  - vendor doc upload UI renders
+  - comparison can run
+  - field detail modal opens
+  - interface AI assistant modal opens
+- Run interface spec smoke:
+  - `python scripts/interface_spec_smoke.py`
+  - verify all sections return `OK`
+
 ## Project Detail
 
 - Open a project detail page in `/`
@@ -220,6 +233,18 @@
   - share / access actions work if enabled
 - Run local project-detail smoke:
   - `python scripts/project_detail_smoke.py`
+  - verify all sections return `OK`
+
+## Delivery Data Domains
+
+- Verify at least one CRUD flow in:
+  - members / contacts
+  - worklogs / departures
+  - documents / expenses
+  - changes / acceptances / satisfaction / follow-ups
+  - task / issue / device update
+- Run delivery data smoke:
+  - `python scripts/delivery_data_domains_smoke.py`
   - verify all sections return `OK`
 
 ## Collaboration Center
@@ -254,6 +279,24 @@
   - `/m/project/briefing/<project_id>` renders
   - `/m/daily_report/<project_id>` renders
   - `/m/acceptance/<project_id>` renders
+
+## Auth / Async / WeCom
+
+- Verify auth surface:
+  - overlay login renders when not logged in
+  - normal login / register modal renders
+- Verify task center async surface:
+  - task detail opens
+  - retry works
+  - cancel works
+  - cleanup works
+- Verify WeCom surface:
+  - OAuth login route exists
+  - callback route exists
+  - JS-SDK config route exists
+- Run auth/async/WeCom smoke:
+  - `python scripts/auth_async_wecom_smoke.py`
+  - verify all sections return `OK`
 
 ## Admin Config
 

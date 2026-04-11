@@ -140,6 +140,18 @@ To intentionally refresh the baseline after a validated change:
 python scripts/form_generator_smoke.py --write-contracts
 ```
 
+You can also invoke the full regression runner and include the contract update in one pass:
+
+```bash
+python scripts/regression_suite.py --update-contracts
+```
+
+Or via PowerShell wrapper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_regression_suite.ps1 -UpdateContracts
+```
+
 Current checks:
 
 - score-table sample selects `score_table`

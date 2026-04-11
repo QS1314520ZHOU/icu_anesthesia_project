@@ -11,6 +11,86 @@ from app_config import NOTIFICATION_CONFIG
 class MonitorService:
     """监控与通知服务"""
 
+    DEFAULT_ROUTING = {
+        'danger': 'project_manager,admin',
+        'warning': 'project_manager',
+        'info': 'project_manager'
+    }
+
+    def _resolve_project_manager_user_id(self, conn, project_id):
+        """根据项目经理姓名反查用户ID，用于通知定向。"""
+        if not project_id:
+            return None
+        project = conn.execute(
+            DatabasePool.format_sql('SELECT project_manager FROM projects WHERE id = ?'),
+            (project_id,)
+        ).fetchone()
+        if not project:
+            return None
+        project = dict(project)
+        manager = (project.get('project_manager') or '').strip()
+        if not manager:
+            return None
+        user = conn.execute(DatabasePool.format_sql('''
+            SELECT id FROM users
+            WHERE display_name = ? OR username = ?
+            ORDER BY id ASC
+            LIMIT 1
+        '''), (manager, manager)).fetchone()
+        return user['id'] if user else None
+
+    def _get_routing_rule(self, conn, notification_type):
+        ntype = (notification_type or 'info').strip().lower()
+        key = f'notification_route_{ntype}'
+        row = conn.execute(
+            DatabasePool.format_sql('SELECT value FROM system_config WHERE config_key = ?'),
+            (key,)
+        ).fetchone()
+        if row and row.get('value'):
+            return str(row['value'])
+        return self.DEFAULT_ROUTING.get(ntype, 'project_manager')
+
+    def _resolve_admin_user_ids(self, conn):
+        rows = conn.execute(DatabasePool.format_sql('''
+            SELECT id FROM users
+            WHERE role = 'admin'
+            ORDER BY id ASC
+        ''')).fetchall()
+        return [r['id'] for r in rows]
+
+    def _resolve_target_user_ids(self, conn, project_id, notification_type, explicit_target_user_id=None):
+        # 显式指定时优先
+        if explicit_target_user_id is not None:
+            if isinstance(explicit_target_user_id, list):
+                ids = [int(x) for x in explicit_target_user_id if str(x).strip()]
+                return ids or [None]
+            try:
+                return [int(explicit_target_user_id)]
+            except Exception:
+                return [None]
+
+        rule = self._get_routing_rule(conn, notification_type)
+        tokens = [t.strip().lower() for t in str(rule or '').split(',') if t.strip()]
+        if not tokens:
+            tokens = ['project_manager']
+
+        target_ids = []
+        if 'project_manager' in tokens:
+            pm_uid = self._resolve_project_manager_user_id(conn, project_id)
+            if pm_uid:
+                target_ids.append(pm_uid)
+        if 'admin' in tokens:
+            target_ids.extend(self._resolve_admin_user_ids(conn))
+        if 'broadcast' in tokens or 'all' in tokens:
+            return [None]
+
+        # 去重
+        uniq = []
+        for uid in target_ids:
+            if uid not in uniq:
+                uniq.append(uid)
+        return uniq or [None]
+
 
     def send_wecom_message(self, title, content, msg_type='text', allow_fallback=True):
         """发送企业微信通知（优先自建应用，降级到Webhook）"""
@@ -121,15 +201,18 @@ class MonitorService:
         thread = Thread(target=_send)
         thread.start()
 
-    def get_notifications(self, limit=50):
+    def get_notifications(self, limit=50, user_id=None):
         """获取通知列表"""
-        return self.get_notification_inbox(limit=limit)
+        return self.get_notification_inbox(limit=limit, user_id=user_id)
 
-    def get_notification_inbox(self, limit=50, notification_type=None, read_status=None, keyword=None):
+    def get_notification_inbox(self, limit=50, notification_type=None, read_status=None, keyword=None, user_id=None):
         """获取通知收件箱，支持分类、已读状态与关键词筛选"""
         with DatabasePool.get_connection() as conn:
             clauses = ['1=1']
             params = []
+            if user_id:
+                clauses.append('(n.target_user_id IS NULL OR n.target_user_id = ?)')
+                params.append(user_id)
 
             if notification_type:
                 clauses.append('n.type = ?')
@@ -155,7 +238,7 @@ class MonitorService:
             params.append(limit)
             notifications = [dict(n) for n in conn.execute(sql, params).fetchall()]
 
-            summary_sql = DatabasePool.format_sql('''
+            summary_sql = DatabasePool.format_sql(f'''
                 SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN is_read = ? THEN 1 ELSE 0 END) as unread_count,
@@ -163,8 +246,12 @@ class MonitorService:
                     SUM(CASE WHEN type = 'warning' THEN 1 ELSE 0 END) as warning_count,
                     SUM(CASE WHEN type = 'info' THEN 1 ELSE 0 END) as info_count
                 FROM notifications
+                {"WHERE (target_user_id IS NULL OR target_user_id = ?)" if user_id else ""}
             ''')
-            summary_row = dict(conn.execute(summary_sql, (False,)).fetchone())
+            summary_params = [False]
+            if user_id:
+                summary_params.append(user_id)
+            summary_row = dict(conn.execute(summary_sql, tuple(summary_params)).fetchone())
 
         return {
             'items': notifications,
@@ -180,25 +267,47 @@ class MonitorService:
     def create_notification(self, data):
         """创建通知"""
         with DatabasePool.get_connection() as conn:
+            targets = self._resolve_target_user_ids(
+                conn,
+                data.get('project_id'),
+                data.get('type', 'info'),
+                explicit_target_user_id=data.get('target_user_id')
+            )
             sql = DatabasePool.format_sql('''
-                INSERT INTO notifications (project_id, title, content, type, due_date, remind_type)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO notifications (project_id, target_user_id, title, content, type, due_date, remind_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''')
-            conn.execute(sql, (data.get('project_id'), data['title'], data.get('content', ''), 
-                  data.get('type', 'info'), data.get('due_date'), data.get('remind_type', 'once')))
+            for uid in targets:
+                conn.execute(sql, (
+                    data.get('project_id'),
+                    uid,
+                    data['title'],
+                    data.get('content', ''),
+                    data.get('type', 'info'),
+                    data.get('due_date'),
+                    data.get('remind_type', 'once')
+                ))
             conn.commit()
         self.send_notification_async(data['title'], data.get('content', ''), data.get('type', 'info'), data.get('project_id'))
         return True
 
-    def mark_as_read(self, nid=None):
+    def mark_as_read(self, nid=None, user_id=None):
         """标记已读"""
         with DatabasePool.get_connection() as conn:
             if nid:
-                sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE id = ?')
-                conn.execute(sql, (True, nid))
+                if user_id:
+                    sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE id = ? AND (target_user_id IS NULL OR target_user_id = ?)')
+                    conn.execute(sql, (True, nid, user_id))
+                else:
+                    sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE id = ?')
+                    conn.execute(sql, (True, nid))
             else:
-                sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE is_read = ?')
-                conn.execute(sql, (True, False))
+                if user_id:
+                    sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE is_read = ? AND (target_user_id IS NULL OR target_user_id = ?)')
+                    conn.execute(sql, (True, False, user_id))
+                else:
+                    sql = DatabasePool.format_sql('UPDATE notifications SET is_read = ? WHERE is_read = ?')
+                    conn.execute(sql, (True, False))
             conn.commit()
         return True
 
@@ -214,11 +323,15 @@ class MonitorService:
             conn.commit()
         return True
 
-    def get_unread_count(self):
+    def get_unread_count(self, user_id=None):
         """获取未读数"""
         with DatabasePool.get_connection() as conn:
-            sql = DatabasePool.format_sql('SELECT COUNT(*) as count FROM notifications WHERE is_read = ?')
-            count = conn.execute(sql, (False,)).fetchone()['count']
+            if user_id:
+                sql = DatabasePool.format_sql('SELECT COUNT(*) as count FROM notifications WHERE is_read = ? AND (target_user_id IS NULL OR target_user_id = ?)')
+                count = conn.execute(sql, (False, user_id)).fetchone()['count']
+            else:
+                sql = DatabasePool.format_sql('SELECT COUNT(*) as count FROM notifications WHERE is_read = ?')
+                count = conn.execute(sql, (False,)).fetchone()['count']
         return count
 
     def check_and_create_reminders(self):

@@ -39,6 +39,25 @@ def init_db():
         REAL_TYPE = "DOUBLE PRECISION" if db_type == 'postgres' else "REAL"
         BOOL_TYPE = "BOOLEAN" if db_type == 'postgres' else "BOOLEAN"
         TIMESTAMP_TYPE = "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP" if db_type == 'postgres' else "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+
+        # PostgreSQL 中 ALTER TABLE 失败会中止整个事务，使用 SAVEPOINT 隔离
+        _sp_counter = [0]
+        def _safe_alter(sql_pg, sql_lite=None):
+            """安全执行 ALTER TABLE，失败不影响后续 SQL"""
+            _sp_counter[0] += 1
+            sp_name = f"sp_alter_{_sp_counter[0]}"
+            try:
+                if db_type == 'postgres':
+                    cursor.execute(f"SAVEPOINT {sp_name}")
+                    try:
+                        cursor.execute(sql_pg)
+                        cursor.execute(f"RELEASE SAVEPOINT {sp_name}")
+                    except Exception:
+                        cursor.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                else:
+                    cursor.execute(sql_lite or sql_pg)
+            except Exception:
+                pass
         
         # 0. 系统配置表
         cursor.execute(f'''
@@ -50,14 +69,11 @@ def init_db():
             )
         ''')
         
-        # 升级脚本：增加 WeCom 关联
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE")
-            else:
-                cursor.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
-        except:
-            pass
+        # 升级脚本：增加 WeCom 关联（users 表可能尚未创建）
+        _safe_alter(
+            'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE',
+            "ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE"
+        )
         
         # 1. 项目主表
         cursor.execute(f'''
@@ -95,30 +111,10 @@ def init_db():
         ''')
         
         # 升级脚本
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE")
-            else:
-                cursor.execute("ALTER TABLE projects ADD COLUMN share_token TEXT UNIQUE")
-        except: pass
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_enabled INTEGER DEFAULT 0")
-            else:
-                cursor.execute("ALTER TABLE projects ADD COLUMN share_enabled INTEGER DEFAULT 0")
-        except: pass
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_analysis TEXT")
-            else:
-                cursor.execute("ALTER TABLE projects ADD COLUMN risk_analysis TEXT")
-        except: pass
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_score DOUBLE PRECISION DEFAULT 0")
-            else:
-                cursor.execute("ALTER TABLE projects ADD COLUMN risk_score REAL DEFAULT 0")
-        except: pass
+        _safe_alter("ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_token TEXT UNIQUE", "ALTER TABLE projects ADD COLUMN share_token TEXT UNIQUE")
+        _safe_alter("ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_enabled INTEGER DEFAULT 0", "ALTER TABLE projects ADD COLUMN share_enabled INTEGER DEFAULT 0")
+        _safe_alter("ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_analysis TEXT", "ALTER TABLE projects ADD COLUMN risk_analysis TEXT")
+        _safe_alter("ALTER TABLE projects ADD COLUMN IF NOT EXISTS risk_score DOUBLE PRECISION DEFAULT 0", "ALTER TABLE projects ADD COLUMN risk_score REAL DEFAULT 0")
         
         # 2. 项目阶段表
         cursor.execute(f'''
@@ -142,18 +138,8 @@ def init_db():
         ''')
         
         # 升级脚本：添加阶段缩放字段
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS scale_quantity INTEGER DEFAULT 0")
-            else:
-                cursor.execute("ALTER TABLE project_stages ADD COLUMN scale_quantity INTEGER DEFAULT 0")
-        except: pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS scale_unit TEXT")
-            else:
-                cursor.execute("ALTER TABLE project_stages ADD COLUMN scale_unit TEXT")
-        except: pass
+        _safe_alter("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS scale_quantity INTEGER DEFAULT 0", "ALTER TABLE project_stages ADD COLUMN scale_quantity INTEGER DEFAULT 0")
+        _safe_alter("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS scale_unit TEXT", "ALTER TABLE project_stages ADD COLUMN scale_unit TEXT")
         
         # 3. 任务表
         cursor.execute(f'''
@@ -286,10 +272,7 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
-        try:
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_cache_project_type ON report_cache(project_id, report_type)")
-        except:
-            pass
+        _safe_alter("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_cache_project_type ON report_cache(project_id, report_type)")
     
         # 11a. AI 风险历史记录表
         cursor.execute(f'''
@@ -426,23 +409,11 @@ def init_db():
         ''')
         
         # 升级 milestones 增加庆祝状态和完成日期
-        try:
-            if db_type == 'postgres':
-                cursor.execute(f"ALTER TABLE milestones ADD COLUMN IF NOT EXISTS is_celebrated {BOOL_TYPE} DEFAULT FALSE")
-            else:
-                cursor.execute(f"ALTER TABLE milestones ADD COLUMN is_celebrated {BOOL_TYPE} DEFAULT 0")
-        except: pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE milestones ADD COLUMN IF NOT EXISTS completed_date DATE")
-            else:
-                cursor.execute("ALTER TABLE milestones ADD COLUMN completed_date DATE")
-        except: pass
+        _safe_alter(f"ALTER TABLE milestones ADD COLUMN IF NOT EXISTS is_celebrated {BOOL_TYPE} DEFAULT FALSE", f"ALTER TABLE milestones ADD COLUMN is_celebrated {BOOL_TYPE} DEFAULT 0")
+        _safe_alter("ALTER TABLE milestones ADD COLUMN IF NOT EXISTS completed_date DATE", "ALTER TABLE milestones ADD COLUMN completed_date DATE")
         
         # 后置补全遗漏的完成日期
-        try:
-            cursor.execute(f"UPDATE milestones SET completed_date = target_date WHERE is_completed = {'TRUE' if db_type == 'postgres' else '1'} AND completed_date IS NULL")
-        except: pass
+        _safe_alter(f"UPDATE milestones SET completed_date = target_date WHERE is_completed = {'TRUE' if db_type == 'postgres' else '1'} AND completed_date IS NULL")
     
         # 15. 工作日志表
         cursor.execute(f'''
@@ -629,12 +600,7 @@ def init_db():
         ''')
         
         # 升级 knowledge_base 增加 embedding
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS embedding BYTEA")
-            else:
-                cursor.execute("ALTER TABLE knowledge_base ADD COLUMN embedding BLOB")
-        except: pass
+        _safe_alter("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS embedding BYTEA", "ALTER TABLE knowledge_base ADD COLUMN embedding BLOB")
 
         # 23a. RAG 知识条目表
         if db_type == 'postgres':
@@ -809,14 +775,8 @@ def init_db():
                 UNIQUE(project_id, metric_month)
             )
         ''')
-        try:
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_archive_project_type_date ON report_archive(project_id, report_type, report_date)")
-        except:
-            pass
-        try:
-            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_project_date ON standup_minutes(project_id, meeting_date)")
-        except:
-            pass
+        _safe_alter("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_archive_project_type_date ON report_archive(project_id, report_type, report_date)")
+        _safe_alter("CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_project_date ON standup_minutes(project_id, meeting_date)")
 
         # 30.5 后台任务中心
         cursor.execute(f'''
@@ -837,46 +797,13 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
-        try:
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status)")
-        except:
-            pass
-        try:
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_project_id ON background_tasks(project_id)")
-        except:
-            pass
-        try:
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_background_tasks_created_at ON background_tasks(created_at)")
-        except:
-            pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS project_id INTEGER")
-            else:
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN project_id INTEGER")
-        except:
-            pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS payload_summary TEXT")
-            else:
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN payload_summary TEXT")
-        except:
-            pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS source_endpoint TEXT")
-            else:
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN source_endpoint TEXT")
-        except:
-            pass
-        try:
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS retried_from_task_id TEXT")
-            else:
-                cursor.execute("ALTER TABLE background_tasks ADD COLUMN retried_from_task_id TEXT")
-        except:
-            pass
+        _safe_alter("CREATE INDEX IF NOT EXISTS idx_background_tasks_status ON background_tasks(status)")
+        _safe_alter("CREATE INDEX IF NOT EXISTS idx_background_tasks_project_id ON background_tasks(project_id)")
+        _safe_alter("CREATE INDEX IF NOT EXISTS idx_background_tasks_created_at ON background_tasks(created_at)")
+        _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS project_id INTEGER", "ALTER TABLE background_tasks ADD COLUMN project_id INTEGER")
+        _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS payload_summary TEXT", "ALTER TABLE background_tasks ADD COLUMN payload_summary TEXT")
+        _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS source_endpoint TEXT", "ALTER TABLE background_tasks ADD COLUMN source_endpoint TEXT")
+        _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS retried_from_task_id TEXT", "ALTER TABLE background_tasks ADD COLUMN retried_from_task_id TEXT")
     
         # 31. 接口规范库
         cursor.execute(f'''
@@ -904,18 +831,8 @@ def init_db():
                 FOREIGN KEY (doc_id) REFERENCES project_documents(id)
             )
         ''')
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE interface_specs ADD COLUMN IF NOT EXISTS category TEXT")
-            else:
-                cursor.execute("ALTER TABLE interface_specs ADD COLUMN category TEXT")
-        except: pass
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE interface_specs ADD COLUMN IF NOT EXISTS raw_text TEXT")
-            else:
-                cursor.execute("ALTER TABLE interface_specs ADD COLUMN raw_text TEXT")
-        except: pass
+        _safe_alter("ALTER TABLE interface_specs ADD COLUMN IF NOT EXISTS category TEXT", "ALTER TABLE interface_specs ADD COLUMN category TEXT")
+        _safe_alter("ALTER TABLE interface_specs ADD COLUMN IF NOT EXISTS raw_text TEXT", "ALTER TABLE interface_specs ADD COLUMN raw_text TEXT")
     
         # 32. 接口字段明细
         cursor.execute(f'''
@@ -1059,12 +976,7 @@ def init_db():
                 FOREIGN KEY (vendor_spec_id) REFERENCES interface_specs(id)
             )
         ''')
-        try: 
-            if db_type == 'postgres':
-                cursor.execute("ALTER TABLE interface_comparisons ADD COLUMN IF NOT EXISTS category TEXT")
-            else:
-                cursor.execute("ALTER TABLE interface_comparisons ADD COLUMN category TEXT")
-        except: pass
+        _safe_alter("ALTER TABLE interface_comparisons ADD COLUMN IF NOT EXISTS category TEXT", "ALTER TABLE interface_comparisons ADD COLUMN category TEXT")
     
         # 37. 字段级映射关系
         cursor.execute(f'''
@@ -1117,38 +1029,36 @@ def init_db():
                     cols = [row[1] for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()]
                 
                 if table_name == 'project_stages':
-                    if 'responsible_person' not in cols: cursor.execute("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS responsible_person TEXT")
-                    if 'bonus_amount' not in cols: cursor.execute(f"ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS bonus_amount {REAL_TYPE} DEFAULT 0")
+                    if 'responsible_person' not in cols: _safe_alter("ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS responsible_person TEXT")
+                    if 'bonus_amount' not in cols: _safe_alter(f"ALTER TABLE project_stages ADD COLUMN IF NOT EXISTS bonus_amount {REAL_TYPE} DEFAULT 0")
                 elif table_name == 'work_logs':
-                    if 'stage_id' not in cols: cursor.execute("ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS stage_id INTEGER")
+                    if 'stage_id' not in cols: _safe_alter("ALTER TABLE work_logs ADD COLUMN IF NOT EXISTS stage_id INTEGER")
                 elif table_name == 'project_expenses':
-                    if 'stage_id' not in cols: cursor.execute("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS stage_id INTEGER")
-                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
+                    if 'stage_id' not in cols: _safe_alter("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS stage_id INTEGER")
+                    if 'approval_sp_no' not in cols: _safe_alter("ALTER TABLE project_expenses ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
                 elif table_name == 'project_changes':
-                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_changes ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
+                    if 'approval_sp_no' not in cols: _safe_alter("ALTER TABLE project_changes ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
                 elif table_name == 'project_members':
-                    if 'daily_rate' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS daily_rate {REAL_TYPE} DEFAULT 0")
-                    if 'current_city' not in cols: cursor.execute("ALTER TABLE project_members ADD COLUMN IF NOT EXISTS current_city TEXT")
-                    if 'lng' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lng {REAL_TYPE}")
-                    if 'lat' not in cols: cursor.execute(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lat {REAL_TYPE}")
+                    if 'daily_rate' not in cols: _safe_alter(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS daily_rate {REAL_TYPE} DEFAULT 0")
+                    if 'current_city' not in cols: _safe_alter("ALTER TABLE project_members ADD COLUMN IF NOT EXISTS current_city TEXT")
+                    if 'lng' not in cols: _safe_alter(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lng {REAL_TYPE}")
+                    if 'lat' not in cols: _safe_alter(f"ALTER TABLE project_members ADD COLUMN IF NOT EXISTS lat {REAL_TYPE}")
                 elif table_name == 'project_departures':
-                    if 'approval_sp_no' not in cols: cursor.execute("ALTER TABLE project_departures ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
+                    if 'approval_sp_no' not in cols: _safe_alter("ALTER TABLE project_departures ADD COLUMN IF NOT EXISTS approval_sp_no TEXT")
                 elif table_name == 'hardware_assets':
-                    if 'current_project_id' not in cols: cursor.execute("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS current_project_id INTEGER")
-                    if 'operator' not in cols: cursor.execute("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS operator TEXT")
+                    if 'current_project_id' not in cols: _safe_alter("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS current_project_id INTEGER")
+                    if 'operator' not in cols: _safe_alter("ALTER TABLE hardware_assets ADD COLUMN IF NOT EXISTS operator TEXT")
                 elif table_name == 'knowledge_base':
-                    if 'attachment_path' not in cols: cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS attachment_path TEXT")
-                    if 'external_link' not in cols: cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS external_link TEXT")
-                    if 'assoc_stage' not in cols: cursor.execute("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS assoc_stage TEXT")
+                    if 'attachment_path' not in cols: _safe_alter("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS attachment_path TEXT")
+                    if 'external_link' not in cols: _safe_alter("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS external_link TEXT")
+                    if 'assoc_stage' not in cols: _safe_alter("ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS assoc_stage TEXT")
                 elif table_name == 'projects':
                     for col_name, col_def in columns_to_add:
                         if col_name not in cols:
-                            try: 
-                                if db_type == 'postgres':
-                                    cursor.execute(f'ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col_name} {col_def}')
-                                else:
-                                    cursor.execute(f'ALTER TABLE projects ADD COLUMN {col_name} {col_def}')
-                            except: pass
+                            _safe_alter(
+                                f'ALTER TABLE projects ADD COLUMN IF NOT EXISTS {col_name} {col_def}',
+                                f'ALTER TABLE projects ADD COLUMN {col_name} {col_def}'
+                            )
 
         migrate_add_form_making_stage(cursor)
         conn.commit()
@@ -1183,23 +1093,29 @@ def init_db():
             ("idx_field_mappings_comp", "field_mappings", "comparison_id"),
         ]
         for idx_name, table_name, column_name in indexes:
-            try: cursor.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")
-            except: pass
+            _safe_alter(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")
 
         try:
-            user_count_sql = DatabasePool.format_sql("SELECT COUNT(*) as c FROM users")
+            if db_type == 'postgres':
+                cursor.execute("SAVEPOINT sp_seed_users")
+            
+            user_count_sql = DatabasePool.format_sql('SELECT COUNT(*) as c FROM "users"')
             user_count_row = cursor.execute(user_count_sql).fetchone()
             user_count = user_count_row[0] if isinstance(user_count_row, (list, tuple)) else user_count_row['c']
             if user_count == 0:
                 admin_password = hashlib.sha256('admin123'.encode()).hexdigest()
                 active_value = True if db_type == 'postgres' else 1
                 seed_sql = DatabasePool.format_sql('''
-                    INSERT INTO users (username, password_hash, display_name, role, is_active)
+                    INSERT INTO "users" (username, password_hash, display_name, role, is_active)
                     VALUES (?, ?, ?, ?, ?)
                 ''')
                 cursor.execute(seed_sql, ('admin', admin_password, '系统管理员', 'admin', active_value))
-        except:
-            pass
+            
+            if db_type == 'postgres':
+                cursor.execute("RELEASE SAVEPOINT sp_seed_users")
+        except Exception:
+            if db_type == 'postgres':
+                cursor.execute("ROLLBACK TO SAVEPOINT sp_seed_users")
         conn.commit()
 
 def migrate_add_form_making_stage(cursor):

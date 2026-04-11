@@ -97,7 +97,7 @@ class DependencyService:
         with DatabasePool.get_connection() as conn:
             # 获取所有任务
             sql_tasks = DatabasePool.format_sql('''
-                SELECT t.id, t.task_name, t.is_completed, t.completed_date,
+                SELECT t.id, t.task_name, t.is_completed, t.completed_date, t.estimated_duration,
                        s.stage_name, s.stage_order, s.plan_start_date, s.plan_end_date
                 FROM tasks t
                 JOIN project_stages s ON t.stage_id = s.id
@@ -128,7 +128,7 @@ class DependencyService:
                 'stage': t['stage_name'],
                 'stage_order': t['stage_order'],
                 'completed': bool(t['is_completed']),
-                'duration': 1,  # 默认每个任务 1 个单位时间
+                'duration': int(t['estimated_duration'] or 1),
                 'predecessors': [],
                 'successors': [],
                 'early_start': 0,

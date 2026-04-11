@@ -87,7 +87,9 @@ class RAGService:
     def sync_embeddings(self, ai_service):
         """同步缺失的向量嵌入"""
         with DatabasePool.get_connection() as conn:
-            rows = conn.execute('SELECT id, title, content, category, tags FROM knowledge_base WHERE embedding IS NULL').fetchall()
+            rows = conn.execute(
+                DatabasePool.format_sql('SELECT id, title, content, category, tags FROM knowledge_base WHERE embedding IS NULL')
+            ).fetchall()
             if not rows: return 0
             
             count = 0
@@ -97,7 +99,10 @@ class RAGService:
                 vector = ai_service.get_embeddings(text)
                 if vector:
                     blob = vector_utils.encode_vector(vector)
-                    conn.execute('UPDATE knowledge_base SET embedding = ? WHERE id = ?', (blob, item['id']))
+                    conn.execute(
+                        DatabasePool.format_sql('UPDATE knowledge_base SET embedding = ? WHERE id = ?'),
+                        (blob, item['id'])
+                    )
                     count += 1
             conn.commit()
             return count

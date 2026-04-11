@@ -79,12 +79,19 @@ def get_pg_column_types(pg_cur, table: str) -> Dict[str, str]:
     return {row[0]: row[1] for row in pg_cur.fetchall()}
 
 
+# PostgreSQL DATE / TIMESTAMP 类型，空字符串必须转为 None
+_PG_DATE_TYPES = {'date', 'timestamp without time zone', 'timestamp with time zone'}
+
+
 def convert_row_for_pg(row, columns: List[str], column_types: Dict[str, str]) -> List:
     converted = []
     for column in columns:
         value = row[column]
-        if column_types.get(column) == 'boolean' and value in (0, 1):
+        col_type = column_types.get(column, '')
+        if col_type == 'boolean' and value in (0, 1):
             value = bool(value)
+        elif col_type in _PG_DATE_TYPES and value == '':
+            value = None
         converted.append(value)
     return converted
 
@@ -99,10 +106,18 @@ def migrate_table(lite_cur, pg_conn, table: str) -> Dict[str, int]:
         logger.info("  表为空，跳过。")
         return {"total": 0, "inserted": 0, "skipped": 0}
 
-    columns = list(rows[0].keys())
+    sqlite_columns = list(rows[0].keys())
 
     with pg_conn.cursor() as pg_cur:
         column_types = get_pg_column_types(pg_cur, table)
+
+        # 只保留 PG 表中实际存在的列，跳过 SQLite 独有的列
+        pg_column_set = set(column_types.keys())
+        columns = [col for col in sqlite_columns if col in pg_column_set]
+        dropped = set(sqlite_columns) - pg_column_set
+        if dropped:
+            logger.warning("  跳过 PG 中不存在的列: %s", ', '.join(sorted(dropped)))
+
         insert_query = sql.SQL(
             "INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT DO NOTHING RETURNING 1"
         ).format(
@@ -166,11 +181,19 @@ def reset_table_sequence(pg_conn, table: str):
 def set_replication_role(pg_conn, role: str):
     original_autocommit = pg_conn.autocommit
     try:
+        # 必须先结束当前事务，才能切换 autocommit
+        if not pg_conn.autocommit:
+            pg_conn.commit()
         pg_conn.autocommit = True
         with pg_conn.cursor() as pg_cur:
             pg_cur.execute(f"SET session_replication_role = '{role}'")
     finally:
-        pg_conn.autocommit = original_autocommit
+        try:
+            pg_conn.autocommit = original_autocommit
+        except psycopg2.ProgrammingError:
+            # 如果仍在事务中，先提交再恢复
+            pg_conn.commit()
+            pg_conn.autocommit = original_autocommit
 
 
 def confirm_continue_if_needed(existing_counts: Dict[str, int], force: bool):
@@ -248,7 +271,7 @@ def migrate(force: bool = False):
                 continue
     finally:
         try:
-            set_replication_role(pg_conn, 'DEFAULT')
+            set_replication_role(pg_conn, 'origin')
         except Exception as exc:
             logger.warning("恢复 session_replication_role 失败: %s", exc)
 

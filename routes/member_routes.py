@@ -4,6 +4,21 @@ from utils.response_utils import api_response
 
 member_bp = Blueprint('member', __name__, url_prefix='/api')
 
+@member_bp.route('/my/dashboard', methods=['GET'])
+def get_my_dashboard():
+    current_user = getattr(request, 'current_user', None)
+    if not current_user:
+        return api_response(False, message='未登录', code=401)
+    return api_response(True, member_service.get_my_dashboard(current_user))
+
+@member_bp.route('/ops/people-board', methods=['GET'])
+def get_people_project_board():
+    current_user = getattr(request, 'current_user', None)
+    if not current_user:
+        return api_response(False, message='未登录', code=401)
+    silent_days = request.args.get('silent_days', 3, type=int)
+    return api_response(True, member_service.get_people_project_board(current_user=current_user, silent_days=silent_days))
+
 # --- Project Members ---
 @member_bp.route('/projects/<int:project_id>/members', methods=['GET'])
 def get_project_members(project_id):

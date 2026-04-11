@@ -31,16 +31,23 @@ class ReportScheduler:
     WEEKLY_HOUR = 22
     WEEKLY_MINUTE = 30
     WEEKLY_DAY = 4  # Friday (0=Monday)
-    BRIEFING_HOUR = 8    # 早上8:30推送晨会简报
-    BRIEFING_MINUTE = 30
-    MONITOR_HOUR = 9     # 早上9:00运行项目哨兵扫描
-    MONITOR_MINUTE = 0
+    BRIEFING_HOUR = 8
+    BRIEFING_MINUTE = 0
+    MONITOR_HOUR = 8
+    MONITOR_MINUTE = 5
+    NIGHTLY_HOUR = 23
+    NIGHTLY_MINUTE = 0
+    EXEC_HOUR = 8
+    EXEC_MINUTE = 15
+    EXEC_WEEKDAY = 0  # Monday
 
     def __init__(self):
         self._daily_timer = None
         self._weekly_timer = None
         self._briefing_timer = None
         self._monitor_timer = None
+        self._nightly_timer = None
+        self._exec_timer = None
         self._running = False
 
     # ------------------------------------------------------------------
@@ -55,6 +62,8 @@ class ReportScheduler:
         self._schedule_weekly()
         self._schedule_briefing()
         self._schedule_monitor()
+        self._schedule_nightly()
+        self._schedule_exec()
         logger.info("📅 报告自动归档调度器已启动 (日报 %02d:%02d / 周报 周五 %02d:%02d / 晨会简报 %02d:%02d / 项目哨兵 %02d:%02d)",
                      self.DAILY_HOUR, self.DAILY_MINUTE,
                      self.WEEKLY_HOUR, self.WEEKLY_MINUTE,
@@ -72,6 +81,10 @@ class ReportScheduler:
             self._briefing_timer.cancel()
         if self._monitor_timer:
             self._monitor_timer.cancel()
+        if self._nightly_timer:
+            self._nightly_timer.cancel()
+        if self._exec_timer:
+            self._exec_timer.cancel()
         logger.info("报告自动归档调度器已停止")
 
     # ------------------------------------------------------------------
@@ -134,6 +147,26 @@ class ReportScheduler:
         next_run = datetime.now() + timedelta(seconds=delay)
         logger.info("下次项目哨兵扫描时间: %s", next_run.strftime('%Y-%m-%d %H:%M'))
 
+    def _schedule_nightly(self):
+        if not self._running:
+            return
+        delay = self._seconds_until(self.NIGHTLY_HOUR, self.NIGHTLY_MINUTE)
+        self._nightly_timer = threading.Timer(delay, self._run_nightly)
+        self._nightly_timer.daemon = True
+        self._nightly_timer.start()
+        next_run = datetime.now() + timedelta(seconds=delay)
+        logger.info("下次夜间快照时间: %s", next_run.strftime('%Y-%m-%d %H:%M'))
+
+    def _schedule_exec(self):
+        if not self._running:
+            return
+        delay = self._seconds_until(self.EXEC_HOUR, self.EXEC_MINUTE, self.EXEC_WEEKDAY)
+        self._exec_timer = threading.Timer(delay, self._run_exec)
+        self._exec_timer.daemon = True
+        self._exec_timer.start()
+        next_run = datetime.now() + timedelta(seconds=delay)
+        logger.info("下次周一经营摘要推送时间: %s", next_run.strftime('%Y-%m-%d %H:%M'))
+
     # ------------------------------------------------------------------
     # Runners
     # ------------------------------------------------------------------
@@ -180,12 +213,41 @@ class ReportScheduler:
                 from services.monitor_service import monitor_service
                 reminders = monitor_service.check_and_create_reminders()
                 logger.info("✅ 项目哨兵扫描完成，创建了 %d 条提醒: %s", len(reminders), reminders[:5])
+                if reminders:
+                    monitor_service.send_wecom_message(
+                        "每日预警扫描结果",
+                        f"今日新增预警 {len(reminders)} 条：\n" + "\n".join(f"- {item}" for item in reminders[:10]),
+                        msg_type='markdown'
+                    )
+                self._push_global_anomaly_briefing()
             else:
                 logger.info("今天是周末，跳过项目哨兵扫描")
         except Exception as e:
             logger.error("项目哨兵扫描异常: %s", e, exc_info=True)
         finally:
             self._schedule_monitor()
+
+    def _run_nightly(self):
+        """执行夜间风险快照与知识向量同步"""
+        try:
+            logger.info("⏰ 开始执行夜间风险快照与向量同步...")
+            self._snapshot_project_risks()
+            self._sync_kb_embeddings()
+            self._sync_payment_milestones()
+        except Exception as e:
+            logger.error("夜间任务异常: %s", e, exc_info=True)
+        finally:
+            self._schedule_nightly()
+
+    def _run_exec(self):
+        """每周一推送经营摘要"""
+        try:
+            logger.info("⏰ 开始生成周一经营摘要...")
+            self._push_weekly_executive_summary()
+        except Exception as e:
+            logger.error("周一经营摘要异常: %s", e, exc_info=True)
+        finally:
+            self._schedule_exec()
 
     def _push_daily_briefing(self):
         """生成并推送每日晨会简报到企业微信"""
@@ -213,6 +275,63 @@ class ReportScheduler:
                 )
         except Exception as e:
             logger.error("闲置催办检查失败: %s", e)
+
+    def _snapshot_project_risks(self):
+        from services.ai_insight_service import ai_insight_service
+        projects = self._get_active_projects()
+        ok_count = 0
+        for project in projects:
+            try:
+                if ai_insight_service.snapshot_project_risk(project['id']):
+                    ok_count += 1
+            except Exception as ex:
+                logger.warning("项目 %s 风险快照失败: %s", project['id'], ex)
+        logger.info("夜间风险快照完成: %d/%d", ok_count, len(projects))
+
+    def _sync_kb_embeddings(self):
+        try:
+            from rag_service import rag_service
+            from services.ai_service import ai_service
+            synced = rag_service.sync_embeddings(ai_service)
+            logger.info("知识向量同步完成: %d 条", synced)
+        except Exception as ex:
+            logger.warning("知识向量同步失败: %s", ex)
+
+    def _push_weekly_executive_summary(self):
+        from services.analytics_service import analytics_service
+        from services.monitor_service import monitor_service
+        digest = analytics_service.get_weekly_exec_digest(days=7)
+        summary = digest.get('summary', {})
+        content = (
+            f"上周有进展项目: {summary.get('progressed_project_count', 0)}\n"
+            f"高优预警: {summary.get('high_warning_count', 0)}\n"
+            f"超3天未更新人员: {summary.get('silent_people_count', 0)}\n"
+            f"未来7天预计回款: {summary.get('expected_receivable_amount', 0)} 元\n"
+            f"回款节点数: {summary.get('expected_receivable_count', 0)}"
+        )
+        monitor_service.send_wecom_message("周一全线经营摘要", content, msg_type='markdown')
+
+    def _sync_payment_milestones(self):
+        try:
+            from services.project_service import project_service
+            count = project_service.reevaluate_all_payment_milestones()
+            logger.info("回款节点兜底扫描完成，项目数: %d", count)
+        except Exception as ex:
+            logger.warning("回款节点兜底扫描失败: %s", ex)
+
+    def _push_global_anomaly_briefing(self):
+        try:
+            from services.analytics_service import analytics_service
+            from services.monitor_service import monitor_service
+            digest = analytics_service.get_global_anomaly_briefing(use_ai=True)
+            monitor_service.send_wecom_message(
+                "今日全局异常巡航",
+                digest.get('briefing') or '暂无异常摘要',
+                msg_type='markdown'
+            )
+            logger.info("全局异常巡航摘要已推送")
+        except Exception as ex:
+            logger.warning("全局异常巡航摘要推送失败: %s", ex)
 
     # ------------------------------------------------------------------
     # Report generation core

@@ -13,7 +13,7 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-from threading import Thread
+from threading import Thread, Lock
 from werkzeug.utils import secure_filename
 from ai_config import AI_CONFIG, get_model_config, switch_to_backup_api
 from database import DatabasePool, close_db, DB_INTEGRITY_ERRORS, DB_OPERATIONAL_ERRORS
@@ -22,6 +22,7 @@ from api_utils import api_response, validate_json, cached
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 from storage_service import storage_service
+from services.kb_service import kb_service
 
 app = Flask(__name__)
 # app.teardown_appcontext(close_db) # PostgreSQL handled by pool
@@ -127,6 +128,7 @@ app.register_blueprint(mobile_bp)
 app.register_blueprint(hardware_bp)
 app.register_blueprint(communication_bp)
 app.register_blueprint(business_bp)
+from services.scheduler_service import report_scheduler
 
 
 @app.before_request
@@ -166,6 +168,33 @@ def require_global_auth():
         return jsonify({"success": False, "message": "请先登录", "code": 401}), 401
 
     request.current_user = user
+    return None
+
+
+_scheduler_lock = Lock()
+_scheduler_started = False
+
+
+def ensure_scheduler_started():
+    """确保调度器在当前进程只启动一次（兼容 gunicorn/flask 运行方式）。"""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    with _scheduler_lock:
+        if _scheduler_started:
+            return
+        report_scheduler.start()
+        _scheduler_started = True
+
+
+@app.before_request
+def ensure_background_scheduler():
+    if app.testing:
+        return None
+    # Flask debug reloader 的父进程不启动
+    if app.debug and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+        return None
+    ensure_scheduler_started()
     return None
 
 # thread executor for async tasks
@@ -410,6 +439,39 @@ def log_operation(operator, op_type, entity_type, entity_id, entity_name, old_va
               json.dumps(old_val, ensure_ascii=False) if old_val else None,
               json.dumps(new_val, ensure_ascii=False) if new_val else None))
         conn.commit()
+
+
+@app.after_request
+def audit_write_operations(response):
+    """自动审计写操作请求，减少蓝图手工埋点遗漏。"""
+    try:
+        if request.method not in ('POST', 'PUT', 'DELETE'):
+            return response
+        if not request.path.startswith('/api/'):
+            return response
+        # 避免把日志相关查询写成噪音
+        if request.path.startswith('/api/operation-logs'):
+            return response
+        if response.status_code >= 400:
+            return response
+
+        user = getattr(request, 'current_user', None) or {}
+        operator = user.get('display_name') or user.get('username') or '系统'
+        path_parts = [p for p in (request.path or '').split('/') if p]
+        entity_type = path_parts[1] if len(path_parts) > 1 else 'unknown'
+        entity_id = path_parts[-1] if path_parts and path_parts[-1].isdigit() else None
+        payload = request.get_json(silent=True) or {}
+        log_operation(
+            operator=operator,
+            op_type=request.method,
+            entity_type=entity_type,
+            entity_id=str(entity_id) if entity_id else None,
+            entity_name=payload.get('name') or payload.get('project_name') or request.path,
+            new_val=payload
+        )
+    except Exception as ex:
+        logging.warning("Audit middleware failed: %s", ex)
+    return response
 
 
 # ========== Analytics and Statistics - Migrated to analytics_service
@@ -3265,12 +3327,15 @@ def add_kb_item():
                     traceback.print_exc()
                     return jsonify({'success': False, 'message': f'上传失败: {str(e)}'}), 500
     
-            conn.execute(DatabasePool.format_sql('''
+            cursor = conn.execute(DatabasePool.format_sql('''
                 INSERT INTO knowledge_base (category, title, content, tags, assoc_stage, project_id, author, attachment_path, external_link)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             '''), (data.get('category'), data.get('title'), data.get('content'), data.get('tags'), 
                   data.get('assoc_stage'), data.get('project_id'), data.get('author'),
                   attachment_path, data.get('external_link')))
+            kb_id = DatabasePool.get_inserted_id(cursor)
+            if kb_id:
+                kb_service.sync_kb_chunks(kb_id)
             conn.commit()
             return jsonify({'success': True})
     except Exception as e:
@@ -3337,6 +3402,7 @@ def update_kb_item(kid):
                 data.get('external_link', existing.get('external_link')),
                 kid
             ))
+            kb_service.sync_kb_chunks(kid)
             conn.commit()
             return jsonify({'success': True})
     except Exception as e:
@@ -3397,8 +3463,26 @@ def delete_kb_item(kid):
             if not os.path.exists(item['attachment_path']):
                 storage_service.delete_file(item['attachment_path'])
         conn.execute(DatabasePool.format_sql('DELETE FROM knowledge_base WHERE id = ?'), (kid,))
+        kb_service.delete_kb_chunks(kid)
         conn.commit()
     return jsonify({'success': True})
+
+@app.route('/api/kb-items/search', methods=['GET'])
+def search_kb_items():
+    query = request.args.get('q', '').strip()
+    project_id = request.args.get('project_id', type=int)
+    limit = request.args.get('limit', 5, type=int)
+    if not query:
+        return jsonify({'success': True, 'data': []})
+    data = kb_service.search_kb_items(query, project_id=project_id, limit=limit)
+    return jsonify({'success': True, 'data': data})
+
+@app.route('/api/kb-items/rebuild', methods=['POST'])
+def rebuild_kb_items():
+    data = request.json or {}
+    limit = data.get('limit')
+    result = kb_service.rebuild_all_chunks(limit=limit)
+    return jsonify({'success': True, 'data': result})
 
 # ========== Workload Analytics - Handled by analytics_bp
 
@@ -4036,7 +4120,6 @@ def migrate_ai_configs():
         return jsonify({'success': True, 'message': '无新配置可导入（已存在或环境变量未设置）'})
 
 # ========== 报告归档 API ==========
-from services.scheduler_service import report_scheduler
 
 @app.route('/api/projects/<int:project_id>/report-archive', methods=['GET'])
 def get_report_archive(project_id):
@@ -4383,10 +4466,6 @@ if __name__ == '__main__':
         init_db()
         reload_notification_config(NOTIFICATION_CONFIG)
         warm_task_cache()
-    # 启动报告自动归档调度器（含晨会简报、项目哨兵等定时任务）
-    # 注意：debug 模式下 Flask reloader 会 fork 子进程，
-    # 必须在子进程中启动调度器（或关闭 reloader），否则 Timer 线程会丢失
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
-        report_scheduler.start()
+    # 调度器由 ensure_background_scheduler 统一启动，避免多入口重复启动。
     app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
 

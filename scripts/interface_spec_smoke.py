@@ -24,7 +24,6 @@ ROUTE_REQUIREMENTS = [
     "/interface-comparisons/<int:comp_id>/detail",
     "/projects/<int:project_id>/interface-comparison/report",
     "/field-mappings/<int:mapping_id>/confirm",
-    "/field-mappings/export",
     "/chat",
 ]
 
@@ -39,7 +38,8 @@ MODULE_REQUIREMENTS = [
     "async loadComparisons(",
     "async runComparison(",
     "async showFieldDetail(",
-    "async openChatModal(",
+    "openChatModal: function",
+    "exportFieldMappings()",
 ]
 
 TEMPLATE_REQUIREMENTS = [

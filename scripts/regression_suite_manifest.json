@@ -1,0 +1,105 @@
+{
+  "python_compile_targets": [
+    "routes/form_generator_routes.py",
+    "services/file_parser.py",
+    "scripts/form_generator_smoke.py",
+    "scripts/project_detail_smoke.py",
+    "scripts/alignment_center_smoke.py",
+    "scripts/interface_spec_smoke.py",
+    "scripts/core_workbench_smoke.py",
+    "scripts/insight_reporting_smoke.py",
+    "scripts/advanced_governance_smoke.py",
+    "scripts/delivery_data_domains_smoke.py",
+    "scripts/auth_async_wecom_smoke.py",
+    "scripts/auxiliary_surfaces_smoke.py",
+    "scripts/platform_admin_share_smoke.py",
+    "scripts/collaboration_center_smoke.py",
+    "scripts/regression_suite.py"
+  ],
+  "frontend_syntax_targets": [
+    "static/js/form_generator.js",
+    "static/js/dashboard_hub.js",
+    "static/js/alert_hub.js",
+    "static/js/reminder_center_hub.js",
+    "static/js/ai_analysis_hub.js",
+    "static/js/report_hub.js",
+    "static/js/gantt_hub.js",
+    "static/js/map_hub.js",
+    "static/js/business_hub.js",
+    "static/js/financial_hub.js",
+    "static/js/auth_hub.js",
+    "static/js/bootstrap_hub.js",
+    "static/js/project_detail_hub.js",
+    "static/js/project_detail_actions_hub.js",
+    "static/js/project_detail_render_hub.js",
+    "static/js/project_detail_tools_hub.js",
+    "static/js/operations_hub.js",
+    "static/js/analytics_hub.js",
+    "static/js/collaboration_hub.js",
+    "static/js/kb_management.js",
+    "static/js/asset_management.js",
+    "static/js/modules/interface-spec.js"
+  ],
+  "smoke_suites": [
+    {
+      "name": "form_generator",
+      "description": "Form Generator strategy, contracts and smoke samples",
+      "command": ["python", "scripts/form_generator_smoke.py"]
+    },
+    {
+      "name": "project_detail",
+      "description": "Project detail tabs, loaders and route surface",
+      "command": ["python", "scripts/project_detail_smoke.py"]
+    },
+    {
+      "name": "alignment_center",
+      "description": "Standalone alignment center route, template and API surface",
+      "command": ["python", "scripts/alignment_center_smoke.py"]
+    },
+    {
+      "name": "interface_spec",
+      "description": "Project-level interface spec and intelligent comparison workbench",
+      "command": ["python", "scripts/interface_spec_smoke.py"]
+    },
+    {
+      "name": "core_workbench",
+      "description": "Dashboard, task center and main desktop workbench entry points",
+      "command": ["python", "scripts/core_workbench_smoke.py"]
+    },
+    {
+      "name": "insight_reporting",
+      "description": "Warning, reminder, AI analysis, report, gantt and map surfaces",
+      "command": ["python", "scripts/insight_reporting_smoke.py"]
+    },
+    {
+      "name": "advanced_governance",
+      "description": "PMO, stage baselines, demand impact and risk simulation",
+      "command": ["python", "scripts/advanced_governance_smoke.py"]
+    },
+    {
+      "name": "delivery_data_domains",
+      "description": "Project/member/log/doc/lifecycle/task backend route domains",
+      "command": ["python", "scripts/delivery_data_domains_smoke.py"]
+    },
+    {
+      "name": "auth_async_wecom",
+      "description": "Auth, async task center and WeCom platform route surface",
+      "command": ["python", "scripts/auth_async_wecom_smoke.py"]
+    },
+    {
+      "name": "auxiliary_surfaces",
+      "description": "Knowledge base, assets and mobile auxiliary surfaces",
+      "command": ["python", "scripts/auxiliary_surfaces_smoke.py"]
+    },
+    {
+      "name": "platform_admin_share",
+      "description": "Admin settings, role matrix, project share and access control",
+      "command": ["python", "scripts/platform_admin_share_smoke.py"]
+    },
+    {
+      "name": "collaboration_center",
+      "description": "Communications, meeting assistant and collaboration AI surface",
+      "command": ["python", "scripts/collaboration_center_smoke.py"]
+    }
+  ]
+}

@@ -5,10 +5,18 @@
 from datetime import datetime, timedelta
 from database import DatabasePool
 
+def _load_dismissed_keys():
+    with DatabasePool.get_connection() as conn:
+        rows = conn.execute(
+            DatabasePool.format_sql("SELECT warning_key FROM warning_dismissals")
+        ).fetchall()
+    return set(row['warning_key'] for row in rows if row.get('warning_key'))
+
 def check_milestone_warnings():
     """检查里程碑逾期预警（提前3/7天）"""
     today = datetime.now().date()
     warnings = []
+    dismissed_keys = _load_dismissed_keys()
     
     with DatabasePool.get_connection() as conn:
         rows = conn.execute(DatabasePool.format_sql('''
@@ -32,8 +40,12 @@ def check_milestone_warnings():
         
         if days_until < 0:
             # 已逾期
+            warning_key = f"milestone_overdue:{row['id']}"
+            if warning_key in dismissed_keys:
+                continue
             warnings.append({
                 'type': 'milestone_overdue',
+                'warning_key': warning_key,
                 'severity': 'high',
                 'project_id': row['project_id'],
                 'project_name': row['project_name'],
@@ -45,8 +57,12 @@ def check_milestone_warnings():
             })
         elif days_until <= 3:
             # 3天内到期
+            warning_key = f"milestone_due_soon:{row['id']}"
+            if warning_key in dismissed_keys:
+                continue
             warnings.append({
                 'type': 'milestone_due_soon',
+                'warning_key': warning_key,
                 'severity': 'high',
                 'project_id': row['project_id'],
                 'project_name': row['project_name'],
@@ -58,8 +74,12 @@ def check_milestone_warnings():
             })
         elif days_until <= 7:
             # 7天内到期
+            warning_key = f"milestone_due_soon:{row['id']}"
+            if warning_key in dismissed_keys:
+                continue
             warnings.append({
                 'type': 'milestone_due_soon',
+                'warning_key': warning_key,
                 'severity': 'medium',
                 'project_id': row['project_id'],
                 'project_name': row['project_name'],
@@ -73,15 +93,54 @@ def check_milestone_warnings():
     return warnings
 
 def check_task_stagnation():
-    """检查任务停滞预警（7天无更新） - 暂时禁用，需添加updated_at字段"""
-    return []
+    """检查任务停滞预警（7天无更新）"""
+    today = datetime.now().date()
+    warnings = []
+    cutoff = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+    with DatabasePool.get_connection() as conn:
+        rows = conn.execute(DatabasePool.format_sql('''
+            SELECT t.id, t.task_name, t.updated_at, t.assigned_to, s.stage_name, s.project_id, p.project_name
+            FROM tasks t
+            JOIN project_stages s ON t.stage_id = s.id
+            JOIN projects p ON s.project_id = p.id
+            WHERE t.is_completed = ?
+              AND t.updated_at IS NOT NULL
+              AND DATE(t.updated_at) < ?
+              AND p.status NOT IN ('已完成', '已终止', '已验收', '质保期')
+            ORDER BY t.updated_at ASC
+        '''), (False, cutoff)).fetchall()
+        dismissed_keys = _load_dismissed_keys()
 
-    # Legacy implementation removed.
+    for row in rows:
+        warning_key = f"task_stagnation:{row['id']}"
+        if warning_key in dismissed_keys:
+            continue
+        updated_str = str(row['updated_at'])[:10] if row.get('updated_at') else ''
+        try:
+            updated_date = datetime.strptime(updated_str, '%Y-%m-%d').date()
+            days_stagnant = (today - updated_date).days
+        except Exception:
+            days_stagnant = 8
+        warnings.append({
+            'type': 'task_stagnation',
+            'severity': 'high' if days_stagnant >= 14 else 'medium',
+            'warning_key': warning_key,
+            'project_id': row['project_id'],
+            'project_name': row['project_name'],
+            'task_id': row['id'],
+            'task_name': row['task_name'],
+            'stage_name': row['stage_name'],
+            'assigned_to': row.get('assigned_to') or '',
+            'days_stagnant': days_stagnant,
+            'message': f"任务「{row['task_name']}」已 {days_stagnant} 天无更新"
+        })
+    return warnings
 
 def check_interface_timeout():
     """检查接口对接超时预警"""
     today = datetime.now().date()
     warnings = []
+    dismissed_keys = _load_dismissed_keys()
     
     with DatabasePool.get_connection() as conn:
         rows = conn.execute(DatabasePool.format_sql('''
@@ -99,8 +158,12 @@ def check_interface_timeout():
             days_overdue = (today - plan_date).days
             
             if days_overdue > 0:
+                warning_key = f"interface_timeout:{row['id']}"
+                if warning_key in dismissed_keys:
+                    continue
                 warnings.append({
                     'type': 'interface_timeout',
+                    'warning_key': warning_key,
                     'severity': 'medium' if days_overdue < 7 else 'high',
                     'project_id': row['project_id'],
                     'project_name': row['project_name'],

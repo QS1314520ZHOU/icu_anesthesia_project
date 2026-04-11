@@ -33,7 +33,21 @@ def get_geo_stats():
 @project_bp.route('/projects', methods=['GET'])
 def get_projects():
     try:
-        projects = project_service.get_all_projects(is_admin=True) 
+        keyword = request.args.get('keyword')
+        status = request.args.get('status')
+        page = request.args.get('page', 1, type=int)
+        page_size = request.args.get('page_size', 20, type=int)
+        sort_by = request.args.get('sort_by', 'created_at')
+        sort_order = request.args.get('sort_order', 'desc')
+        projects = project_service.get_all_projects(
+            is_admin=True,
+            keyword=keyword,
+            status=status,
+            page=page,
+            page_size=page_size,
+            sort_by=sort_by,
+            sort_order=sort_order
+        )
         return api_response(True, projects)
     except Exception as e:
         import traceback
@@ -45,6 +59,15 @@ def create_project():
     data = request.json or {}
     project_id = project_service.create_project(data)
     return api_response(True, {'project_id': project_id})
+
+@project_bp.route('/projects/createfromtemplate/<int:template_id>', methods=['POST'])
+@project_bp.route('/projects/create-from-template/<int:template_id>', methods=['POST'])
+def create_project_from_template(template_id):
+    payload = request.json or {}
+    result = project_service.create_project_from_template(template_id, overrides=payload)
+    if result.get('error'):
+        return api_response(False, message=result['error'], code=404)
+    return api_response(True, result)
 
 @project_bp.route('/projects/<int:project_id>', methods=['GET'])
 def get_project_detail(project_id):
@@ -143,8 +166,8 @@ def get_issues(project_id):
 @project_bp.route('/projects/<int:project_id>/issues', methods=['POST'])
 def add_issue(project_id):
     data = request.json or {}
-    project_service.add_issue(project_id, data)
-    return api_response(True)
+    result = project_service.add_issue(project_id, data)
+    return api_response(True, result)
 
 # --- Devices ---
 @project_bp.route('/projects/<int:project_id>/devices', methods=['GET'])
@@ -156,6 +179,69 @@ def get_devices(project_id):
 def add_device(project_id):
     data = request.json or {}
     project_service.add_device(project_id, data)
+    return api_response(True)
+
+# --- Bed Units ---
+@project_bp.route('/projects/<int:project_id>/bed-units', methods=['GET'])
+def list_bed_units(project_id):
+    return api_response(True, project_service.list_bed_units(project_id))
+
+@project_bp.route('/projects/<int:project_id>/bed-units', methods=['POST'])
+def create_bed_unit(project_id):
+    bed_unit_id = project_service.create_bed_unit(project_id, request.json or {})
+    return api_response(True, {'bed_unit_id': bed_unit_id})
+
+@project_bp.route('/bed-units/<int:bed_unit_id>', methods=['PUT'])
+def update_bed_unit(bed_unit_id):
+    ok = project_service.update_bed_unit(bed_unit_id, request.json or {})
+    return api_response(bool(ok))
+
+@project_bp.route('/bed-units/<int:bed_unit_id>', methods=['DELETE'])
+def delete_bed_unit(bed_unit_id):
+    project_service.delete_bed_unit(bed_unit_id)
+    return api_response(True)
+
+@project_bp.route('/bed-units/<int:bed_unit_id>/devices', methods=['GET'])
+def list_bed_unit_devices(bed_unit_id):
+    return api_response(True, project_service.list_bed_unit_devices(bed_unit_id))
+
+@project_bp.route('/bed-units/<int:bed_unit_id>/devices', methods=['POST'])
+def create_bed_unit_device(bed_unit_id):
+    device_id = project_service.create_bed_unit_device(bed_unit_id, request.json or {})
+    return api_response(True, {'device_id': device_id})
+
+@project_bp.route('/bed-unit-devices/<int:device_id>', methods=['PUT'])
+def update_bed_unit_device(device_id):
+    ok = project_service.update_bed_unit_device(device_id, request.json or {})
+    return api_response(bool(ok))
+
+@project_bp.route('/bed-unit-devices/<int:device_id>', methods=['DELETE'])
+def delete_bed_unit_device(device_id):
+    project_service.delete_bed_unit_device(device_id)
+    return api_response(True)
+
+@project_bp.route('/bed-units/summary', methods=['GET'])
+def get_bed_unit_progress_summary():
+    return api_response(True, project_service.get_bed_unit_progress_summary())
+
+# --- Contract Payment Milestones ---
+@project_bp.route('/projects/<int:project_id>/payment-milestones', methods=['GET'])
+def list_contract_payment_milestones(project_id):
+    return api_response(True, project_service.list_contract_payment_milestones(project_id))
+
+@project_bp.route('/projects/<int:project_id>/payment-milestones', methods=['POST'])
+def create_contract_payment_milestone(project_id):
+    milestone_id = project_service.create_contract_payment_milestone(project_id, request.json or {})
+    return api_response(True, {'milestone_id': milestone_id})
+
+@project_bp.route('/payment-milestones/<int:milestone_id>', methods=['PUT'])
+def update_contract_payment_milestone(milestone_id):
+    success = project_service.update_contract_payment_milestone(milestone_id, request.json or {})
+    return api_response(bool(success))
+
+@project_bp.route('/payment-milestones/<int:milestone_id>', methods=['DELETE'])
+def delete_contract_payment_milestone(milestone_id):
+    project_service.delete_contract_payment_milestone(milestone_id)
     return api_response(True)
 
 # --- Task Dependencies ---

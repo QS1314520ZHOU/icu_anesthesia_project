@@ -18,3 +18,11 @@ audit_results.txt
 verify_output*.txt
 tmp_*.txt
 *.xlsx
+scripts/latest_regression_report*.json
+regression_report*.json
+*regression_report*.json
+scripts/*regression_report*.json
+scripts/latest_regression_report*.md
+regression_report*.md
+*regression_report*.md
+scripts/*regression_report*.md
