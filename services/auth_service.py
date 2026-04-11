@@ -339,60 +339,21 @@ class AuthService:
     def __init__(self):
         self._role_cache = None
         self._role_cache_loaded_at = None
-        self._ensure_tables()
-    
-    def _ensure_tables(self):
-        """确保用户表存在"""
-        from app_config import DB_CONFIG
-        db_type = DB_CONFIG.get('TYPE', 'sqlite')
         with DatabasePool.get_connection() as conn:
-            PK_AUTO = "SERIAL PRIMARY KEY" if db_type == 'postgres' else "INTEGER PRIMARY KEY AUTOINCREMENT"
-            TIMESTAMP_TYPE = "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP" if db_type == 'postgres' else "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-            
-            # 用户表
-            conn.execute(f'''
-                CREATE TABLE IF NOT EXISTS users (
-                    id {PK_AUTO},
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS project_members (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER,
+                    name TEXT,
+                    role TEXT,
                     email TEXT,
-                    display_name TEXT,
-                    role TEXT DEFAULT 'team_member',
-                    is_active BOOLEAN DEFAULT {'TRUE' if db_type == 'postgres' else '1'},
-                    last_login TIMESTAMP,
-                    created_at {TIMESTAMP_TYPE}
-                )
-            ''')
-            # 升级脚本：增加 WeCom 关联
-            try:
-                db_type = DB_CONFIG.get('TYPE', 'sqlite')
-                if db_type == 'postgres':
-                    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE")
-                else:
-                    conn.execute("ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE")
-            except:
-                pass
-            # Token表
-            conn.execute(f'''
-                CREATE TABLE IF NOT EXISTS user_tokens (
-                    id {PK_AUTO},
-                    user_id INTEGER,
-                    token TEXT UNIQUE NOT NULL,
-                    expires_at TIMESTAMP,
-                    created_at {TIMESTAMP_TYPE},
-                    FOREIGN KEY (user_id) REFERENCES users(id)
-                )
-            ''')
-            
-            # 项目成员表 - 关联项目和用户
-            conn.execute(f'''
-                CREATE TABLE IF NOT EXISTS project_user_access (
-                    id {PK_AUTO},
-                    project_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL,
-                    role TEXT DEFAULT 'member',
-                    created_at {TIMESTAMP_TYPE},
-                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    status TEXT,
+                    current_city TEXT,
+                    lng REAL,
+                    lat REAL,
+                    is_onsite BOOLEAN,
+                    join_date TEXT,
+                    UNIQUE(project_id, name),
                     UNIQUE(project_id, user_id)
                 )
             ''')

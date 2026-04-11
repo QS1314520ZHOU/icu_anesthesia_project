@@ -79,8 +79,8 @@ def get_pg_column_types(pg_cur, table: str) -> Dict[str, str]:
     return {row[0]: row[1] for row in pg_cur.fetchall()}
 
 
-# PostgreSQL DATE / TIMESTAMP 类型，空字符串必须转为 None
-_PG_DATE_TYPES = {'date', 'timestamp without time zone', 'timestamp with time zone'}
+# PostgreSQL 字符串类型，只有这些类型允许插入纯空字符串
+_PG_STRING_TYPES = {'text', 'character varying', 'character', '"char"'}
 
 
 def convert_row_for_pg(row, columns: List[str], column_types: Dict[str, str]) -> List:
@@ -90,7 +90,10 @@ def convert_row_for_pg(row, columns: List[str], column_types: Dict[str, str]) ->
         col_type = column_types.get(column, '')
         if col_type == 'boolean' and value in (0, 1):
             value = bool(value)
-        elif col_type in _PG_DATE_TYPES and value == '':
+        elif value == '' and col_type not in _PG_STRING_TYPES:
+            # 对于非字符串类型（如整数、浮点数、日期等）
+            # 如果 SQLite 中存在空字符串 ''，PG 会报错 invalid input syntax
+            # 因此将其转换为 None (即 PG 中的 NULL)
             value = None
         converted.append(value)
     return converted

@@ -59,7 +59,46 @@ def init_db():
             except Exception:
                 pass
         
-        # 0. 系统配置表
+        # 0. 用户相关表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS users (
+                id {PK_AUTO},
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                email TEXT,
+                display_name TEXT,
+                role TEXT DEFAULT 'team_member',
+                wecom_userid TEXT UNIQUE,
+                is_active {BOOL_TYPE} DEFAULT {'TRUE' if db_type == 'postgres' else '1'},
+                last_login TIMESTAMP,
+                created_at {TIMESTAMP_TYPE}
+            )
+        ''')
+
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS user_tokens (
+                id {PK_AUTO},
+                user_id INTEGER,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS project_user_access (
+                id {PK_AUTO},
+                project_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT DEFAULT 'member',
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(project_id, user_id)
+            )
+        ''')
+
+        # 0.4 系统配置表
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS system_config (
                 id {PK_AUTO},
@@ -68,12 +107,6 @@ def init_db():
                 updated_at {TIMESTAMP_TYPE}
             )
         ''')
-        
-        # 升级脚本：增加 WeCom 关联（users 表可能尚未创建）
-        _safe_alter(
-            'ALTER TABLE "users" ADD COLUMN IF NOT EXISTS wecom_userid TEXT UNIQUE',
-            "ALTER TABLE users ADD COLUMN wecom_userid TEXT UNIQUE"
-        )
         
         # 1. 项目主表
         cursor.execute(f'''
