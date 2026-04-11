@@ -238,6 +238,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS notifications (
                 id {PK_AUTO},
                 project_id INTEGER,
+                target_user_id INTEGER,
                 title TEXT NOT NULL,
                 content TEXT,
                 type TEXT DEFAULT 'info',
@@ -246,9 +247,12 @@ def init_db():
                 created_at {TIMESTAMP_TYPE},
                 due_date DATE,
                 remind_type TEXT DEFAULT 'once',
-                FOREIGN KEY (project_id) REFERENCES projects(id)
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (target_user_id) REFERENCES users(id)
             )
         ''')
+        _safe_alter("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_user_id INTEGER", "ALTER TABLE notifications ADD COLUMN target_user_id INTEGER")
+
     
         # 7. 医疗设备对接表
         cursor.execute(f'''
@@ -398,6 +402,17 @@ def init_db():
                 created_at {TIMESTAMP_TYPE}
             )
         ''')
+        # 20.5 警告忽略记录表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS warning_dismissals (
+                id {PK_AUTO},
+                warning_key TEXT UNIQUE NOT NULL,
+                user_id INTEGER,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS project_departures (
                 id {PK_AUTO},

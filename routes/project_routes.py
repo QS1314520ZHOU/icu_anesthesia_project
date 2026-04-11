@@ -88,10 +88,68 @@ def update_project_status(project_id):
     project_service.update_project_status(project_id, data.get('status'))
     return api_response(True)
 
-@project_bp.route('/projects/<int:project_id>', methods=['DELETE'])
-def delete_project(project_id):
-    success = project_service.delete_project(project_id)
-    return api_response(success)
+
+@project_bp.route('/projects/<int:project_id>/ai-risk-score', methods=['POST'])
+def get_project_ai_risk_score(project_id):
+    """
+    项目风险预警分析 (对接前端 dashboard)
+    """
+    from database import DatabasePool
+    from ai_utils import call_ai
+    from ai_config import TaskType
+    import re
+
+    with DatabasePool.get_connection() as conn:
+        row = conn.execute(DatabasePool.format_sql("SELECT * FROM projects WHERE id = ?"), (project_id,)).fetchone()
+        if not row:
+            return jsonify({'error': '项目不存在'}), 404
+            
+        project = dict(row)
+        logs_raw = conn.execute(
+            DatabasePool.format_sql("SELECT work_content, issues_encountered FROM work_logs WHERE project_id = ? ORDER BY log_date DESC LIMIT 5"),
+            (project_id,),
+        ).fetchall()
+        logs = [f"内容: {r['work_content']}, 问题: {r['issues_encountered']}" for r in logs_raw]
+        issues_raw = conn.execute(
+            DatabasePool.format_sql("SELECT description, severity, status FROM issues WHERE project_id = ? AND status != '已解决'"),
+            (project_id,),
+        ).fetchall()
+        issues = [f"[{r['severity']}] {r['description']} ({r['status']})" for r in issues_raw]
+
+    # 构建 Prompt
+    prompt = f"""
+你是一位资深的医疗信息化交付专家。请分析以下项目的【交付风险】。
+
+【项目信息】:
+名称: {project['project_name']}
+当前状态: {project['status']}
+进度: {project['progress']}%
+床位数/手术室: {project.get('icu_beds',0)}/{project.get('operating_rooms',0)}
+
+【近期日志摘要】:
+{chr(10).join(logs) if logs else "无近期日志"}
+
+【存疑问题】:
+{chr(10).join(issues) if issues else "无未解决问题"}
+
+请根据以上信息计算一个【风险分数】 (0-100，0为安全，100为极高危)，并给出 1-2 句简洁的分析建议。
+必须严格按以下 JSON 格式回复:
+{{"risk_score": 45, "analysis": "主要风险在于接口联调滞后..."}}
+"""
+    res_text = call_ai(prompt, TaskType.ANALYSIS)
+    
+    # 解析 JSON
+    try:
+        json_match = re.search(r'\{.*\}', res_text, re.DOTALL)
+        if json_match:
+            res_data = json.loads(json_match.group())
+        else:
+            res_data = {"risk_score": 0, "analysis": "分析失败: 未能从 AI 回复中提取 JSON"}
+    except Exception as e:
+        res_data = {"risk_score": 0, "analysis": f"解析异常: {str(e)}"}
+        
+    return jsonify(res_data)
+
 
 # --- Stages ---
 @project_bp.route('/projects/<int:project_id>/stages', methods=['POST'])

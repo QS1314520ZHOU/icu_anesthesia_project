@@ -164,9 +164,19 @@ def require_global_auth():
     if not token:
         token = request.cookies.get('auth_token')
 
+    silent_401_prefixes = [
+        '/api/notifications/unread-count',
+        '/api/reminders/digest',
+        '/api/warnings/count',
+        '/api/check-and-create-reminders',
+        '/api/ai/health',
+    ]
+
     user = auth_service.validate_token(token)
     if not user:
-        return jsonify({"success": False, "message": "请先登录", "code": 401}), 401
+        is_silent = any(path.startswith(p) for p in silent_401_prefixes)
+        msg = "Unauthorized" if is_silent else "请先登录"
+        return jsonify({"success": False, "message": msg, "code": 401, "silent": is_silent}), 401
 
     request.current_user = user
     return None
