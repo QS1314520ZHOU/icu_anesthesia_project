@@ -59,7 +59,17 @@ def init_db():
             except Exception:
                 pass
         
-        # 0. 用户相关表
+        # 0. 系统配置表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS system_config (
+                id {PK_AUTO},
+                config_key TEXT UNIQUE NOT NULL,
+                value TEXT,
+                updated_at {TIMESTAMP_TYPE}
+            )
+        ''')
+
+        # 0.1 用户相关表
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS users (
                 id {PK_AUTO},
@@ -183,10 +193,16 @@ def init_db():
                 is_completed {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'},
                 completed_date DATE,
                 remark TEXT,
+                assigned_to TEXT,
+                estimated_duration INTEGER DEFAULT 1,
                 updated_at {TIMESTAMP_TYPE},
                 FOREIGN KEY (stage_id) REFERENCES project_stages(id)
             )
         ''')
+        
+        # 升级脚本：补齐 tasks 缺失字段
+        _safe_alter("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assigned_to TEXT", "ALTER TABLE tasks ADD COLUMN assigned_to TEXT")
+        _safe_alter("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS estimated_duration INTEGER DEFAULT 1", "ALTER TABLE tasks ADD COLUMN estimated_duration INTEGER DEFAULT 1")
     
         # 3.5. 里程碑表
         cursor.execute(f'''
@@ -254,7 +270,7 @@ def init_db():
         _safe_alter("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_user_id INTEGER", "ALTER TABLE notifications ADD COLUMN target_user_id INTEGER")
 
     
-        # 7. 医疗设备对接表
+        # 7. 医疗设备主表
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS medical_devices (
                 id {PK_AUTO},
@@ -268,6 +284,47 @@ def init_db():
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
         ''')
+
+        # 7.1 床位/手术间表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS bed_units (
+                id {PK_AUTO},
+                project_id INTEGER,
+                unit_type TEXT NOT NULL,
+                unit_code TEXT NOT NULL,
+                location_desc TEXT,
+                status TEXT DEFAULT '未开始',
+                plan_finish_date DATE,
+                actual_finish_date DATE,
+                acceptance_owner TEXT,
+                acceptance_date DATE,
+                remark TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        # 7.2 床位设备关联表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS bed_unit_devices (
+                id {PK_AUTO},
+                bed_unit_id INTEGER,
+                medical_device_id INTEGER,
+                device_type TEXT,
+                brand_model TEXT,
+                device_serial_no TEXT,
+                protocol_type TEXT,
+                data_status TEXT DEFAULT '未对接',
+                last_data_at TIMESTAMP,
+                issue_note TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (bed_unit_id) REFERENCES bed_units(id)
+            )
+        ''')
+        
+        # 升级脚本：补齐床位相关表字段
+        _safe_alter(f"ALTER TABLE bed_units ADD COLUMN IF NOT EXISTS created_at {TIMESTAMP_TYPE}", f"ALTER TABLE bed_units ADD COLUMN created_at {TIMESTAMP_TYPE}")
+        _safe_alter(f"ALTER TABLE bed_unit_devices ADD COLUMN IF NOT EXISTS created_at {TIMESTAMP_TYPE}", f"ALTER TABLE bed_unit_devices ADD COLUMN created_at {TIMESTAMP_TYPE}")
     
         # 8. 周报记录表
         cursor.execute(f'''
@@ -524,7 +581,7 @@ def init_db():
             )
         ''')
         
-        # 17.5 项目收入表
+        # 17.5 项目费用与收入明细
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS project_revenue (
                 id {PK_AUTO},
@@ -533,6 +590,44 @@ def init_db():
                 revenue_date DATE,
                 revenue_type TEXT,
                 description TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        # 17.6 合同回款里程碑
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS contract_payment_milestones (
+                id {PK_AUTO},
+                project_id INTEGER,
+                milestone_name TEXT NOT NULL,
+                payment_condition TEXT,
+                plan_amount {REAL_TYPE} DEFAULT 0,
+                plan_date DATE,
+                actual_amount {REAL_TYPE} DEFAULT 0,
+                actual_date DATE,
+                trigger_bed_unit_count INTEGER DEFAULT 0,
+                trigger_percentage {REAL_TYPE} DEFAULT 0,
+                status TEXT DEFAULT '待满足条件',
+                remark TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        # 17.7 合同主表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS contracts (
+                id {PK_AUTO},
+                project_id INTEGER,
+                contract_no TEXT UNIQUE,
+                contract_name TEXT,
+                amount {REAL_TYPE} DEFAULT 0,
+                sign_date DATE,
+                status TEXT DEFAULT '执行中',
+                party_a TEXT,
+                party_b TEXT,
+                remark TEXT,
                 created_at {TIMESTAMP_TYPE},
                 FOREIGN KEY (project_id) REFERENCES projects(id)
             )
@@ -610,6 +705,24 @@ def init_db():
                 new_value TEXT,
                 ip_address TEXT,
                 created_at {TIMESTAMP_TYPE}
+            )
+        ''')
+
+        # 21.1 业务机会表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS opportunities (
+                id {PK_AUTO},
+                hospital_name TEXT NOT NULL,
+                expected_amount {REAL_TYPE} DEFAULT 0,
+                expected_sign_date DATE,
+                stage TEXT DEFAULT '初步接触',
+                owner TEXT,
+                contact_person TEXT,
+                contact_phone TEXT,
+                remark TEXT,
+                status TEXT DEFAULT '进行中',
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE}
             )
         ''')
     
@@ -811,11 +924,13 @@ def init_db():
                 project_id INTEGER NOT NULL,
                 metric_month TEXT NOT NULL,
                 output_value {REAL_TYPE} DEFAULT 0,
+                budget_output_value {REAL_TYPE} DEFAULT 0,
                 collected_amount {REAL_TYPE} DEFAULT 0,
                 direct_cost {REAL_TYPE} DEFAULT 0,
                 labor_cost {REAL_TYPE} DEFAULT 0,
                 tax_amount {REAL_TYPE} DEFAULT 0,
                 management_cost {REAL_TYPE} DEFAULT 0,
+                budget_cost {REAL_TYPE} DEFAULT 0,
                 notes TEXT,
                 created_at {TIMESTAMP_TYPE},
                 updated_at {TIMESTAMP_TYPE},
@@ -823,6 +938,8 @@ def init_db():
                 UNIQUE(project_id, metric_month)
             )
         ''')
+        _safe_alter(f"ALTER TABLE business_monthly_metrics ADD COLUMN IF NOT EXISTS budget_output_value {REAL_TYPE} DEFAULT 0", f"ALTER TABLE business_monthly_metrics ADD COLUMN budget_output_value {REAL_TYPE} DEFAULT 0")
+        _safe_alter(f"ALTER TABLE business_monthly_metrics ADD COLUMN IF NOT EXISTS budget_cost {REAL_TYPE} DEFAULT 0", f"ALTER TABLE business_monthly_metrics ADD COLUMN budget_cost {REAL_TYPE} DEFAULT 0")
         _safe_alter("CREATE UNIQUE INDEX IF NOT EXISTS uq_report_archive_project_type_date ON report_archive(project_id, report_type, report_date)")
         _safe_alter("CREATE UNIQUE INDEX IF NOT EXISTS uq_standup_project_date ON standup_minutes(project_id, meeting_date)")
 

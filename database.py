@@ -206,6 +206,9 @@ class DatabasePool:
         sql = sql.replace("datetime('now')", "CURRENT_TIMESTAMP")
         sql = sql.replace('datetime("now")', "CURRENT_TIMESTAMP")
         
+        # 处理 DATE(column) -> column::date
+        sql = re.sub(r"\bDATE\s*\(\s*(?!['\"]now['\"])(.*?)\s*\)", r"(\1)::date", sql, flags=re.IGNORECASE)
+        
         # 处理带偏移的情况，如 date('now', '-1 day') -> (CURRENT_DATE + INTERVAL '-1 day')
         sql = re.sub(r"date\s*\(\s*['\"]now['\"]\s*,\s*(['\"].*?['\"])\s*\)", r"(CURRENT_DATE + INTERVAL \1)", sql, flags=re.IGNORECASE)
         sql = re.sub(r"datetime\s*\(\s*['\"]now['\"]\s*,\s*(['\"].*?['\"])\s*\)", r"(CURRENT_TIMESTAMP + INTERVAL \1)", sql, flags=re.IGNORECASE)
@@ -266,8 +269,12 @@ class DatabasePool:
         # 7. 处理布尔值转换 (0/1 -> FALSE/TRUE)
         bool_fields = ['is_completed', 'is_active', 'is_sent', 'is_read', 'is_primary', 'ai_generated', 'is_onsite', 'is_celebrated', 'is_public']
         for field in bool_fields:
-            sql = re.sub(rf"\b{field}\s*=\s*(1|TRUE)\b", f"{field} = TRUE", sql, flags=re.IGNORECASE)
-            sql = re.sub(rf"\b{field}\s*=\s*(0|FALSE)\b", f"{field} = FALSE", sql, flags=re.IGNORECASE)
+            # 转换显式赋值: field = 1 -> field = TRUE
+            sql = re.sub(rf"\b{field}\s*=\s*1\b", f"{field} = TRUE", sql, flags=re.IGNORECASE)
+            sql = re.sub(rf"\b{field}\s*=\s*0\b", f"{field} = FALSE", sql, flags=re.IGNORECASE)
+            # 转换比较: field is 1 -> field IS TRUE
+            sql = re.sub(rf"\b{field}\s+is\s+1\b", f"{field} IS TRUE", sql, flags=re.IGNORECASE)
+            sql = re.sub(rf"\b{field}\s+is\s+0\b", f"{field} IS FALSE", sql, flags=re.IGNORECASE)
 
         # 8. 处理 PostgreSQL 保留字表名 users
         sql = re.sub(
