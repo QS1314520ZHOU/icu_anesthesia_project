@@ -339,32 +339,6 @@ class AuthService:
     def __init__(self):
         self._role_cache = None
         self._role_cache_loaded_at = None
-        with DatabasePool.get_connection() as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS project_members (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    project_id INTEGER,
-                    name TEXT,
-                    role TEXT,
-                    email TEXT,
-                    status TEXT,
-                    current_city TEXT,
-                    lng REAL,
-                    lat REAL,
-                    is_onsite BOOLEAN,
-                    join_date TEXT,
-                    UNIQUE(project_id, name),
-                    UNIQUE(project_id, user_id)
-                )
-            ''')
-            
-            conn.commit()
-            
-            # 检查是否需要创建默认管理员
-            sql_adm = DatabasePool.format_sql('SELECT id FROM users WHERE username = ?')
-            admin = conn.execute(sql_adm, ('admin',)).fetchone()
-            if not admin:
-                self.register('admin', 'admin123', 'admin@local', '系统管理员', 'admin')
     
     def _hash_password(self, password: str) -> str:
         """密码哈希"""
