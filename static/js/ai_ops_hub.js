@@ -286,12 +286,13 @@ async function extractToKb(issueId, btn) {
     try {
         const res = await api.post('/ai/knowledge/extract', { issue_id: issueId });
         if (res.success) {
+            const kbTitle = res?.data?.data?.title || res?.data?.title || res?.title || '知识条目';
             recordAiOpsHistory({
                 type: 'ai_knowledge_extract',
                 title: '知识提炼',
                 detail: `问题 ${issueId} 已提炼为知识条目`
             });
-            showToast(`✅ 提取成功：${res.data.data.title}`, 'success');
+            showToast(`✅ 提取成功：${kbTitle}`, 'success');
         } else {
             showToast('提取失败: ' + res.message, 'danger');
         }

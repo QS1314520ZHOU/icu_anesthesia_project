@@ -9,6 +9,13 @@ logger = logging.getLogger(__name__)
 
 class AIInsightService:
     @staticmethod
+    def _safe_excerpt(text, length=30):
+        text = str(text or '').strip()
+        if len(text) <= length:
+            return text
+        return text[:length].rstrip() + '...'
+
+    @staticmethod
     def generate_daily_advice(project_id, force_refresh=False):
         """聚合日报、任务和进度，生成AI每日建议（支持当日缓存）"""
         try:
@@ -319,5 +326,181 @@ class AIInsightService:
             return ai_service.call_ai_api(system_prompt, transcript, task_type="summary")
         except Exception as e:
             return f"提取失败: {str(e)}"
+
+    @staticmethod
+    def generate_chaser_message(data):
+        """生成催办话术（不依赖 AI 也可工作）。"""
+        item_type = str((data or {}).get('type') or '事项').strip() or '事项'
+        title = str((data or {}).get('title') or '').strip()
+        reason = str((data or {}).get('reason') or '').strip()
+        description = str((data or {}).get('description') or '').strip()
+        item_label = title or description or reason or '当前事项'
+
+        base_subject = f"关于{AIInsightService._safe_excerpt(item_label, 20)}的跟进提醒"
+        detail_line = reason or description or "请协助确认当前处理进展、阻塞点及预计完成时间。"
+
+        return {
+            "professional": {
+                "subject": base_subject,
+                "content": (
+                    f"您好，关于【{item_label}】目前仍处于待推进状态。\n"
+                    f"当前关注点：{detail_line}\n"
+                    "请于今日内回复最新进展、当前阻塞原因以及明确的完成时间，以便项目侧同步安排后续工作。谢谢。"
+                )
+            },
+            "soft": {
+                "subject": f"辛苦协助确认：{AIInsightService._safe_excerpt(item_label, 18)}",
+                "content": (
+                    f"您好，想跟您温和确认一下【{item_label}】的最新进展。\n"
+                    f"目前记录的信息是：{detail_line}\n"
+                    "若方便的话，烦请告知当前推进情况以及后续计划时间，我们这边好提前协调相关资源，感谢支持。"
+                )
+            },
+            "direct": {
+                "subject": f"请尽快反馈：{AIInsightService._safe_excerpt(item_label, 18)}",
+                "content": (
+                    f"请尽快处理并反馈【{item_label}】。\n"
+                    f"当前问题：{detail_line}\n"
+                    "请直接回复当前状态、责任人及完成时间；如存在阻塞，请同步说明需要协调的事项。"
+                )
+            },
+            "meta": {
+                "type": item_type,
+                "title": item_label
+            }
+        }
+
+    @staticmethod
+    def auto_extract_knowledge(issue_id):
+        """将已解决/典型问题提炼为知识库条目。"""
+        try:
+            with DatabasePool.get_connection() as conn:
+                row = conn.execute(DatabasePool.format_sql('''
+                    SELECT i.*, p.project_name, p.hospital_name
+                    FROM issues i
+                    LEFT JOIN projects p ON p.id = i.project_id
+                    WHERE i.id = ?
+                '''), (issue_id,)).fetchone()
+
+                if not row:
+                    return {"success": False, "message": "问题不存在"}
+
+                issue = dict(row)
+                title = f"[{issue.get('severity') or '未分级'}]{issue.get('issue_type') or '问题'} - {AIInsightService._safe_excerpt(issue.get('description'), 24)}"
+                tags = "问题复盘,AI提炼"
+                if issue.get('issue_type'):
+                    tags += f",{issue['issue_type']}"
+                if issue.get('severity'):
+                    tags += f",{issue['severity']}"
+
+                existing = conn.execute(DatabasePool.format_sql('''
+                    SELECT id, title, content, project_id, created_at
+                    FROM knowledge_base
+                    WHERE project_id = ? AND title = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                '''), (issue.get('project_id'), title)).fetchone()
+                if existing:
+                    return {
+                        "success": True,
+                        "message": "已存在对应知识条目",
+                        "data": dict(existing)
+                    }
+
+                content = (
+                    f"### 问题概述\n"
+                    f"- 项目：{issue.get('project_name') or '未知项目'}\n"
+                    f"- 医院：{issue.get('hospital_name') or '-'}\n"
+                    f"- 类型：{issue.get('issue_type') or '-'}\n"
+                    f"- 严重级别：{issue.get('severity') or '-'}\n"
+                    f"- 原始描述：{issue.get('description') or '-'}\n\n"
+                    f"### 建议沉淀\n"
+                    f"- 现象：{issue.get('description') or '-'}\n"
+                    f"- 初步排查方向：先确认问题复现条件、影响范围及最近变更。\n"
+                    f"- 建议动作：补充根因、解决步骤、验证结果后可进一步完善为标准知识条目。\n"
+                )
+
+                insert_sql = DatabasePool.format_sql('''
+                    INSERT INTO knowledge_base (category, title, content, tags, project_id, author, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''')
+                cursor = conn.execute(insert_sql, ('问题复盘', title, content, tags, issue.get('project_id'), 'AI助手'))
+                kb_id = getattr(cursor, 'lastrowid', None)
+                conn.commit()
+
+                created = {
+                    "id": kb_id,
+                    "category": "问题复盘",
+                    "title": title,
+                    "content": content,
+                    "tags": tags,
+                    "project_id": issue.get('project_id')
+                }
+                return {
+                    "success": True,
+                    "message": "知识条目提炼成功",
+                    "data": created
+                }
+        except Exception as e:
+            logger.error(f"Auto Extract Knowledge Error: {e}")
+            return {"success": False, "message": str(e)}
+
+    @staticmethod
+    def find_similar_projects(project_id, limit=5):
+        """基于地区/规模/状态的轻量相似项目推荐。"""
+        try:
+            limit = max(1, min(int(limit or 5), 10))
+            with DatabasePool.get_connection() as conn:
+                current = conn.execute(DatabasePool.format_sql('''
+                    SELECT id, project_name, hospital_name, province, city, status,
+                           COALESCE(icu_beds, 0) as icu_beds,
+                           COALESCE(operating_rooms, 0) as operating_rooms,
+                           COALESCE(pacu_beds, 0) as pacu_beds
+                    FROM projects
+                    WHERE id = ?
+                '''), (project_id,)).fetchone()
+                if not current:
+                    return []
+
+                current = dict(current)
+                rows = conn.execute(DatabasePool.format_sql('''
+                    SELECT id, project_name, hospital_name, province, city, status,
+                           COALESCE(icu_beds, 0) as icu_beds,
+                           COALESCE(operating_rooms, 0) as operating_rooms,
+                           COALESCE(pacu_beds, 0) as pacu_beds,
+                           progress
+                    FROM projects
+                    WHERE id != ?
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 100
+                '''), (project_id,)).fetchall()
+
+            scored = []
+            for row in rows:
+                item = dict(row)
+                score = 0
+                if (item.get('province') or '') == (current.get('province') or '') and current.get('province'):
+                    score += 35
+                if (item.get('city') or '') == (current.get('city') or '') and current.get('city'):
+                    score += 25
+                if (item.get('status') or '') == (current.get('status') or ''):
+                    score += 15
+
+                current_scale = (current.get('icu_beds') or 0) + (current.get('operating_rooms') or 0) * 5 + (current.get('pacu_beds') or 0)
+                item_scale = (item.get('icu_beds') or 0) + (item.get('operating_rooms') or 0) * 5 + (item.get('pacu_beds') or 0)
+                scale_gap = abs(current_scale - item_scale)
+                score += max(0, 25 - min(scale_gap, 25))
+
+                if score <= 0:
+                    continue
+
+                item['similarity_score'] = round(score, 1)
+                scored.append(item)
+
+            scored.sort(key=lambda x: (-(x.get('similarity_score') or 0), -(x.get('progress') or 0), x.get('id') or 0))
+            return scored[:limit]
+        except Exception as e:
+            logger.error(f"Find Similar Projects Error: {e}")
+            return []
 
 ai_insight_service = AIInsightService()

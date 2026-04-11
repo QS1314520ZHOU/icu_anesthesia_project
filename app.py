@@ -15,16 +15,19 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from threading import Thread, Lock
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import HTTPException
 from ai_config import AI_CONFIG, get_model_config, switch_to_backup_api
 from database import DatabasePool, close_db, DB_INTEGRITY_ERRORS, DB_OPERATIONAL_ERRORS
 from db_init import init_db, reload_notification_config, migrate_to_dynamic_milestones, allowed_file
-from api_utils import api_response, validate_json, cached
+from api_utils import api_response, validate_json, cached, SafeJSONEncoder
 from concurrent.futures import ThreadPoolExecutor
 import uuid
 from storage_service import storage_service
 from services.kb_service import kb_service
 
 app = Flask(__name__)
+app.json_encoder = SafeJSONEncoder
+app.config['PROPAGATE_EXCEPTIONS'] = False
 # app.teardown_appcontext(close_db) # PostgreSQL handled by pool
 
 # 注册蓝图
@@ -497,21 +500,48 @@ def alignment_page():
 
 # ========== 项目健康度仪表盘 API ==========
 
-@app.errorhandler(500)
-def handle_500_error(e):
-    """全局 500 错误处理，记录详细堆栈"""
-    tb = traceback.format_exc()
+def _should_return_json_error():
+    path = request.path or ''
+    if path.startswith('/api/'):
+        return True
+    best = request.accept_mimetypes.best
+    return best == 'application/json' and request.accept_mimetypes[best] > request.accept_mimetypes['text/html']
+
+
+def _log_server_error(e, tb):
     logging.error(f"500 Internal Server Error: {str(e)}\n{tb}")
-    # 写入文件以便排查
     with open('error_traceback.log', 'a', encoding='utf-8') as f:
         f.write(f"[{datetime.now().isoformat()}] 500 Error: {str(e)}\n{tb}\n{'-'*50}\n")
-    
-    return jsonify({
+
+
+def _api_error_response(code, message, tb=None):
+    payload = {
         "success": False,
-        "code": 500,
-        "message": f"Internal Server Error: {str(e)}",
-        "traceback": tb if app.debug or app.testing else None
-    }), 500
+        "code": code,
+        "message": message,
+    }
+    if tb and (app.debug or app.testing):
+        payload["traceback"] = tb
+    return jsonify(payload), code
+
+
+@app.errorhandler(HTTPException)
+def handle_http_error(e):
+    if not _should_return_json_error():
+        return e
+    return _api_error_response(e.code or 500, e.description)
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(e):
+    """API 统一异常兜底，避免返回 HTML 调试页。"""
+    tb = traceback.format_exc()
+    _log_server_error(e, tb)
+
+    if _should_return_json_error():
+        return _api_error_response(500, f"Internal Server Error: {str(e)}", tb)
+
+    return "Internal Server Error", 500
 
 @app.route('/api/dashboard/health', methods=['GET'])
 def get_project_health_dashboard():
@@ -966,7 +996,7 @@ def ai_project_retrospective(project_id):
             logs = conn.execute(sql_log, (project_id,)).fetchall()
         
         # 构建prompt
-        completed_tasks = sum(1 for t in tasks if t['status'] == '已完成')
+        completed_tasks = sum(1 for t in tasks if t.get('is_completed'))
         open_issues = sum(1 for i in issues if i['status'] not in ['已解决', '已关闭'])
         
         prompt = f"""作为项目管理专家，请对以下已完成的ICU/麻醉系统实施项目进行复盘分析，生成一份简洁的复盘报告。
@@ -4478,5 +4508,6 @@ if __name__ == '__main__':
         reload_notification_config(NOTIFICATION_CONFIG)
         warm_task_cache()
     # 调度器由 ensure_background_scheduler 统一启动，避免多入口重复启动。
-    app.run(debug=True, host='0.0.0.0', port=5000, use_reloader=False)
+    debug_mode = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes', 'on')
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000, use_reloader=False)
 

@@ -192,6 +192,7 @@ def update_wecom_config():
     webhook = data.get('webhook', '').strip()
     enabled = data.get('enabled', False)
     
+    from app_config import NOTIFICATION_CONFIG
     from database import DatabasePool
     
     with DatabasePool.get_connection() as conn:

@@ -28,7 +28,8 @@ class ApiClient {
             if (!contentType || !contentType.includes("application/json")) {
                 const text = await response.text();
                 console.error('API Non-JSON Response:', text);
-                throw new Error(`API returned non-JSON response: ${response.status} ${response.statusText}`);
+                const extractedMessage = extractApiErrorMessage(text);
+                throw new Error(extractedMessage || `API returned non-JSON response: ${response.status} ${response.statusText}`);
             }
 
             const data = await response.json();
@@ -86,7 +87,39 @@ class ApiClient {
     }
 }
 
+let lastApiToastMessage = '';
+let lastApiToastAt = 0;
+
+function extractApiErrorMessage(text) {
+    if (!text) return '';
+
+    const titleMatch = text.match(/<title>(.*?)<\/title>/i);
+    if (titleMatch && titleMatch[1]) {
+        return titleMatch[1].trim();
+    }
+
+    const h1Match = text.match(/<h1[^>]*>(.*?)<\/h1>/i);
+    if (h1Match && h1Match[1]) {
+        return h1Match[1].replace(/<[^>]+>/g, '').trim();
+    }
+
+    return text
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+}
+
 function notifyApiError(message) {
+    const now = Date.now();
+    if (message === lastApiToastMessage && now - lastApiToastAt < 2500) {
+        return;
+    }
+    lastApiToastMessage = message;
+    lastApiToastAt = now;
+
     if (typeof showToast === 'function') {
         showToast(message, 'danger');
         return;

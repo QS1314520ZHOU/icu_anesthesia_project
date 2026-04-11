@@ -102,6 +102,9 @@ class PGCursorWrapper:
         # This avoids errors like "tuple index out of range" for patterns such as ILIKE '%text%'.
         if vars is not None:
             formatted_query = re.sub(r'(?<!%)%(?!s|%)', '%%', formatted_query)
+        else:
+            # 如果没有参数，也要处理可能存在的 % (例如手动拼写的 LIKE '%...%')
+            formatted_query = formatted_query.replace('%', '%%').replace('%%%%', '%%')
 
         try:
             self._cursor.execute(formatted_query, vars)
@@ -262,30 +265,62 @@ class DatabasePool:
                          r"SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'", sql, flags=re.IGNORECASE)
             # 3) 处理通用情况
             sql = sql.replace("sqlite_master", "information_schema.tables")
+
+        # 4. 处理 LIKE -> ILIKE (Postgres 强制区分大小写，SQLite 默认不区分)
+        # 大部分业务场景下，LIKE 用于搜索，期望不区分大小写
+        sql = re.sub(r"\bLIKE\b", "ILIKE", sql, flags=re.IGNORECASE)
+
+        # 5. 处理 group_concat -> string_agg
+        # SQLite: group_concat(field, ',')
+        # Postgres: string_agg(field, ',')
+        sql = re.sub(r"group_concat\s*\(\s*(.*?)\s*,\s*(.*?)\s*\)", r"string_agg(\1, \2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"group_concat\s*\(\s*(.*?)\s*\)", r"string_agg(\1, ',')", sql, flags=re.IGNORECASE)
+
+        # 6. 处理 sqlite_master -> information_schema.tables
+        if "sqlite_master" in sql.lower():
+            # 1) 处理常用的检查表是否存在模式: SELECT name FROM sqlite_master WHERE type='table' AND name='...'
+            sql = re.sub(r"SELECT\s+name\s+FROM\s+sqlite_master\s+WHERE\s+type=['\"]table['\"]\s+AND\s+name=['\"](.*?)['\"]", 
+                         r"SELECT table_name as name FROM information_schema.tables WHERE table_name = '\1'", sql, flags=re.IGNORECASE)
+            # 2) 处理获取所有表模式: SELECT name FROM sqlite_master WHERE type='table'
+            sql = re.sub(r"SELECT\s+name\s+FROM\s+sqlite_master\s+WHERE\s+type=['\"]table['\"]", 
+                         r"SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'", sql, flags=re.IGNORECASE)
+            # 3) 处理通用情况
+            sql = sql.replace("sqlite_master", "information_schema.tables")
             if "information_schema.tables" in sql:
                  sql = re.sub(r"\bname\b", "table_name", sql)
                  sql = re.sub(r"\btype\b", "table_type", sql)
 
         # 7. 处理布尔值转换 (0/1 -> FALSE/TRUE)
-        bool_fields = ['is_completed', 'is_active', 'is_sent', 'is_read', 'is_primary', 'ai_generated', 'is_onsite', 'is_celebrated', 'is_public']
+        bool_fields = [
+            'is_completed', 'is_active', 'is_sent', 'is_read', 'is_primary', 
+            'ai_generated', 'is_onsite', 'is_celebrated', 'is_public',
+            'account_handover', 'training_handover', 'issue_handover', 'contact_handover',
+            'manual_override', 'is_deleted', 'show_in_dashboard'
+        ]
         for field in bool_fields:
-            # 转换显式赋值: field = 1 -> field = TRUE
+            # 7.1 转换显式赋值: field = 1 -> field = TRUE
             sql = re.sub(rf"\b{field}\s*=\s*1\b", f"{field} = TRUE", sql, flags=re.IGNORECASE)
             sql = re.sub(rf"\b{field}\s*=\s*0\b", f"{field} = FALSE", sql, flags=re.IGNORECASE)
-            # 转换比较: field is 1 -> field IS TRUE
+            # 7.2 转换比较: field is 1 -> field IS TRUE
             sql = re.sub(rf"\b{field}\s+is\s+1\b", f"{field} IS TRUE", sql, flags=re.IGNORECASE)
             sql = re.sub(rf"\b{field}\s+is\s+0\b", f"{field} IS FALSE", sql, flags=re.IGNORECASE)
+            # 7.3 转换占位符赋值 (针对 PostgreSQL 严格类型检查): field = %s -> field = %s::boolean
+            # 这样即使 vars 中传入的是 0/1，PostgreSQL 也会自动转为 boolean
+            sql = re.sub(rf"\b{field}\s*=\s*%s\b", f"{field} = %s::boolean", sql, flags=re.IGNORECASE)
+            # 7.4 处理 INSERT 语句中的占位符 (极简处理常见情况)
+            # 注意：复杂的 INSERT 语句（不带列名或多行插入）可能无法覆盖，推荐业务代码传 True/False
+            if "INSERT INTO" in sql.upper() and field in sql:
+                pass # 后续可以根据需求增加更复杂的列对齐转换
 
-        # 8. 处理 PostgreSQL 保留字表名 users
+        # 8. 处理 PostgreSQL 保留字表名 users, role
         sql = re.sub(
-            r'\b(FROM|JOIN|INTO|UPDATE|EXISTS|TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+users\b',
-            lambda m: f'{m.group(1)} "users"',
+            r'\b(FROM|JOIN|INTO|UPDATE|EXISTS|TABLE(?:\s+IF\s+NOT\s+EXISTS)?)\s+(users|role)\b',
+            lambda m: f'{m.group(1)} "{m.group(2)}"',
             sql,
             flags=re.IGNORECASE,
         )
 
         return sql
-
     @staticmethod
     def is_postgres():
         db_type = DB_CONFIG.get('TYPE', 'sqlite')

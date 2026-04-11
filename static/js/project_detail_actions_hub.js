@@ -878,51 +878,60 @@ async function loadAcceptances(pid) {
 }
 
 async function loadSatisfaction(pid) {
-    const res = await fetch(`/api/projects/${pid}/satisfaction`);
-    const records = await res.json();
     const container = document.getElementById('satisfactionContainer');
+    if (!container) return;
 
-    const statsRes = await fetch(`/api/projects/${pid}/satisfaction/stats`);
-    const stats = await statsRes.json();
+    try {
+        const [recordsRes, statsRes] = await Promise.all([
+            api.get(`/projects/${pid}/satisfaction`, { silent: true }),
+            api.get(`/projects/${pid}/satisfaction/stats`, { silent: true })
+        ]);
 
-    let html = '';
-    if (stats.count > 0) {
-        html += `
-            <div style="margin-bottom:20px;padding:16px;background:var(--gray-50);border-radius:10px;">
-                <div style="font-size:14px;font-weight:600;margin-bottom:12px;">满意度统计 (${stats.count}次调查)</div>
-                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center;">
-                    <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${(stats.avg_quality || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">系统质量</div></div>
-                    <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${(stats.avg_service || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">服务态度</div></div>
-                    <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${(stats.avg_response || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">响应速度</div></div>
-                    <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${(stats.avg_professional || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">专业能力</div></div>
-                    <div><div style="font-size:20px;font-weight:700;color:var(--success);">${(stats.avg_overall || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">总体满意度</div></div>
+        const records = Array.isArray(recordsRes) ? recordsRes : [];
+        const stats = statsRes && typeof statsRes === 'object' ? statsRes : {};
+
+        let html = '';
+        if ((stats.count || 0) > 0) {
+            html += `
+                <div style="margin-bottom:20px;padding:16px;background:var(--gray-50);border-radius:10px;">
+                    <div style="font-size:14px;font-weight:600;margin-bottom:12px;">满意度统计 (${stats.count}次调查)</div>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;text-align:center;">
+                        <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${Number(stats.avg_quality || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">系统质量</div></div>
+                        <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${Number(stats.avg_service || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">服务态度</div></div>
+                        <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${Number(stats.avg_response || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">响应速度</div></div>
+                        <div><div style="font-size:20px;font-weight:700;color:var(--primary);">${Number(stats.avg_professional || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">专业能力</div></div>
+                        <div><div style="font-size:20px;font-weight:700;color:var(--success);">${Number(stats.avg_overall || 0).toFixed(1)}</div><div style="font-size:11px;color:var(--gray-500);">总体满意度</div></div>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        }
+
+        if (!records.length) {
+            html += '<div class="empty-state"><p>暂无满意度记录</p><div class="empty-state-hint">可在交付、试运行和验收阶段记录客户反馈，形成长期满意度画像。</div></div>';
+        } else {
+            html += records.map(r => `
+                <div style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:10px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <span style="font-weight:600;">${r.survey_date} - ${r.survey_type}</span>
+                        <span style="font-size:12px;color:var(--gray-500);">调查人: ${r.surveyor || '-'}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">
+                        <span>质量: ${'★'.repeat(r.score_quality || 0)}${'☆'.repeat(5 - (r.score_quality || 0))}</span>
+                        <span>服务: ${'★'.repeat(r.score_service || 0)}${'☆'.repeat(5 - (r.score_service || 0))}</span>
+                        <span>响应: ${'★'.repeat(r.score_response || 0)}${'☆'.repeat(5 - (r.score_response || 0))}</span>
+                        <span>专业: ${'★'.repeat(r.score_professional || 0)}${'☆'.repeat(5 - (r.score_professional || 0))}</span>
+                        <span style="font-weight:600;">总体: ${'★'.repeat(r.score_overall || 0)}${'☆'.repeat(5 - (r.score_overall || 0))}</span>
+                    </div>
+                    ${r.feedback ? `<div style="margin-top:10px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:13px;">${r.feedback}</div>` : ''}
+                </div>
+            `).join('');
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<div class="empty-state"><p>满意度数据加载失败</p><div class="empty-state-hint">请稍后重试。</div></div>';
+        console.error('loadSatisfaction failed:', e);
     }
-
-    if (!records.length) {
-        html += '<div class="empty-state"><p>暂无满意度记录</p><div class="empty-state-hint">可在交付、试运行和验收阶段记录客户反馈，形成长期满意度画像。</div></div>';
-    } else {
-        html += records.map(r => `
-            <div style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:10px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                    <span style="font-weight:600;">${r.survey_date} - ${r.survey_type}</span>
-                    <span style="font-size:12px;color:var(--gray-500);">调查人: ${r.surveyor || '-'}</span>
-                </div>
-                <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;">
-                    <span>质量: ${'★'.repeat(r.score_quality || 0)}${'☆'.repeat(5 - (r.score_quality || 0))}</span>
-                    <span>服务: ${'★'.repeat(r.score_service || 0)}${'☆'.repeat(5 - (r.score_service || 0))}</span>
-                    <span>响应: ${'★'.repeat(r.score_response || 0)}${'☆'.repeat(5 - (r.score_response || 0))}</span>
-                    <span>专业: ${'★'.repeat(r.score_professional || 0)}${'☆'.repeat(5 - (r.score_professional || 0))}</span>
-                    <span style="font-weight:600;">总体: ${'★'.repeat(r.score_overall || 0)}${'☆'.repeat(5 - (r.score_overall || 0))}</span>
-                </div>
-                ${r.feedback ? `<div style="margin-top:10px;padding:10px;background:var(--gray-50);border-radius:6px;font-size:13px;">${r.feedback}</div>` : ''}
-            </div>
-        `).join('');
-    }
-
-    container.innerHTML = html;
 }
 
 async function loadDevices(pid) {
