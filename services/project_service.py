@@ -225,7 +225,7 @@ class ProjectService:
                 if milestone and milestone['is_completed']:
                     # 如果阶段未完成但里程碑已完成（撤销任务时），则更新为未完成
                     sql_up = DatabasePool.format_sql('UPDATE milestones SET is_completed = ? WHERE id = ?')
-                    cursor.execute(sql_up, (False, milestone['id'],))
+                    cursor.execute(sql_up, (False, milestone['id']))
 
     @staticmethod
     def get_all_projects(user_id=None, is_admin=False, keyword=None, status=None, page=1, page_size=20, sort_by='created_at', sort_order='desc'):
@@ -452,7 +452,7 @@ class ProjectService:
             sql_sel = DatabasePool.format_sql('SELECT * FROM milestones WHERE id = ?')
             m = conn.execute(sql_sel, (mid,)).fetchone()
             if not m: return False
-            new_status = (not bool(m['is_completed'])) if DatabasePool.is_postgres() else (0 if m['is_completed'] else 1)
+            new_status = not bool(m['is_completed'])
             completed_date = datetime.now().strftime('%Y-%m-%d') if new_status else None
             sql_upd = DatabasePool.format_sql('UPDATE milestones SET is_completed = ?, completed_date = ? WHERE id = ?')
             conn.execute(sql_upd, (new_status, completed_date, mid))
@@ -637,7 +637,7 @@ class ProjectService:
             
             project_id = task['project_id']
             stage_id = task['stage_id']
-            new_status = (not bool(task['is_completed'])) if DatabasePool.is_postgres() else (0 if task['is_completed'] else 1)
+            new_status = not bool(task['is_completed'])
             today = datetime.now().strftime('%Y-%m-%d')
             completed_date = today if new_status else None
             
