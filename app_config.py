@@ -81,8 +81,9 @@ DB_CONFIG = {
         "NAME": os.environ.get("DB_NAME", (PARSED_DATABASE_URL or {}).get("NAME", "icu_pm")),
         "USER": os.environ.get("DB_USER", (PARSED_DATABASE_URL or {}).get("USER", "postgres")),
         "PASSWORD": os.environ.get("DB_PASSWORD", (PARSED_DATABASE_URL or {}).get("PASSWORD", "")),
-        "MIN_CONN": 1,
-        "MAX_CONN": 10
+        "MIN_CONN": int(os.environ.get("DB_MIN_CONN", 1)),
+        "MAX_CONN": int(os.environ.get("DB_MAX_CONN", 30)),
+        "POOL_ACQUIRE_TIMEOUT": float(os.environ.get("DB_POOL_ACQUIRE_TIMEOUT", 15)),
     }
 }
 

@@ -209,6 +209,42 @@ class ApiSmokeTests(unittest.TestCase):
         body = resp.get_json() or {}
         self.assertTrue(body.get('success'))
 
+    def test_project_detail_aux_endpoints(self):
+        create_resp = self.client.post('/api/projects', headers=self._auth_headers(), json={
+            'project_name': '详情辅助接口测试项目',
+            'hospital_name': '测试医院C',
+            'plan_start_date': '2026-04-01',
+            'plan_end_date': '2026-07-31'
+        })
+        self.assertEqual(create_resp.status_code, 200)
+        create_body = create_resp.get_json() or {}
+        project_id = ((create_body.get('data') or {}).get('project_id'))
+        self.assertTrue(project_id)
+
+        cases = [
+            ('/api/operational/stage-baselines', True),
+            (f'/api/projects/{project_id}/changes', True),
+            (f'/api/projects/{project_id}/gantt-data', False),
+            (f'/api/risk/countdown/{project_id}', True),
+            ('/api/ai/health', False),
+        ]
+
+        for url, wrapped in cases:
+            with self.subTest(url=url):
+                resp = self.client.get(url, headers=self._auth_headers())
+                self.assertEqual(resp.status_code, 200)
+                body = resp.get_json() or {}
+                if wrapped:
+                    self.assertTrue(body.get('success'))
+                    if url.startswith('/api/risk/countdown/'):
+                        data = body.get('data') or {}
+                        self.assertIn('plan_end_date', data)
+                        self.assertIn('predicted_end_date', data)
+                        self.assertIn('is_delay_predicted', data)
+                        self.assertIn('delay_days', data)
+                else:
+                    self.assertIsInstance(body, (dict, list))
+
 
     def test_warnings_api(self):
         resp = self.client.get('/api/warnings', headers=self._auth_headers())

@@ -22,6 +22,20 @@ function switchTab(tabEl, tabName) {
             loadCommunications(currentProjectId);
         } else if (tabName === 'flow' && typeof renderInterfaceFlow === 'function') {
             renderInterfaceFlow();
+        } else if (tabName === 'devices' && typeof loadDevices === 'function') {
+            loadDevices(currentProjectId);
+        } else if (tabName === 'worklogs' && typeof loadWorklogs === 'function') {
+            loadWorklogs(currentProjectId);
+        } else if (tabName === 'documents' && typeof loadDocuments === 'function') {
+            loadDocuments(currentProjectId);
+        } else if (tabName === 'expenses' && typeof loadExpenses === 'function') {
+            loadExpenses(currentProjectId);
+        } else if (tabName === 'changes' && typeof loadChanges === 'function') {
+            loadChanges(currentProjectId);
+        } else if (tabName === 'acceptance' && typeof loadAcceptances === 'function') {
+            loadAcceptances(currentProjectId);
+        } else if (tabName === 'satisfaction' && typeof loadSatisfaction === 'function') {
+            loadSatisfaction(currentProjectId);
         } else if (tabName === 'standup' && typeof loadStandupData === 'function') {
             const dateStr = document.getElementById('standupDatePicker')?.value || '';
             loadStandupData(currentProjectId, dateStr);
@@ -31,6 +45,8 @@ function switchTab(tabEl, tabName) {
             loadProjectFinancials(currentProjectId);
         } else if (tabName === 'dependencies' && typeof loadDependencies === 'function') {
             loadDependencies(currentProjectId);
+        } else if (tabName === 'interfaceSpec' && window.InterfaceSpec && typeof window.InterfaceSpec.renderTab === 'function') {
+            window.InterfaceSpec.renderTab(currentProjectId);
         }
     } catch (e) {
         console.error('switchTab loader failed:', tabName, e);

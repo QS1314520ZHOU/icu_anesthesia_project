@@ -155,7 +155,7 @@ function renderPmoRegionalChart(data) {
 
 async function loadStageBaselines() {
     try {
-        const res = await api.get('/operational/stage-baselines');
+        const res = await api.get('/operational/stage-baselines', { cacheTtlMs: 30000 });
         if (res) {
             window.stageBaselines = res;
             const hint = document.getElementById('baselineHint');

@@ -25,7 +25,7 @@ async function renderProjectGantt(project) {
     try {
         const [ganttTasks, baselines] = await Promise.all([
             api.get(`/projects/${project.id}/gantt-data`, { silent: true }),
-            api.get('/operational/stage-baselines', { silent: true }).catch(() => [])
+            api.get('/operational/stage-baselines', { silent: true, cacheTtlMs: 30000 }).catch(() => [])
         ]);
 
         if (!ganttTasks || ganttTasks.length === 0) {

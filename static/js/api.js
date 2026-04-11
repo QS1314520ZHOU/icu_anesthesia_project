@@ -2,10 +2,13 @@
 class ApiClient {
     constructor(baseUrl = '/api') {
         this.baseUrl = baseUrl;
+        this.inflightRequests = new Map();
+        this.responseCache = new Map();
     }
 
     async request(endpoint, options = {}) {
         const url = `${this.baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+        const method = (options.method || 'GET').toUpperCase();
         const defaultHeaders = {};
         const token = localStorage.getItem('token');
         if (token) {
@@ -19,46 +22,86 @@ class ApiClient {
 
         options.headers = { ...defaultHeaders, ...options.headers };
 
-        try {
-            console.log(`[API] ${options.method || 'GET'} ${url}`, options.body ? 'with body' : '');
-            const response = await fetch(url, options);
+        const requestKey = `${method}:${url}`;
+        const isGet = method === 'GET';
+        const dedupeEnabled = isGet && options.dedupe !== false;
+        const cacheTtlMs = isGet ? Number(options.cacheTtlMs || 0) : 0;
 
-            // Check content type
-            const contentType = response.headers.get("content-type");
-            if (!contentType || !contentType.includes("application/json")) {
-                const text = await response.text();
-                console.error('API Non-JSON Response:', text);
-                const extractedMessage = extractApiErrorMessage(text);
-                throw new Error(extractedMessage || `API returned non-JSON response: ${response.status} ${response.statusText}`);
+        if (cacheTtlMs > 0) {
+            const cached = this.responseCache.get(requestKey);
+            if (cached && (Date.now() - cached.timestamp) < cacheTtlMs) {
+                return cached.data;
             }
+            if (cached) {
+                this.responseCache.delete(requestKey);
+            }
+        }
 
-            const data = await response.json();
+        if (dedupeEnabled && this.inflightRequests.has(requestKey)) {
+            return this.inflightRequests.get(requestKey);
+        }
 
-            if (data && typeof data === 'object' && 'success' in data) {
-                if (data.success) {
-                    return data.data !== undefined ? data.data : data;
-                } else {
-                    const errorMsg = data.message || data.error || 'Unknown API Error';
-                    if (!options.silent) {
-                        notifyApiError(errorMsg);
+        const requestPromise = (async () => {
+            try {
+                console.log(`[API] ${method} ${url}`, options.body ? 'with body' : '');
+                const response = await fetch(url, options);
+
+                // Check content type
+                const contentType = response.headers.get("content-type");
+                if (!contentType || !contentType.includes("application/json")) {
+                    const text = await response.text();
+                    console.error('API Non-JSON Response:', text);
+                    const extractedMessage = extractApiErrorMessage(text);
+                    throw new Error(extractedMessage || `API returned non-JSON response: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                let result;
+
+                if (data && typeof data === 'object' && 'success' in data) {
+                    if (data.success) {
+                        result = data.data !== undefined ? data.data : data;
+                    } else {
+                        const errorMsg = data.message || data.error || 'Unknown API Error';
+                        if (!options.silent) {
+                            notifyApiError(errorMsg);
+                        }
+                        throw new Error(errorMsg);
                     }
-                    throw new Error(errorMsg);
+                } else {
+                    // Handle legacy/direct response
+                    if (!response.ok) {
+                        throw new Error(data.message || data.error || `HTTP Error ${response.status}`);
+                    }
+                    result = data;
+                }
+
+                if (cacheTtlMs > 0) {
+                    this.responseCache.set(requestKey, {
+                        data: result,
+                        timestamp: Date.now()
+                    });
+                }
+
+                return result;
+            } catch (error) {
+                if (!options.silent) {
+                    console.error('API Request Failed:', error);
+                    notifyApiError(error.message || 'Request failed');
+                }
+                throw error;
+            } finally {
+                if (dedupeEnabled) {
+                    this.inflightRequests.delete(requestKey);
                 }
             }
+        })();
 
-            // Handle legacy/direct response
-            if (!response.ok) {
-                throw new Error(data.message || data.error || `HTTP Error ${response.status}`);
-            }
-
-            return data;
-        } catch (error) {
-            if (!options.silent) {
-                console.error('API Request Failed:', error);
-                notifyApiError(error.message || 'Request failed');
-            }
-            throw error;
+        if (dedupeEnabled) {
+            this.inflightRequests.set(requestKey, requestPromise);
         }
+
+        return requestPromise;
     }
 
     async get(endpoint, options = {}) {

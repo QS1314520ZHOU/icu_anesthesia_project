@@ -25,7 +25,11 @@ def get_death_countdown(project_id):
     prediction = ai_insight_service.predict_future_risks(project_id)
     if not prediction:
         return api_response(False, error="Failed to get prediction data")
-    
+
+    prediction.setdefault('is_delay_predicted', False)
+    prediction.setdefault('delay_days', 0)
+    prediction.setdefault('remaining_days_to_plan', None)
+
     # 构建倒计时语义
     # 假设如果延期天数 > 0, 则是违约风险
     # 距离原定交付日期的天数
@@ -39,7 +43,9 @@ def get_death_countdown(project_id):
             prediction['countdown_status'] = "Critical" if remaining_days < 7 else "Normal"
             if prediction['is_delay_predicted']:
                 prediction['countdown_status'] = "VioloationPredicted"
+        else:
+            prediction['countdown_status'] = "Unknown"
     except:
-        pass
+        prediction['countdown_status'] = prediction.get('countdown_status') or "Unknown"
         
     return api_response(True, prediction)

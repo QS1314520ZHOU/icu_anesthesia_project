@@ -221,7 +221,7 @@ async function updateAiHealthUI() {
     if (!nodeList) return;
 
     try {
-        const info = await api.get('/ai/health');
+        const info = await api.get('/ai/health', { cacheTtlMs: 15000 });
         nodeList.innerHTML = info.nodes.map(node => `
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="color:var(--gray-600);">${node.name}</span>

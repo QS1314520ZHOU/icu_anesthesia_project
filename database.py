@@ -160,6 +160,8 @@ class PGConnectionWrapper:
 class DatabasePool:
     _local = threading.local()
     _pg_pool = None
+    _pg_pool_semaphore = None
+    _pg_pool_timeout_seconds = 15.0
 
     @staticmethod
     def format_sql(sql):
@@ -382,10 +384,77 @@ class DatabasePool:
                     user=conf['USER'],
                     password=conf['PASSWORD']
                 )
+                cls._pg_pool_semaphore = threading.BoundedSemaphore(conf['MAX_CONN'])
+                cls._pg_pool_timeout_seconds = float(conf.get('POOL_ACQUIRE_TIMEOUT', 15) or 15)
                 print("PostgreSQL connection pool initialized.")
             except Exception as e:
                 print(f"Failed to initialize PostgreSQL pool: {e}")
                 raise e
+
+    @classmethod
+    def _checkout_postgres_connection(cls):
+        cls._init_pg_pool()
+
+        existing = getattr(cls._local, 'pg_conn', None)
+        if existing is not None:
+            cls._local.pg_conn_depth = getattr(cls._local, 'pg_conn_depth', 0) + 1
+            return existing, False
+
+        timeout_seconds = max(float(getattr(cls, '_pg_pool_timeout_seconds', 15) or 15), 0.1)
+        acquired = cls._pg_pool_semaphore.acquire(timeout=timeout_seconds)
+        if not acquired:
+            raise TimeoutError(
+                f"Timed out waiting for a PostgreSQL connection after {timeout_seconds:.1f}s"
+            )
+
+        conn = None
+        try:
+            conn = cls._pg_pool.getconn()
+            conn.cursor_factory = DictCursor
+            wrapped = PGConnectionWrapper(conn)
+            cls._local.pg_conn = wrapped
+            cls._local.pg_conn_depth = 1
+            return wrapped, True
+        except Exception:
+            if conn is not None:
+                try:
+                    cls._pg_pool.putconn(conn)
+                except Exception:
+                    pass
+            cls._pg_pool_semaphore.release()
+            raise
+
+    @classmethod
+    def _release_postgres_connection(cls, wrapped_conn):
+        if wrapped_conn is None:
+            return
+
+        depth = max(getattr(cls._local, 'pg_conn_depth', 0) - 1, 0)
+        cls._local.pg_conn_depth = depth
+        if depth > 0:
+            return
+
+        cls._local.pg_conn = None
+        try:
+            cls._pg_pool.putconn(wrapped_conn._conn)
+        finally:
+            if cls._pg_pool_semaphore is not None:
+                cls._pg_pool_semaphore.release()
+
+    @classmethod
+    def _checkout_sqlite_connection(cls):
+        if not hasattr(cls._local, 'conn') or cls._local.conn is None:
+            cls._local.conn = sqlite3.connect(DATABASE_SQLITE, check_same_thread=False)
+            cls._local.conn.row_factory = sqlite3.Row
+            cls._local.conn_depth = 0
+
+        cls._local.conn_depth = getattr(cls._local, 'conn_depth', 0) + 1
+        return cls._local.conn, cls._local.conn_depth == 1
+
+    @classmethod
+    def _release_sqlite_connection(cls):
+        depth = max(getattr(cls._local, 'conn_depth', 0) - 1, 0)
+        cls._local.conn_depth = depth
 
     @classmethod
     @contextmanager
@@ -397,32 +466,31 @@ class DatabasePool:
         db_type = DB_CONFIG.get('TYPE', 'sqlite')
         
         if db_type == 'postgres':
-            cls._init_pg_pool()
-            conn = cls._pg_pool.getconn()
-            # Set direct cursor to return dict-like objects for compatibility with existing code
-            conn.cursor_factory = DictCursor
-            wrapped_conn = PGConnectionWrapper(conn)
+            wrapped_conn, is_owner = cls._checkout_postgres_connection()
             try:
                 yield wrapped_conn
-                conn.commit()
+                if is_owner:
+                    wrapped_conn.commit()
             except Exception as e:
-                conn.rollback()
+                try:
+                    wrapped_conn.rollback()
+                except Exception:
+                    pass
                 raise e
             finally:
-                cls._pg_pool.putconn(conn)
+                cls._release_postgres_connection(wrapped_conn)
         else:
-            # SQLite Implementation
-            if not hasattr(cls._local, 'conn') or cls._local.conn is None:
-                cls._local.conn = sqlite3.connect(DATABASE_SQLITE, check_same_thread=False)
-                cls._local.conn.row_factory = sqlite3.Row
-            
+            conn, is_owner = cls._checkout_sqlite_connection()
             try:
-                yield cls._local.conn
-                cls._local.conn.commit()
+                yield conn
+                if is_owner:
+                    conn.commit()
             except Exception as e:
-                if cls._local.conn:
-                    cls._local.conn.rollback()
+                if conn:
+                    conn.rollback()
                 raise e
+            finally:
+                cls._release_sqlite_connection()
 
     @classmethod
     def close_connection(cls, exception=None):
@@ -431,24 +499,21 @@ class DatabasePool:
         if conn is not None:
             conn.close()
             cls._local.conn = None
+            cls._local.conn_depth = 0
 
 def get_db():
     """保留函数名兼容旧代码"""
     db_type = DB_CONFIG.get('TYPE', 'sqlite')
     if db_type == 'postgres':
-        # NOTE: This usage is discouraged for PG because it doesn't handle the pool correctly.
-        # But for minimal impact refactoring, we'll try to provide a connection.
-        # It's better to use DatabasePool.get_connection()
-        DatabasePool._init_pg_pool()
         if not hasattr(DatabasePool._local, 'pg_conn') or DatabasePool._local.pg_conn is None:
-             conn = DatabasePool._pg_pool.getconn()
-             conn.cursor_factory = DictCursor
-             DatabasePool._local.pg_conn = PGConnectionWrapper(conn)
+            wrapped_conn, _ = DatabasePool._checkout_postgres_connection()
+            DatabasePool._local.pg_conn = wrapped_conn
         return DatabasePool._local.pg_conn
     else:
         if not hasattr(DatabasePool._local, 'conn') or DatabasePool._local.conn is None:
             DatabasePool._local.conn = sqlite3.connect(DATABASE_SQLITE, check_same_thread=False)
             DatabasePool._local.conn.row_factory = sqlite3.Row
+            DatabasePool._local.conn_depth = 1
         return DatabasePool._local.conn
 
 def execute_query(sql, params=None):
@@ -467,8 +532,13 @@ def close_db(e=None):
     if db_type == 'postgres':
         wrapped_conn = getattr(DatabasePool._local, 'pg_conn', None)
         if wrapped_conn:
-            DatabasePool._pg_pool.putconn(wrapped_conn._conn)
+            try:
+                DatabasePool._pg_pool.putconn(wrapped_conn._conn)
+            finally:
+                if DatabasePool._pg_pool_semaphore is not None:
+                    DatabasePool._pg_pool_semaphore.release()
             DatabasePool._local.pg_conn = None
+            DatabasePool._local.pg_conn_depth = 0
     else:
         DatabasePool.close_connection(e)
 

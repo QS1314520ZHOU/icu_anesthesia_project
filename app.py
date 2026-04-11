@@ -28,7 +28,7 @@ from services.kb_service import kb_service
 app = Flask(__name__)
 app.json_encoder = SafeJSONEncoder
 app.config['PROPAGATE_EXCEPTIONS'] = False
-# app.teardown_appcontext(close_db) # PostgreSQL handled by pool
+app.teardown_appcontext(close_db)
 
 # 注册蓝图
 @app.route('/debug/routes')

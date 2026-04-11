@@ -599,7 +599,7 @@ function renderProjectDetail(project) {
                     <div class="tab" onclick="switchTab(this, 'flow')">🎨 流设计器</div>
                     <div class="tab" onclick="switchTab(this, 'devices')">📡 设备</div>
                     <div class="tab" onclick="switchTab(this, 'issues')">⚠️ 问题</div>
-                    <div class="tab" onclick="switchTab(this, 'communications'); loadCommunications(${project.id})">💬 沟通</div>
+                    <div class="tab" onclick="switchTab(this, 'communications')">💬 沟通</div>
                     <div class="tab" onclick="switchTab(this, 'departures')">🚪 离场</div>
                     <div class="tab" onclick="switchTab(this, 'worklogs')">📝 日志</div>
                     <div class="tab" onclick="switchTab(this, 'documents')">📄 文档</div>
@@ -607,11 +607,11 @@ function renderProjectDetail(project) {
                     <div class="tab" onclick="switchTab(this, 'changes')">📝 变更</div>
                     <div class="tab" onclick="switchTab(this, 'acceptance')">✅ 验收</div>
                     <div class="tab" onclick="switchTab(this, 'satisfaction')">⭐ 满意度</div>
-                    <div class="tab" onclick="switchTab(this, 'dependencies'); loadDependencies(${project.id})">🔗 依赖</div>
-                    <div class="tab" onclick="switchTab(this, 'standup'); loadStandupData(${project.id})">📋 站会</div>
-                    <div class="tab" onclick="switchTab(this, 'deviation'); loadDeviationAnalysis(${project.id})">📊 偏差</div>
-                    <div class="tab" onclick="switchTab(this, 'interfaceSpec'); InterfaceSpec.renderTab(currentProjectId)" style="position:relative;">📑 智能对照 <span style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:white; font-size:10px; padding:1px 4px; border-radius:4px; transform:scale(0.8);">NEW</span></div>
-                    <div class="tab" onclick="switchTab(this, 'financials'); loadProjectFinancials(${project.id})">💰 财务看板</div>
+                    <div class="tab" onclick="switchTab(this, 'dependencies')">🔗 依赖</div>
+                    <div class="tab" onclick="switchTab(this, 'standup')">📋 站会</div>
+                    <div class="tab" onclick="switchTab(this, 'deviation')">📊 偏差</div>
+                    <div class="tab" onclick="switchTab(this, 'interfaceSpec')" style="position:relative;">📑 智能对照 <span style="position:absolute; top:-6px; right:-6px; background:#ef4444; color:white; font-size:10px; padding:1px 4px; border-radius:4px; transform:scale(0.8);">NEW</span></div>
+                    <div class="tab" onclick="switchTab(this, 'financials')">💰 财务看板</div>
                 </div>
 
                 <!-- Tab内容 -->
@@ -942,13 +942,5 @@ function renderProjectDetail(project) {
         renderProjectGantt(project);
     }, 100);
 
-    loadDevices(project.id);
-    loadWorklogs(project.id);
-    loadDocuments(project.id);
-    loadExpenses(project.id);
-    loadChanges(project.id);
-    loadAcceptances(project.id);
-    loadSatisfaction(project.id);
-    loadDependencies(project.id);
     enableTabDragging();
 }

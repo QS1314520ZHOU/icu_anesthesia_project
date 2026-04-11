@@ -261,12 +261,41 @@ class AIInsightService:
             with DatabasePool.get_connection() as conn:
                 project = conn.execute(DatabasePool.format_sql('SELECT id, project_name, progress, plan_end_date FROM projects WHERE id = ?'), (project_id,)).fetchone()
                 if not project: return None
-                
+
+                plan_end_date = str(project['plan_end_date'])[:10] if project['plan_end_date'] else None
+                predicted_end_date = plan_end_date
+                is_delay_predicted = False
+                delay_days = 0
+                risk_level = "Normal"
+
+                if plan_end_date:
+                    try:
+                        plan_end = datetime.strptime(plan_end_date, '%Y-%m-%d').date()
+                        today = datetime.now().date()
+                        progress = int(project['progress'] or 0)
+                        overdue_days = max((today - plan_end).days, 0)
+
+                        if overdue_days > 0 and progress < 100:
+                            is_delay_predicted = True
+                            delay_days = max(overdue_days, 1)
+                            predicted_end_date = (today + timedelta(days=delay_days)).strftime('%Y-%m-%d')
+                            risk_level = "High"
+                        elif progress < 30 and (plan_end - today).days <= 7:
+                            is_delay_predicted = True
+                            delay_days = max(1, 7 - max((plan_end - today).days, 0))
+                            predicted_end_date = (plan_end + timedelta(days=delay_days)).strftime('%Y-%m-%d')
+                            risk_level = "Medium"
+                    except Exception:
+                        pass
+
                 return {
                     "project_id": project_id,
                     "current_progress": project['progress'],
-                    "predicted_end_date": "2026-12-31", # 模拟预判
-                    "risk_level": "Normal"
+                    "plan_end_date": plan_end_date,
+                    "predicted_end_date": predicted_end_date,
+                    "is_delay_predicted": is_delay_predicted,
+                    "delay_days": delay_days,
+                    "risk_level": risk_level
                 }
         except: return None
 
