@@ -243,9 +243,41 @@ def init_db():
                 description TEXT,
                 severity TEXT,
                 status TEXT DEFAULT '待处理',
+                owner_member_id INTEGER,
+                first_response_at TIMESTAMP,
                 created_at {TIMESTAMP_TYPE},
                 resolved_at TIMESTAMP,
+                closed_by_member_id INTEGER,
+                reopen_count INTEGER DEFAULT 0,
+                is_external_blocker {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'},
+                root_cause_type TEXT,
+                last_wecom_push_at TIMESTAMP,
+                last_wecom_push_summary TEXT,
                 FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS owner_member_id INTEGER", "ALTER TABLE issues ADD COLUMN owner_member_id INTEGER")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP", "ALTER TABLE issues ADD COLUMN first_response_at TIMESTAMP")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_by_member_id INTEGER", "ALTER TABLE issues ADD COLUMN closed_by_member_id INTEGER")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS reopen_count INTEGER DEFAULT 0", "ALTER TABLE issues ADD COLUMN reopen_count INTEGER DEFAULT 0")
+        _safe_alter(f"ALTER TABLE issues ADD COLUMN IF NOT EXISTS is_external_blocker {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'}", f"ALTER TABLE issues ADD COLUMN is_external_blocker {BOOL_TYPE} DEFAULT 0")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS root_cause_type TEXT", "ALTER TABLE issues ADD COLUMN root_cause_type TEXT")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS last_wecom_push_at TIMESTAMP", "ALTER TABLE issues ADD COLUMN last_wecom_push_at TIMESTAMP")
+        _safe_alter("ALTER TABLE issues ADD COLUMN IF NOT EXISTS last_wecom_push_summary TEXT", "ALTER TABLE issues ADD COLUMN last_wecom_push_summary TEXT")
+
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS issue_push_receipts (
+                id {PK_AUTO},
+                issue_id INTEGER NOT NULL,
+                push_channel TEXT DEFAULT 'wecom',
+                trigger_type TEXT DEFAULT 'manual',
+                success {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'},
+                sent_count INTEGER DEFAULT 0,
+                sent_members_json TEXT,
+                missing_members_json TEXT,
+                result_message TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (issue_id) REFERENCES issues(id)
             )
         ''')
         
@@ -969,6 +1001,164 @@ def init_db():
         _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS payload_summary TEXT", "ALTER TABLE background_tasks ADD COLUMN payload_summary TEXT")
         _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS source_endpoint TEXT", "ALTER TABLE background_tasks ADD COLUMN source_endpoint TEXT")
         _safe_alter("ALTER TABLE background_tasks ADD COLUMN IF NOT EXISTS retried_from_task_id TEXT", "ALTER TABLE background_tasks ADD COLUMN retried_from_task_id TEXT")
+
+        # 30.8 研发绩效周评周期
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_review_cycles (
+                id {PK_AUTO},
+                cycle_key TEXT UNIQUE NOT NULL,
+                title TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                status TEXT DEFAULT 'active',
+                created_by TEXT,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE}
+            )
+        ''')
+
+        # 30.9 周评对象
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_review_targets (
+                id {PK_AUTO},
+                cycle_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                member_id INTEGER,
+                member_name TEXT NOT NULL,
+                member_role TEXT,
+                is_onsite {BOOL_TYPE} DEFAULT {'FALSE' if db_type == 'postgres' else '0'},
+                status TEXT DEFAULT 'active',
+                signal_logs INTEGER DEFAULT 0,
+                signal_tasks INTEGER DEFAULT 0,
+                signal_stages INTEGER DEFAULT 0,
+                signal_issues INTEGER DEFAULT 0,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (member_id) REFERENCES project_members(id),
+                UNIQUE(cycle_id, project_id, member_name)
+            )
+        ''')
+
+        # 30.10 现场评分表
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_review_forms (
+                id {PK_AUTO},
+                cycle_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                reviewer_name TEXT NOT NULL,
+                reviewer_role TEXT,
+                score_responsibility {REAL_TYPE} DEFAULT 0,
+                score_collaboration {REAL_TYPE} DEFAULT 0,
+                score_response {REAL_TYPE} DEFAULT 0,
+                score_professional {REAL_TYPE} DEFAULT 0,
+                highlight TEXT,
+                suggestion TEXT,
+                evidence_note TEXT,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (target_id) REFERENCES performance_review_targets(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(cycle_id, target_id, reviewer_name)
+            )
+        ''')
+
+        # 30.11 暖心加分 / 感谢卡
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_recognition (
+                id {PK_AUTO},
+                cycle_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                giver_name TEXT,
+                recognition_type TEXT DEFAULT 'gratitude',
+                title TEXT,
+                content TEXT,
+                weight {REAL_TYPE} DEFAULT 0,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (target_id) REFERENCES performance_review_targets(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id)
+            )
+        ''')
+
+        # 30.12 绩效评分卡
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_score_cards (
+                id {PK_AUTO},
+                cycle_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                target_member_name TEXT NOT NULL,
+                onsite_score {REAL_TYPE} DEFAULT 0,
+                ai_evidence_score {REAL_TYPE} DEFAULT 0,
+                ai_raw_score {REAL_TYPE} DEFAULT 0,
+                ai_score {REAL_TYPE} DEFAULT 0,
+                warmth_score {REAL_TYPE} DEFAULT 0,
+                base_final_score {REAL_TYPE} DEFAULT 0,
+                calibration_delta {REAL_TYPE} DEFAULT 0,
+                final_score {REAL_TYPE} DEFAULT 0,
+                formula_json TEXT,
+                evidence_json TEXT,
+                ai_summary TEXT,
+                ai_highlight TEXT,
+                ai_risk TEXT,
+                ai_support TEXT,
+                review_count INTEGER DEFAULT 0,
+                calibrated_by TEXT,
+                calibrated_reason TEXT,
+                approved_by TEXT,
+                approved_at TIMESTAMP,
+                ai_generated_at TIMESTAMP,
+                generated_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (target_id) REFERENCES performance_review_targets(id),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(cycle_id, target_id)
+            )
+        ''')
+
+        # 30.13 人工校准记录
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_adjustments (
+                id {PK_AUTO},
+                scorecard_id INTEGER NOT NULL,
+                cycle_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                operator TEXT,
+                delta {REAL_TYPE} DEFAULT 0,
+                reason TEXT,
+                created_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (scorecard_id) REFERENCES performance_score_cards(id),
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (target_id) REFERENCES performance_review_targets(id)
+            )
+        ''')
+
+        # 30.14 绩效申诉与复核
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS performance_appeals (
+                id {PK_AUTO},
+                scorecard_id INTEGER NOT NULL,
+                cycle_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                appellant_name TEXT NOT NULL,
+                appeal_reason TEXT,
+                status TEXT DEFAULT 'pending',
+                resolution_text TEXT,
+                resolved_by TEXT,
+                resolved_at TIMESTAMP,
+                created_at {TIMESTAMP_TYPE},
+                updated_at {TIMESTAMP_TYPE},
+                FOREIGN KEY (scorecard_id) REFERENCES performance_score_cards(id),
+                FOREIGN KEY (cycle_id) REFERENCES performance_review_cycles(id),
+                FOREIGN KEY (target_id) REFERENCES performance_review_targets(id)
+            )
+        ''')
     
         # 31. 接口规范库
         cursor.execute(f'''
@@ -1256,6 +1446,19 @@ def init_db():
             ("idx_alignment_field_maps_result", "alignment_field_maps", "result_id"),
             ("idx_comparisons_project", "interface_comparisons", "project_id"),
             ("idx_field_mappings_comp", "field_mappings", "comparison_id"),
+            ("idx_issues_owner_member", "issues", "owner_member_id"),
+            ("idx_perf_cycles_start_date", "performance_review_cycles", "start_date"),
+            ("idx_perf_targets_cycle", "performance_review_targets", "cycle_id"),
+            ("idx_perf_targets_project", "performance_review_targets", "project_id"),
+            ("idx_perf_forms_cycle", "performance_review_forms", "cycle_id"),
+            ("idx_perf_forms_target", "performance_review_forms", "target_id"),
+            ("idx_perf_recognition_target", "performance_recognition", "target_id"),
+            ("idx_perf_cards_cycle", "performance_score_cards", "cycle_id"),
+            ("idx_perf_cards_target", "performance_score_cards", "target_id"),
+            ("idx_perf_adjustments_scorecard", "performance_adjustments", "scorecard_id"),
+            ("idx_perf_appeals_scorecard", "performance_appeals", "scorecard_id"),
+            ("idx_perf_appeals_cycle", "performance_appeals", "cycle_id"),
+            ("idx_issue_push_receipts_issue", "issue_push_receipts", "issue_id"),
         ]
         for idx_name, table_name, column_name in indexes:
             _safe_alter(f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table_name}({column_name})")

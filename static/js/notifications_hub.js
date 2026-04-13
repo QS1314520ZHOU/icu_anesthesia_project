@@ -93,14 +93,25 @@ async function deleteAllNotifications() {
     await showNotificationsModal();
 }
 
-async function checkReminders() {
+async function checkReminders(options = {}) {
+    const silent = !!options.silent;
+    if (!currentUser) return { created: [] };
+
     try {
-        const data = await api.post('/check-and-create-reminders', {});
+        const data = await api.post('/check-and-create-reminders', {}, { silent });
         await loadUnreadCount();
         if (document.getElementById('dashboardView')?.style.display !== 'none') showDashboard();
         const created = data.created || [];
-        showToast(created.length ? `已生成 ${created.length} 条提醒` : '本次未发现新的提醒', 'success');
+        if (!silent) {
+            showToast(created.length ? `已生成 ${created.length} 条提醒` : '本次未发现新的提醒', 'success');
+        }
+        return data;
     } catch (e) {
+        if (silent) {
+            console.warn('后台检查提醒失败', e);
+            return { created: [] };
+        }
         showToast(`检查提醒失败: ${e.message}`, 'danger');
+        throw e;
     }
 }

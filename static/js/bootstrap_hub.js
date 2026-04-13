@@ -21,6 +21,25 @@ function hideAllViews() {
     });
 }
 
+function ensureAiHealthPolling() {
+    updateAiHealthUI();
+    if (window.__aiHealthTimer) return;
+    window.__aiHealthTimer = setInterval(updateAiHealthUI, 60000);
+}
+
+window.initializeAuthenticatedShell = function (options = {}) {
+    if (!currentUser) return;
+
+    loadUnreadCount();
+    loadReminderBadge();
+    loadWarningCount();
+    ensureAiHealthPolling();
+
+    if (options.triggerReminderCheck) {
+        checkReminders({ silent: true });
+    }
+};
+
 function loadScriptOnce(src) {
     return new Promise((resolve, reject) => {
         const existing = document.querySelector(`script[src="${src}"]`);
@@ -260,7 +279,7 @@ async function showPerformanceAnalytics() {
     const view = document.getElementById('analyticsView');
     if (view) view.style.display = 'block';
     if (typeof initPerformanceAnalytics !== 'function') {
-        await loadScriptOnce('/api/force_static/js/analytics.js?v=1');
+        await loadScriptOnce('/api/force_static/js/analytics.js?v=3');
     }
     if (typeof initPerformanceAnalytics === 'function') {
         initPerformanceAnalytics();
@@ -420,10 +439,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (followupDate) followupDate.value = new Date().toISOString().split('T')[0];
 
     await checkAuth();
-    loadUnreadCount();
-    loadReminderBadge();
-    loadWarningCount();
-    checkReminders();
-    updateAiHealthUI();
-    setInterval(updateAiHealthUI, 60000);
+
+    if (currentUser) {
+        window.initializeAuthenticatedShell({ triggerReminderCheck: true });
+    } else {
+        ensureAiHealthPolling();
+    }
 });

@@ -100,6 +100,7 @@ from routes.mobile_routes import mobile_bp
 from routes.hardware_routes import hardware_bp
 from routes.communication_routes import communication_bp
 from routes.business_routes import business_bp
+from routes.performance_review_routes import performance_review_bp
 from services.analytics_service import analytics_service
 from services.monitor_service import monitor_service
 from services.auth_service import auth_service
@@ -131,6 +132,7 @@ app.register_blueprint(mobile_bp)
 app.register_blueprint(hardware_bp)
 app.register_blueprint(communication_bp)
 app.register_blueprint(business_bp)
+app.register_blueprint(performance_review_bp)
 from services.scheduler_service import report_scheduler
 
 

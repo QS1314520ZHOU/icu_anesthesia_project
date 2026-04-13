@@ -248,6 +248,47 @@ class MemberService:
             return [dict(m) for m in members]
 
     @staticmethod
+    def get_member_directory(keyword: str = '', limit: int = 8):
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(DatabasePool.format_sql('''
+                SELECT id, name, role, phone, email, join_date, current_city, is_onsite, created_at
+                FROM project_members
+                WHERE status = '在岗'
+                ORDER BY created_at DESC, id DESC
+            ''')).fetchall()
+
+        keyword = str(keyword or '').strip().lower()
+        deduped = []
+        seen = set()
+        for row in rows:
+            item = dict(row)
+            name = str(item.get('name') or '').strip()
+            if not name or name in seen:
+                continue
+            haystack = ' '.join([
+                name,
+                str(item.get('role') or ''),
+                str(item.get('phone') or ''),
+                str(item.get('email') or ''),
+                str(item.get('current_city') or '')
+            ]).lower()
+            if keyword and keyword not in haystack:
+                continue
+            seen.add(name)
+            deduped.append({
+                'name': name,
+                'role': item.get('role') or '',
+                'phone': item.get('phone') or '',
+                'email': item.get('email') or '',
+                'join_date': str(item.get('join_date') or '')[:10] if item.get('join_date') else '',
+                'current_city': item.get('current_city') or '',
+                'is_onsite': bool(item.get('is_onsite')),
+            })
+            if len(deduped) >= max(1, min(int(limit or 8), 20)):
+                break
+        return deduped
+
+    @staticmethod
     def add_project_member(project_id, data):
         with DatabasePool.get_connection() as conn:
             onsite_value = bool(data.get('is_onsite')) if DatabasePool.is_postgres() else (1 if data.get('is_onsite') else 0)

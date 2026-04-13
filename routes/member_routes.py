@@ -25,6 +25,13 @@ def get_project_members(project_id):
     members = member_service.get_project_members(project_id)
     return api_response(True, members)
 
+@member_bp.route('/members/directory', methods=['GET'])
+def get_member_directory():
+    keyword = request.args.get('q', '').strip()
+    limit = request.args.get('limit', 8, type=int)
+    members = member_service.get_member_directory(keyword=keyword, limit=limit)
+    return api_response(True, members)
+
 @member_bp.route('/projects/<int:project_id>/members', methods=['POST'])
 def add_project_member(project_id):
     try:

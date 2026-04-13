@@ -4,6 +4,7 @@ from services.monitor_service import monitor_service
 from services.ai_service import ai_service
 from utils.geo_service import geo_service
 from services.kb_service import kb_service
+from services.wecom_push_service import wecom_push_service
 
 class ProjectService:
     @staticmethod
@@ -520,12 +521,36 @@ class ProjectService:
     def add_issue(project_id, data):
         with DatabasePool.get_connection() as conn:
             is_postgres = DatabasePool.is_postgres()
-            sql = 'INSERT INTO issues (project_id, issue_type, description, severity, status) VALUES (?, ?, ?, ?, ?)'
+            status = data.get('status', '待处理')
+            first_response_at = None
+            resolved_at = None
+            if status in ('处理中', '已解决'):
+                first_response_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            if status == '已解决':
+                resolved_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            sql = '''
+                INSERT INTO issues (
+                    project_id, issue_type, description, severity, status,
+                    owner_member_id, first_response_at, resolved_at, is_external_blocker, root_cause_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            '''
             if is_postgres:
                 sql += ' RETURNING id'
             cursor = conn.execute(
                 DatabasePool.format_sql(sql),
-                (project_id, data['issue_type'], data['description'], data['severity'], data.get('status', '待处理'))
+                (
+                    project_id,
+                    data['issue_type'],
+                    data['description'],
+                    data['severity'],
+                    status,
+                    data.get('owner_member_id'),
+                    first_response_at,
+                    resolved_at,
+                    bool(data.get('is_external_blocker')),
+                    data.get('root_cause_type')
+                )
             )
             issue_id = DatabasePool.get_inserted_id(cursor)
             
@@ -540,20 +565,34 @@ class ProjectService:
 
             suggestions = kb_service.suggest_for_issue(project_id, data.get('description', ''), limit=3)
             conn.commit()
+            push_result = None
+            if data.get('push_to_wecom', True):
+                try:
+                    push_result = wecom_push_service.push_issue_to_rnd_and_onsite(issue_id, trigger='create')
+                except Exception as e:
+                    push_result = {'success': False, 'message': str(e)}
             return {
                 'success': True,
                 'issue_id': issue_id,
-                'knowledge_suggestions': suggestions
+                'knowledge_suggestions': suggestions,
+                'wecom_push': push_result
             }
 
     @staticmethod
     def update_issue(issue_id, data):
         with DatabasePool.get_connection() as conn:
+            existing = conn.execute(
+                DatabasePool.format_sql('SELECT * FROM issues WHERE id = ?'),
+                (issue_id,)
+            ).fetchone()
+            if not existing:
+                return False
+            existing = dict(existing)
             # Dynamically build SET clause to only update provided fields
             set_parts = []
             params = []
             
-            updatable_fields = ['issue_type', 'description', 'severity', 'status']
+            updatable_fields = ['issue_type', 'description', 'severity', 'status', 'owner_member_id', 'root_cause_type', 'is_external_blocker']
             for field in updatable_fields:
                 if field in data:
                     set_parts.append(f'{field}=?')
@@ -563,9 +602,18 @@ class ProjectService:
             if data.get('status') == '已解决':
                 set_parts.append('resolved_at=?')
                 params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                if not existing.get('first_response_at'):
+                    set_parts.append('first_response_at=?')
+                    params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             elif 'status' in data and data['status'] != '已解决':
                 set_parts.append('resolved_at=?')
                 params.append(None)
+                if existing.get('status') == '已解决':
+                    set_parts.append('reopen_count=?')
+                    params.append(int(existing.get('reopen_count') or 0) + 1)
+                if data['status'] == '处理中' and not existing.get('first_response_at'):
+                    set_parts.append('first_response_at=?')
+                    params.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             
             if not set_parts:
                 return True
@@ -575,6 +623,11 @@ class ProjectService:
             sql = DatabasePool.format_sql(f'UPDATE issues SET {", ".join(set_parts)} WHERE id=?')
             conn.execute(sql, tuple(params))
             conn.commit()
+            if data.get('push_to_wecom'):
+                try:
+                    wecom_push_service.push_issue_to_rnd_and_onsite(issue_id, trigger='update')
+                except Exception:
+                    pass
             return True
 
     @staticmethod

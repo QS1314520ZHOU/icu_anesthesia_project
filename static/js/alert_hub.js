@@ -150,10 +150,16 @@
     };
 
     window.loadWarningCount = async function () {
+        const badge = document.getElementById('warningBadge');
+        if (!currentUser) {
+            window.warningCount = 0;
+            if (badge) badge.style.display = 'none';
+            return;
+        }
+
         try {
-            const data = await api.get('/warnings/count');
+            const data = await api.get('/warnings/count', { silent: true });
             window.warningCount = data.total || 0;
-            const badge = document.getElementById('warningBadge');
             if (badge) {
                 badge.textContent = window.warningCount;
                 badge.style.display = window.warningCount > 0 ? 'inline-block' : 'none';

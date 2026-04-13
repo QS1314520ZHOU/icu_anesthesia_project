@@ -88,16 +88,15 @@ function showFullPageLogin() {
                 </div>
                 <div id="overlayLoginError" style="color: var(--danger); margin-bottom: 12px; display: none;"></div>
                 <button class="btn btn-primary btn-full" onclick="doOverlayLogin()" style="padding: 14px; font-size: 16px;">登 录</button>
-                
+
                 <div style="margin-top: 20px; text-align: center; border-top: 1px solid var(--gray-200); padding-top: 20px;">
                     <div style="color: var(--gray-400); font-size: 13px; margin-bottom: 12px;">
                         ── 或使用企业微信登录 ──
                     </div>
-                    <button type="button" onclick="showWecomLogin('overlayWecomContainer', 'overlayLoginForm')" style="width:100%; padding:12px; background:#07C160; color:white; 
-                        border:none; border-radius:8px; cursor:pointer; font-size:15px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <button type="button" onclick="startWecomLogin()" style="width:100%; padding:12px; background:#07C160; color:white;
+                        border:none; border-radius:8px; cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center; gap:8px;">
                         📱 企业微信扫码登录
                     </button>
-                    <div id="overlayWecomContainer" style="display:none; margin-top:15px; background: #f9fafb; border-radius: 8px; padding: 10px;"></div>
                 </div>
 
                 <p style="text-align: center; margin-top: 16px; color: var(--gray-500); font-size: 13px;">
@@ -108,6 +107,16 @@ function showFullPageLogin() {
         document.body.appendChild(loginOverlay);
     }
     loginOverlay.style.display = 'flex';
+}
+
+function initializeAuthenticatedShellAfterLogin() {
+    if (typeof window.initializeAuthenticatedShell === 'function') {
+        window.initializeAuthenticatedShell({ triggerReminderCheck: true });
+    }
+}
+
+function startWecomLogin() {
+    window.location.href = '/api/wecom/oauth/login';
 }
 
 async function doOverlayLogin() {
@@ -137,6 +146,7 @@ async function doOverlayLogin() {
         if (header) header.style.display = 'flex';
         updateUserUI();
         loadProjects();
+        initializeAuthenticatedShellAfterLogin();
     } catch (e) {
         errorDiv.textContent = e.message || '登录失败';
         errorDiv.style.display = 'block';
@@ -275,25 +285,8 @@ async function doLogout() {
     window.location.reload();
 }
 
-function showWecomLogin(containerId = 'overlayWecomContainer', loginFormId = 'overlayLoginForm') {
-    const container = document.getElementById(containerId);
-    const loginForm = document.getElementById(loginFormId);
-    if (!container) {
-        window.location.href = '/api/wecom/oauth/login';
-        return;
-    }
-
-    if (loginForm) {
-        loginForm.style.display = 'none';
-    }
-    container.style.display = 'block';
-    container.innerHTML = `
-        <div style="text-align:center;padding:12px;">
-            <div style="font-size:13px;color:#64748b;margin-bottom:10px;">点击下方按钮前往企业微信扫码登录</div>
-            <button class="btn btn-success btn-full" onclick="window.location.href='/api/wecom/oauth/login'">📱 前往企业微信登录</button>
-            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="showLoginForm(); document.getElementById('${containerId}').style.display='none'; document.getElementById('${loginFormId}').style.display='block';">返回账号登录</button>
-        </div>
-    `;
+function showWecomLogin() {
+    startWecomLogin();
 }
 
 function startWecomBind() {

@@ -743,6 +743,13 @@
             white-space: nowrap;
         }
 
+        .btn-full {
+            display: flex;
+            width: 100%;
+            justify-content: center;
+            box-sizing: border-box;
+        }
+
         .btn-primary {
             background: var(--primary);
             color: white;
@@ -3320,7 +3327,7 @@
     <div class="modal" id="memberModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>添加项目成员</h3>
+                <h3 id="memberModalTitle">添加项目成员（实施 / 研发）</h3>
                 <button class="modal-close" onclick="closeModal('memberModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -3328,17 +3335,34 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label>姓名 *</label>
-                            <input type="text" id="memberName" required>
+                            <div style="position:relative;">
+                                <input type="text" id="memberName" required autocomplete="off"
+                                    placeholder="输入姓名，可从历史成员中选择"
+                                    oninput="searchMemberDirectory(this.value)"
+                                    onfocus="searchMemberDirectory(this.value)">
+                                <div id="memberNameSuggestions"
+                                    style="display:none;position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:10003;background:white;border:1px solid var(--gray-200);border-radius:12px;box-shadow:0 12px 30px rgba(15,23,42,0.14);overflow:hidden;max-height:260px;">
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>角色</label>
-                            <select id="memberRole">
-                                <option value="项目经理">项目经理</option>
-                                <option value="实施工程师" selected>实施工程师</option>
-                                <option value="开发工程师">开发工程师</option>
-                                <option value="测试工程师">测试工程师</option>
-                                <option value="运维工程师">运维工程师</option>
+                            <select id="memberRole" onchange="syncMemberRolePreset()">
+                                <option value="驻场实施工程师" selected>驻场实施工程师</option>
+                                <option value="实施项目经理">实施项目经理</option>
+                                <option value="实施支持工程师">实施支持工程师</option>
+                                <option value="交付经理">交付经理</option>
+                                <option value="研发经理">研发经理</option>
+                                <option value="后端研发工程师">后端研发工程师</option>
+                                <option value="前端研发工程师">前端研发工程师</option>
+                                <option value="接口研发工程师">接口研发工程师</option>
+                                <option value="测试研发工程师">测试研发工程师</option>
+                                <option value="运维研发工程师">运维研发工程师</option>
+                                <option value="产品经理">产品经理</option>
                             </select>
+                            <div style="margin-top:8px;padding:10px 12px;border-radius:10px;background:var(--gray-50);border:1px solid var(--gray-200);font-size:12px;line-height:1.7;color:var(--gray-600);">
+                                现场实施 / 驻场成员会作为评分人，研发侧成员会作为被评分对象。
+                            </div>
                         </div>
                     </div>
                     <div class="form-row">
@@ -3367,12 +3391,15 @@
                             <option value="1">是</option>
                             <option value="0">否</option>
                         </select>
+                        <div style="margin-top:6px;font-size:12px;line-height:1.6;color:var(--gray-500);">
+                            默认会随角色自动带出，你也可以手动调整。
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline" onclick="closeModal('memberModal')">取消</button>
-                <button class="btn btn-primary" onclick="saveMember()">保存</button>
+                <button id="memberModalSubmit" class="btn btn-primary" onclick="saveMember()">保存</button>
             </div>
         </div>
     </div>
@@ -4347,7 +4374,8 @@
                             <label>问题类型</label>
                             <select id="issueType">
                                 <option value="技术">技术问题</option>
-                                <option value="需求">需求变更</option>
+                                <option value="需求">需求</option>
+                                <option value="接口">接口问题</option>
                                 <option value="协调">协调沟通</option>
                                 <option value="资源">资源不足</option>
                                 <option value="其他">其他</option>
@@ -4365,6 +4393,34 @@
                     <div class="form-group">
                         <label>问题描述 *</label>
                         <textarea id="issueDesc" rows="4" required></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>责任人</label>
+                            <select id="issueOwnerMemberId">
+                                <option value="">未指定</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>根因分类</label>
+                            <select id="issueRootCauseType">
+                                <option value="">未分类</option>
+                                <option value="需求变更">需求变更</option>
+                                <option value="接口联调">接口联调</option>
+                                <option value="环境配置">环境配置</option>
+                                <option value="数据质量">数据质量</option>
+                                <option value="现场协同">现场协同</option>
+                                <option value="外部依赖">外部依赖</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="issueExternalBlocker" style="width:auto;">
+                        <label for="issueExternalBlocker" style="margin:0;">该问题主要由外部阻塞导致</label>
+                    </div>
+                    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+                        <input type="checkbox" id="issuePushWecom" style="width:auto;" checked>
+                        <label for="issuePushWecom" style="margin:0;">保存后推送到研发负责人和现场实施企业微信</label>
                     </div>
                 </form>
             </div>
@@ -5095,11 +5151,10 @@
                     <div style="color: var(--gray-400); font-size: 13px; margin-bottom: 12px;">
                         ── 或使用企业微信登录 ──
                     </div>
-                    <button type="button" onclick="showWecomLogin()" style="width:100%; padding:10px; background:#07C160; color:white; 
+                    <button type="button" onclick="startWecomLogin()" style="width:100%; padding:10px; background:#07C160; color:white; 
                         border:none; border-radius:8px; cursor:pointer; font-size:14px;">
                         📱 企业微信扫码登录
                     </button>
-                    <div id="wecom_login_container" style="display:none; margin-top:15px;"></div>
                 </div>
 
                 <div id="registerForm" style="display: none;">

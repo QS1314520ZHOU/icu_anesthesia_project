@@ -187,7 +187,13 @@ async function saveDeparture() {
     showToast('离场申请已保存', 'success');
 }
 
+let currentEditingMemberId = null;
+let memberDirectoryCache = null;
+let memberDirectorySearchTimer = null;
+let memberDirectoryRenderedEntries = [];
+
 async function saveMember() {
+    const isEditing = !!currentEditingMemberId;
     const data = {
         name: document.getElementById('memberName').value,
         role: document.getElementById('memberRole').value,
@@ -201,10 +207,254 @@ async function saveMember() {
         showToast('请填写姓名', 'warning');
         return;
     }
-    await api.post(`/projects/${currentProjectId}/members`, data);
+    if (isEditing) {
+        await api.put(`/members/${currentEditingMemberId}`, data);
+    } else {
+        await api.post(`/projects/${currentProjectId}/members`, data);
+    }
     closeModal('memberModal');
+    currentEditingMemberId = null;
+    memberDirectoryCache = null;
     await syncCurrentProjectDetailState(['members']);
-    showToast('成员已保存', 'success');
+    showToast(isEditing ? '成员已更新' : '成员已保存', 'success');
+}
+
+function syncMemberRolePreset() {
+    const role = document.getElementById('memberRole')?.value || '';
+    const onsite = document.getElementById('memberOnsite');
+    if (!onsite) return;
+    const onsiteRoles = ['驻场实施工程师', '实施项目经理', '实施支持工程师', '交付经理'];
+    const remoteRoles = ['研发经理', '后端研发工程师', '前端研发工程师', '接口研发工程师', '测试研发工程师', '运维研发工程师', '产品经理'];
+    if (onsiteRoles.includes(role)) {
+        onsite.value = '1';
+    } else if (remoteRoles.includes(role)) {
+        onsite.value = '0';
+    }
+}
+
+function ensureMemberRoleOption(roleValue) {
+    const role = document.getElementById('memberRole');
+    if (!role || !roleValue) return;
+    const exists = Array.from(role.options).some(option => option.value === roleValue);
+    if (!exists) {
+        role.insertAdjacentHTML('beforeend', `<option value="${roleValue}">${roleValue}</option>`);
+    }
+}
+
+function showMemberModal() {
+    currentEditingMemberId = null;
+    document.getElementById('memberForm')?.reset();
+    const title = document.getElementById('memberModalTitle');
+    if (title) title.textContent = '添加项目成员（实施 / 研发）';
+    const submit = document.getElementById('memberModalSubmit');
+    if (submit) submit.textContent = '保存';
+    const role = document.getElementById('memberRole');
+    if (role) role.value = '驻场实施工程师';
+    const joinDate = document.getElementById('memberJoinDate');
+    if (joinDate) joinDate.value = new Date().toISOString().split('T')[0];
+    hideMemberDirectorySuggestions();
+    syncMemberRolePreset();
+    showModal('memberModal', { reset: false });
+}
+
+function showEditMemberModal(memberId) {
+    const member = Array.isArray(currentProject?.members)
+        ? currentProject.members.find(item => Number(item.id) === Number(memberId))
+        : null;
+    if (!member) {
+        showToast('未找到成员信息', 'warning');
+        return;
+    }
+    currentEditingMemberId = member.id;
+    const title = document.getElementById('memberModalTitle');
+    if (title) title.textContent = `编辑成员 · ${member.name}`;
+    const submit = document.getElementById('memberModalSubmit');
+    if (submit) submit.textContent = '更新';
+    document.getElementById('memberName').value = member.name || '';
+    ensureMemberRoleOption(member.role);
+    document.getElementById('memberRole').value = member.role || '驻场实施工程师';
+    document.getElementById('memberPhone').value = member.phone || '';
+    document.getElementById('memberEmail').value = member.email || '';
+    document.getElementById('memberJoinDate').value = member.join_date ? String(member.join_date).slice(0, 10) : '';
+    document.getElementById('memberCity').value = member.current_city || '';
+    document.getElementById('memberOnsite').value = member.is_onsite ? '1' : '0';
+    hideMemberDirectorySuggestions();
+    showModal('memberModal', { reset: false });
+}
+
+async function loadMemberDirectory(keyword = '') {
+    const trimmed = String(keyword || '').trim();
+    if (!trimmed && Array.isArray(memberDirectoryCache)) {
+        return memberDirectoryCache;
+    }
+    const query = new URLSearchParams({ q: trimmed, limit: '8' }).toString();
+    const entries = await api.get(`/members/directory?${query}`, { silent: true });
+    if (!trimmed) {
+        memberDirectoryCache = Array.isArray(entries) ? entries : [];
+    }
+    return Array.isArray(entries) ? entries : [];
+}
+
+function renderMemberDirectorySuggestions(entries) {
+    const box = document.getElementById('memberNameSuggestions');
+    if (!box) return;
+    if (!entries.length) {
+        box.style.display = 'none';
+        box.innerHTML = '';
+        memberDirectoryRenderedEntries = [];
+        return;
+    }
+    memberDirectoryRenderedEntries = entries.slice();
+    box.innerHTML = entries.map((item, index) => `
+        <button type="button"
+            style="width:100%;text-align:left;padding:12px 14px;border:none;background:${index === 0 ? 'var(--gray-50)' : 'white'};cursor:pointer;border-bottom:${index === entries.length - 1 ? 'none' : '1px solid var(--gray-100)'};"
+            onclick="selectMemberDirectoryEntryByIndex(${index})">
+            <div style="font-size:14px;font-weight:700;color:var(--gray-800);">${item.name}</div>
+            <div style="margin-top:4px;font-size:12px;color:var(--gray-500);">${item.role || '未设置角色'}${item.current_city ? ` | ${item.current_city}` : ''}${item.phone ? ` | ${item.phone}` : ''}</div>
+        </button>
+    `).join('');
+    box.style.display = 'block';
+}
+
+function hideMemberDirectorySuggestions() {
+    const box = document.getElementById('memberNameSuggestions');
+    if (!box) return;
+    box.style.display = 'none';
+    box.innerHTML = '';
+    memberDirectoryRenderedEntries = [];
+}
+
+function selectMemberDirectoryEntry(item) {
+    document.getElementById('memberName').value = item.name || '';
+    if (item.role) {
+        ensureMemberRoleOption(item.role);
+        document.getElementById('memberRole').value = item.role;
+    }
+    if (item.phone) document.getElementById('memberPhone').value = item.phone;
+    if (item.email) document.getElementById('memberEmail').value = item.email;
+    if (item.join_date) document.getElementById('memberJoinDate').value = item.join_date;
+    if (item.current_city) document.getElementById('memberCity').value = item.current_city;
+    syncMemberRolePreset();
+    document.getElementById('memberOnsite').value = item.is_onsite ? '1' : '0';
+    hideMemberDirectorySuggestions();
+}
+
+function selectMemberDirectoryEntryByIndex(index) {
+    const item = memberDirectoryRenderedEntries[index];
+    if (!item) return;
+    selectMemberDirectoryEntry(item);
+}
+
+function searchMemberDirectory(keyword) {
+    if (memberDirectorySearchTimer) {
+        clearTimeout(memberDirectorySearchTimer);
+    }
+    memberDirectorySearchTimer = setTimeout(async () => {
+        try {
+            const entries = await loadMemberDirectory(keyword);
+            renderMemberDirectorySuggestions(entries);
+        } catch (e) {
+            hideMemberDirectorySuggestions();
+        }
+    }, 120);
+}
+
+document.addEventListener('click', (event) => {
+    const input = document.getElementById('memberName');
+    const box = document.getElementById('memberNameSuggestions');
+    if (!input || !box) return;
+    if (event.target === input || box.contains(event.target)) return;
+    hideMemberDirectorySuggestions();
+});
+
+function openCurrentProjectPerformanceReview() {
+    if (!currentProjectId) {
+        showToast('请先进入项目详情后再打开研发绩效评价', 'warning');
+        return;
+    }
+    if (typeof showPerformanceAnalytics === 'function') {
+        if (window.performanceReviewState) {
+            window.performanceReviewState.selectedProjectId = Number(currentProjectId);
+        }
+        showPerformanceAnalytics();
+        return;
+    }
+    showToast('研发绩效页面尚未加载，请稍后重试', 'warning');
+}
+
+function normalizeMemberRole(role, isOnsite) {
+    const text = String(role || '').trim();
+    if (!text) {
+        return isOnsite ? '驻场实施工程师' : '后端研发工程师';
+    }
+    if (/后端|backend/i.test(text)) return '后端研发工程师';
+    if (/前端|frontend|ui/i.test(text)) return '前端研发工程师';
+    if (/接口/.test(text)) return '接口研发工程师';
+    if (/测试|qa/i.test(text)) return '测试研发工程师';
+    if (/运维|ops/i.test(text)) return '运维研发工程师';
+    if (/产品/.test(text)) return '产品经理';
+    if (/研发经理|技术经理|开发经理/.test(text)) return '研发经理';
+    if (/交付/.test(text)) return '交付经理';
+    if (/项目经理/.test(text) && isOnsite) return '实施项目经理';
+    if (/实施支持/.test(text)) return '实施支持工程师';
+    if (/实施|驻场|现场|工程/.test(text) || isOnsite) return '驻场实施工程师';
+    return text;
+}
+
+async function normalizeProjectMemberRoles() {
+    const members = Array.isArray(currentProject?.members) ? currentProject.members : [];
+    if (!members.length) {
+        showToast('当前项目暂无成员可规范', 'warning');
+        return;
+    }
+    const updates = members
+        .map(member => ({
+            id: member.id,
+            name: member.name,
+            from: member.role || '',
+            to: normalizeMemberRole(member.role, !!member.is_onsite),
+            is_onsite: !!member.is_onsite
+        }))
+        .filter(item => item.from !== item.to);
+    if (!updates.length) {
+        showToast('当前项目成员角色已经比较规范', 'success');
+        return;
+    }
+    const preview = updates.slice(0, 8).map(item => `${item.name}: ${item.from || '未设置'} -> ${item.to}`).join('\n');
+    if (!confirm(`将批量规范 ${updates.length} 位成员的角色：\n\n${preview}\n\n确定继续吗？`)) {
+        return;
+    }
+    for (const item of updates) {
+        await api.put(`/members/${item.id}`, { role: item.to, is_onsite: item.is_onsite });
+    }
+    await syncCurrentProjectDetailState(['members']);
+    showToast(`已规范 ${updates.length} 位成员角色`, 'success');
+}
+
+async function bulkSetUnknownMembersRole(targetType) {
+    const members = Array.isArray(currentProject?.members) ? currentProject.members : [];
+    const unknownMembers = members.filter(member => {
+        const role = String(member?.role || '');
+        const isRAndD = ['研发', '开发', '后端', '前端', '测试', '产品', '架构', '算法', '平台', '接口研发'].some(keyword => role.includes(keyword));
+        const isImplementation = ['现场', '驻场', '实施', '交付', '项目经理', '工程'].some(keyword => role.includes(keyword)) && !isRAndD;
+        return !(isRAndD || isImplementation || member?.is_onsite);
+    });
+    if (!unknownMembers.length) {
+        showToast('当前项目没有待确认身份的成员', 'success');
+        return;
+    }
+    const nextRole = targetType === 'implementation' ? '驻场实施工程师' : '后端研发工程师';
+    const nextOnsite = targetType === 'implementation';
+    const label = targetType === 'implementation' ? '实施侧评分人' : '研发侧被评分对象';
+    const preview = unknownMembers.slice(0, 8).map(member => `${member.name} -> ${nextRole}`).join('\n');
+    if (!confirm(`将 ${unknownMembers.length} 位待确认身份成员批量设为“${label}”：\n\n${preview}\n\n确定继续吗？`)) {
+        return;
+    }
+    for (const member of unknownMembers) {
+        await api.put(`/members/${member.id}`, { role: nextRole, is_onsite: nextOnsite });
+    }
+    await syncCurrentProjectDetailState(['members']);
+    showToast(`已将 ${unknownMembers.length} 位成员设为${label}`, 'success');
 }
 
 async function saveContact() {
@@ -361,12 +611,35 @@ async function saveInterface() {
 
 let isSavingIssue = false;
 
+function showIssueModal() {
+    document.getElementById('issueForm')?.reset();
+    const ownerSelect = document.getElementById('issueOwnerMemberId');
+    if (ownerSelect) {
+        const members = Array.isArray(currentProject?.members) ? currentProject.members : [];
+        ownerSelect.innerHTML = `<option value="">未指定</option>${members.map(member => `
+            <option value="${member.id}">${member.name}${member.role ? ` (${member.role})` : ''}</option>
+        `).join('')}`;
+        ownerSelect.value = '';
+    }
+    const blocker = document.getElementById('issueExternalBlocker');
+    if (blocker) blocker.checked = false;
+    const pushWecom = document.getElementById('issuePushWecom');
+    if (pushWecom) pushWecom.checked = true;
+    const rootCause = document.getElementById('issueRootCauseType');
+    if (rootCause) rootCause.value = '';
+    showModal('issueModal', { reset: false });
+}
+
 async function saveIssue() {
     if (isSavingIssue) return;
     const data = {
         issue_type: document.getElementById('issueType').value,
         severity: document.getElementById('issueSeverity').value,
-        description: document.getElementById('issueDesc').value
+        description: document.getElementById('issueDesc').value,
+        owner_member_id: document.getElementById('issueOwnerMemberId')?.value ? Number(document.getElementById('issueOwnerMemberId').value) : null,
+        is_external_blocker: !!document.getElementById('issueExternalBlocker')?.checked,
+        root_cause_type: document.getElementById('issueRootCauseType')?.value || null,
+        push_to_wecom: !!document.getElementById('issuePushWecom')?.checked
     };
     if (!data.description) {
         showToast('请填写问题描述', 'warning');
@@ -668,6 +941,51 @@ function downloadDocument(did) {
 async function updateIssueStatus(issueId, newStatus) {
     await api.put(`/issues/${issueId}`, { status: newStatus });
     await syncCurrentProjectDetailState(['issues']);
+}
+
+async function pushIssueToWecom(issueId) {
+    try {
+        const res = await api.post(`/issues/${issueId}/push-wecom`, {});
+        const info = [];
+        if (Array.isArray(res.sent_members) && res.sent_members.length) {
+            info.push(`已推送：${res.sent_members.join('、')}`);
+        } else if (res.sent_count) {
+            info.push(`已推送 ${res.sent_count} 人`);
+        }
+        if (Array.isArray(res.missing_members) && res.missing_members.length) {
+            info.push(`未绑定企微：${res.missing_members.join('、')}`);
+        }
+        showToast(info.length ? info.join('；') : (res.message || '已执行企业微信推送'), res.sent_count ? 'success' : 'warning');
+        await syncCurrentProjectDetailState(['issues']);
+    } catch (e) {
+        showToast(`企业微信推送失败: ${e.message}`, 'danger');
+    }
+}
+
+async function showIssuePushReceipts(issueId) {
+    try {
+        const receipts = await api.get(`/issues/${issueId}/push-receipts`, { silent: true });
+        const items = Array.isArray(receipts) ? receipts : [];
+        const html = items.length ? items.map(item => `
+            <div style="border:1px solid var(--gray-200);border-radius:12px;padding:12px 14px;margin-bottom:10px;background:white;">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+                    <div>
+                        <div style="font-size:14px;font-weight:700;color:var(--gray-800);">${item.success ? '推送成功' : '推送失败'}</div>
+                        <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${String(item.created_at || '').replace('T', ' ').slice(0, 19)} · 触发方式：${item.trigger_type || 'manual'}</div>
+                    </div>
+                    <span class="badge ${item.success ? 'badge-success' : 'badge-warning'}">${item.sent_count || 0} 人</span>
+                </div>
+                <div style="margin-top:10px;font-size:13px;color:var(--gray-700);line-height:1.8;">
+                    ${item.sent_members?.length ? `<div>已推送：${item.sent_members.join('、')}</div>` : ''}
+                    ${item.missing_members?.length ? `<div style="color:#c2410c;">未绑定企微：${item.missing_members.join('、')}</div>` : ''}
+                    <div style="margin-top:6px;color:var(--gray-500);">${item.result_message || ''}</div>
+                </div>
+            </div>
+        `).join('') : '<div class="empty-state"><p>暂无推送回执</p><div class="empty-state-hint">执行过企业微信推送后，这里会显示推送结果。</div></div>';
+        showGenericModal('企微推送回执', html);
+    } catch (e) {
+        showToast(`加载推送回执失败: ${e.message}`, 'danger');
+    }
 }
 
 async function updateInterfaceStatus(interfaceId, newStatus) {

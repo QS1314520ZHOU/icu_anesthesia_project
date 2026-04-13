@@ -81,15 +81,93 @@ function renderMembers(members) {
     if (!members || members.length === 0) {
         return '<div class="empty-state"><p>暂无成员</p><div class="empty-state-hint">请先补录项目成员，后续资源、工时和地图视图会联动展示。</div></div>';
     }
-    return members.map(m => `
+    const grouped = getMemberIdentitySummary(members);
+    const summary = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px;">
+            <div class="overview-card" style="background:#ecfdf5;border:1px solid #bbf7d0;box-shadow:none;">
+                <div class="overview-card-title" style="color:#15803d;">实施侧评分人</div>
+                <div class="overview-card-value" style="color:#166534;">${grouped.implementation.length}</div>
+            </div>
+            <div class="overview-card" style="background:#eff6ff;border:1px solid #bfdbfe;box-shadow:none;">
+                <div class="overview-card-title" style="color:#2563eb;">研发侧对象</div>
+                <div class="overview-card-value" style="color:#1d4ed8;">${grouped.rnd.length}</div>
+            </div>
+            <div class="overview-card" style="background:#fff7ed;border:1px solid #fed7aa;box-shadow:none;">
+                <div class="overview-card-title" style="color:#c2410c;">待确认身份</div>
+                <div class="overview-card-value" style="color:#9a3412;">${grouped.unknown.length}</div>
+            </div>
+        </div>
+        <div style="margin-bottom:14px;padding:12px 14px;border-radius:12px;background:${grouped.implementation.length && grouped.rnd.length && !grouped.unknown.length ? '#ecfdf5' : '#fff7ed'};border:1px solid ${grouped.implementation.length && grouped.rnd.length && !grouped.unknown.length ? '#bbf7d0' : '#fed7aa'};color:${grouped.implementation.length && grouped.rnd.length && !grouped.unknown.length ? '#166534' : '#9a3412'};font-size:13px;line-height:1.8;">
+            ${grouped.implementation.length && grouped.rnd.length && !grouped.unknown.length
+                ? '当前项目成员身份已经整理完成，可以开始进入“实施评研发”的项目绩效评价。'
+                : '当前项目成员身份还没完全整理好。建议先补齐实施侧评分人和研发侧对象，再进入研发绩效评价。'}
+        </div>
+    `;
+    const renderMemberCard = (m) => `
         <div class="member-item">
             <div>
                 <div class="member-name">${m.name}</div>
                 <div class="member-meta">${m.role || '-'} | ${m.current_city || '-'} ${m.is_onsite ? '| 驻场' : ''}</div>
+                <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">
+                    ${renderMemberPerformanceIdentity(m)}
+                </div>
             </div>
-            <button class="btn btn-danger btn-xs" onclick="deleteMember(${m.id})">删除</button>
+            <div class="btn-group">
+                <button class="btn btn-outline btn-xs" onclick="showEditMemberModal(${m.id})">编辑</button>
+                <button class="btn btn-danger btn-xs" onclick="deleteMember(${m.id})">删除</button>
+            </div>
         </div>
-    `).join('');
+    `;
+    const renderGroup = (title, items, hint, tone = '') => `
+        <div style="border:1px solid var(--gray-200);border-radius:14px;overflow:hidden;background:white;">
+            <div style="padding:12px 14px;background:var(--gray-50);border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                <div>
+                    <div style="font-size:14px;font-weight:700;color:var(--gray-800);">${title}</div>
+                    <div style="font-size:12px;color:var(--gray-500);margin-top:4px;">${hint}</div>
+                </div>
+                <span class="badge ${tone || 'badge-gray'}">${items.length}</span>
+            </div>
+            <div style="padding:12px;display:grid;gap:10px;">
+                ${items.length ? items.map(renderMemberCard).join('') : '<div class="empty-state-hint">暂无成员</div>'}
+            </div>
+        </div>
+    `;
+    return `
+        <div style="display:grid;gap:14px;">
+            ${summary}
+            ${renderGroup('实施侧评分人', grouped.implementation, '这些人负责对本项目的研发协作表现进行评价。', 'badge-success')}
+            ${renderGroup('研发侧被评分对象', grouped.rnd, '这些人会出现在研发绩效评价里作为被评分对象。', 'badge-info')}
+            ${renderGroup('待确认身份', grouped.unknown, '建议尽快确认这些成员属于实施侧还是研发侧，避免影响开评。')}
+        </div>
+    `;
+}
+
+function getMemberIdentitySummary(members) {
+    const implementation = [];
+    const rnd = [];
+    const unknown = [];
+    (members || []).forEach(member => {
+        const role = String(member?.role || '');
+        const isRAndD = ['研发', '开发', '后端', '前端', '测试', '产品', '架构', '算法', '平台', '接口研发'].some(keyword => role.includes(keyword));
+        const isImplementation = ['现场', '驻场', '实施', '交付', '项目经理', '工程'].some(keyword => role.includes(keyword)) && !isRAndD;
+        if (isRAndD) rnd.push(member);
+        else if (isImplementation || member?.is_onsite) implementation.push(member);
+        else unknown.push(member);
+    });
+    return { implementation, rnd, unknown };
+}
+
+function renderMemberPerformanceIdentity(member) {
+    const role = String(member?.role || '');
+    const isRAndD = ['研发', '开发', '后端', '前端', '测试', '产品', '架构', '算法', '平台', '接口研发'].some(keyword => role.includes(keyword));
+    const isImplementation = ['现场', '驻场', '实施', '交付', '项目经理', '工程'].some(keyword => role.includes(keyword)) && !isRAndD;
+    if (isRAndD) {
+        return '<span class="badge badge-info">研发侧：被评分对象</span>';
+    }
+    if (isImplementation || member?.is_onsite) {
+        return '<span class="badge badge-success">实施侧：现场评分人</span>';
+    }
+    return '<span class="badge badge-gray">未归类：请确认实施/研发身份</span>';
 }
 
 function renderContacts(contacts) {
@@ -146,12 +224,18 @@ function renderIssues(issues) {
     return `
         <div class="table-container">
             <table class="table">
-                <thead><tr><th>类型</th><th>描述</th><th>严重度</th><th>状态</th><th>操作</th></tr></thead>
+                <thead><tr><th>类型</th><th>描述</th><th>责任人</th><th>严重度</th><th>状态</th><th>操作</th></tr></thead>
                 <tbody>
                     ${issues.map(i => `
                         <tr>
-                            <td>${i.issue_type}</td>
-                            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${i.description}</td>
+                            <td>${i.issue_type}${i.issue_type === '需求' ? '<div style="font-size:11px;color:#2563eb;margin-top:4px;">研发需求</div>' : ''}</td>
+                            <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;">
+                                ${i.description}
+                                ${i.is_external_blocker ? '<div style="font-size:11px;color:#b45309;margin-top:4px;">外部阻塞</div>' : ''}
+                                ${i.first_response_at ? `<div style="font-size:11px;color:#059669;margin-top:4px;">已响应：${String(i.first_response_at).replace('T', ' ').slice(0, 16)}</div>` : '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">尚未响应</div>'}
+                                ${i.last_wecom_push_summary ? `<div style="font-size:11px;color:#2563eb;margin-top:4px;">企微：${i.last_wecom_push_summary}</div>` : ''}
+                            </td>
+                            <td>${i.owner_member_id ? (currentProject?.members || []).find(m => Number(m.id) === Number(i.owner_member_id))?.name || '-' : '-'}</td>
                             <td><span class="badge ${severityMap[i.severity]}">${i.severity}</span></td>
                             <td>
                                 <select class="badge ${statusMap[i.status]}" style="border:none;cursor:pointer;" onchange="updateIssueStatus(${i.id}, this.value)">
@@ -162,6 +246,8 @@ function renderIssues(issues) {
                             </td>
                             <td>
                                 <div style="display:flex;gap:4px;">
+                                    <button class="btn btn-outline btn-xs" onclick="pushIssueToWecom(${i.id})">企微推送</button>
+                                    <button class="btn btn-outline btn-xs" onclick="showIssuePushReceipts(${i.id})">推送回执</button>
                                     ${i.status === '已解决' ? `<button class="btn btn-ai btn-xs" onclick="extractToKb(${i.id}, this)" title="提取为知识库条目">🧠 提炼</button>` : ''}
                                     <button class="btn btn-danger btn-xs" onclick="deleteIssue(${i.id})">删除</button>
                                 </div>
@@ -695,7 +781,13 @@ function renderProjectDetail(project) {
                     <div class="panel">
                         <div class="panel-header">
                             <div class="panel-title">👥 项目团队</div>
-                            <button class="btn btn-primary btn-sm" onclick="showModal('memberModal')">+ 添加成员</button>
+                            <div class="btn-group">
+                                <button class="btn btn-outline btn-sm" onclick="normalizeProjectMemberRoles()">🧭 批量规范角色</button>
+                                <button class="btn btn-outline btn-sm" onclick="bulkSetUnknownMembersRole('implementation')">批量设为实施侧</button>
+                                <button class="btn btn-outline btn-sm" onclick="bulkSetUnknownMembersRole('rnd')">批量设为研发侧</button>
+                                <button class="btn btn-outline btn-sm" onclick="openCurrentProjectPerformanceReview()">🏅 进入研发绩效评价</button>
+                                <button class="btn btn-primary btn-sm" onclick="showMemberModal()">+ 添加成员</button>
+                            </div>
                         </div>
                         <div class="panel-body">${renderMembers(project.members)}</div>
                     </div>
@@ -766,7 +858,7 @@ function renderProjectDetail(project) {
                             <div class="panel-title">问题跟踪</div>
                             <div class="btn-group">
                                 <button class="btn btn-warning btn-sm" onclick="showAiChaserModal()">🔔 AI 智能催单</button>
-                                <button class="btn btn-primary btn-sm" onclick="showModal('issueModal')">+ 新增</button>
+                                <button class="btn btn-primary btn-sm" onclick="showIssueModal()">+ 新增</button>
                             </div>
                         </div>
                         <div class="panel-body">${renderIssues(project.issues)}</div>
