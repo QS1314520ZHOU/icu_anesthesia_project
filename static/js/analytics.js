@@ -398,7 +398,8 @@ function renderMyPerformanceReviewQueue(data) {
                         </div>
                         <span class="perf-chip" style="background:#fff7ed;color:#c2410c;">待评分</span>
                     </div>
-                    <div style="font-size:12px;color:#64748b;margin-top:10px;">已收 ${member.review_count || 0} 份评分 / 目标至少 2 份</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:10px;">项目：${escapePerformanceHtml(member.project_name || '')}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:6px;">已收 ${member.review_count || 0} 份评分 / 目标至少 2 份</div>
                 </button>
             `).join('')}
         </div>
