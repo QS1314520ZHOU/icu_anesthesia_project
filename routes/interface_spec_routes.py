@@ -11,6 +11,10 @@ from werkzeug.utils import secure_filename
 from services.interface_parser_service import interface_parser
 from services.interface_comparison_service import comparison_service
 from services.interface_chat_service import interface_chat_service
+from services.builtin_interface_standards import (
+    BUILTIN_STANDARD_DOCS,
+    load_builtin_standard_definitions,
+)
 from database import DatabasePool
 from api_utils import api_response
 
@@ -18,10 +22,6 @@ logger = logging.getLogger(__name__)
 
 spec_bp = Blueprint('interface_spec', __name__, url_prefix='/api')
 
-BUILTIN_STANDARD_DOCS = {
-    '手麻标准': '3_2.手术麻醉信息系统对外接口标准文档Ver1.4(1)(1).pdf',
-    '重症标准': '深医重症信息系统接口说明V2.6(1)(1).pdf',
-}
 BUILTIN_STANDARD_CACHE_VERSION = 'v1'
 
 
@@ -244,17 +244,48 @@ def parse_interface_doc(project_id):
 
     save_project_id = None if spec_source == 'our_standard' and data.get('as_global') else project_id
 
-    parsed = interface_parser.parse_document_with_ai(doc_text, spec_source, vendor_name)
+    cached_specs = []
+    if save_project_id and spec_source == 'vendor' and not data.get('force_reparse'):
+        cached_specs = interface_parser.get_cached_parse(
+            save_project_id, doc_text, spec_source, vendor_name, category
+        )
+        if cached_specs:
+            return api_response(True, {
+                'parsed_count': len(cached_specs),
+                'spec_ids': [row['id'] for row in cached_specs],
+                'cache_hit': True,
+                'fast_path': 'fingerprint_cache',
+                'interfaces': [{
+                    'name': row.get('interface_name', ''),
+                    'transcode': row.get('transcode', ''),
+                    'system_type': row.get('system_type', ''),
+                    'fields_count': None
+                } for row in cached_specs]
+            })
+
+    try:
+        parsed = interface_parser.parse_document_with_ai(doc_text, spec_source, vendor_name)
+    except Exception as e:
+        logger.error("接口文档 AI 解析失败: %s", e, exc_info=True)
+        return api_response(False, message=f'AI 解析失败: {str(e)}', code=502)
     if not parsed:
         return api_response(False, message='AI 解析未能提取到接口定义，请检查文档内容或格式')
 
     created_ids = interface_parser.save_parsed_specs(
-        save_project_id, doc_id, parsed, spec_source, vendor_name, category, raw_text=doc_text
+        save_project_id,
+        doc_id,
+        parsed,
+        spec_source,
+        vendor_name,
+        category,
+        raw_text=interface_parser.document_fingerprint(doc_text, spec_source, vendor_name, category) if save_project_id and spec_source == 'vendor' else doc_text
     )
 
     return api_response(True, {
         'parsed_count': len(parsed),
         'spec_ids': created_ids,
+        'cache_hit': False,
+        'fast_path': 'local_or_ai',
         'interfaces': [{
             'name': p.get('interface_name', ''),
             'transcode': p.get('transcode', ''),
@@ -272,7 +303,11 @@ def parse_our_standard():
     if not doc_text:
         return api_response(False, message='文档内容不能为空')
 
-    parsed = interface_parser.parse_document_with_ai(doc_text, 'our_standard')
+    try:
+        parsed = interface_parser.parse_document_with_ai(doc_text, 'our_standard')
+    except Exception as e:
+        logger.error("标准文档 AI 解析失败: %s", e, exc_info=True)
+        return api_response(False, message=f'AI 解析失败: {str(e)}', code=502)
     if not parsed:
         return api_response(False, message='解析失败')
 
@@ -307,6 +342,45 @@ def load_builtin_standard():
         return api_response(False, message=f'未找到内置标准文档: {filename}', code=404)
 
     try:
+        parsed = load_builtin_standard_definitions(category, current_app.root_path)
+        if parsed:
+            if overwrite:
+                with DatabasePool.get_connection() as conn:
+                    old_rows = conn.execute(
+                        DatabasePool.format_sql('''
+                            SELECT id FROM interface_specs
+                            WHERE project_id IS NULL
+                              AND spec_source IN ('our_standard', 'our', 'standard')
+                              AND category = ?
+                        '''),
+                        (category,)
+                    ).fetchall()
+                    for row in old_rows:
+                        conn.execute(DatabasePool.format_sql('DELETE FROM interface_spec_fields WHERE spec_id = ?'), (row['id'],))
+                    conn.execute(
+                        DatabasePool.format_sql('''
+                            DELETE FROM interface_specs
+                            WHERE project_id IS NULL
+                              AND spec_source IN ('our_standard', 'our', 'standard')
+                              AND category = ?
+                        '''),
+                        (category,)
+                    )
+                    conn.commit()
+
+            created_ids = interface_parser.save_parsed_specs(
+                None, None, parsed, 'our_standard', category=category, raw_text=f'内置标准文档: {filename}'
+            )
+            return api_response(True, {
+                'category': category,
+                'filename': filename,
+                'parsed_count': len(parsed),
+                'spec_ids': created_ids,
+                'cache_hit': False,
+                'db_reused': False,
+                'source': 'builtin_code',
+            })
+
         cache_payload = _load_builtin_standard_cache(category, file_path)
 
         with DatabasePool.get_connection() as conn:
@@ -421,7 +495,8 @@ def run_comparison(project_id):
     """一键执行接口对照（我方标准 vs 该项目的对方文档）"""
     data = request.json or {}
     category = data.get('category')
-    result = comparison_service.run_full_comparison(project_id, category)
+    use_ai_match = bool(data.get('use_ai_match', False))
+    result = comparison_service.run_full_comparison(project_id, category, use_ai_match=use_ai_match)
     return api_response(True, result)
 
 

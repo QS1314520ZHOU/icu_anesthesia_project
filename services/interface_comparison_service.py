@@ -15,7 +15,7 @@ class InterfaceComparisonService:
 
     # ========== 第一阶段：接口匹配 ==========
 
-    def auto_match_interfaces(self, project_id: int, category: str = None) -> list:
+    def auto_match_interfaces(self, project_id: int, category: str = None, use_ai: bool = True) -> list:
         """
         自动匹配我方接口 and 对方接口的对应关系。
         三轮策略：transcode精确匹配 → system_type+名称模糊匹配 → AI语义推理
@@ -111,7 +111,7 @@ class InterfaceComparisonService:
         # --- 第3轮：AI 语义匹配（剩余未匹配的）---
         still_unmatched_ours = [s for s in our_specs if s['id'] not in {m['our_spec_id'] for m in matches}]
         still_unmatched_vendors = [s for s in vendor_specs if s['id'] not in used_vendor_ids]
-        if still_unmatched_ours and still_unmatched_vendors:
+        if use_ai and still_unmatched_ours and still_unmatched_vendors:
             ai_matches = self._ai_semantic_match(still_unmatched_ours, still_unmatched_vendors)
             for am in ai_matches:
                 if am['vendor_spec_id'] not in used_vendor_ids:
@@ -339,9 +339,9 @@ class InterfaceComparisonService:
 
     # ========== 第三阶段：执行完整对照 + 存储 ==========
 
-    def run_full_comparison(self, project_id: int, category: str = None) -> dict:
+    def run_full_comparison(self, project_id: int, category: str = None, use_ai_match: bool = True) -> dict:
         """一键执行完整对照流程并持久化"""
-        matches = self.auto_match_interfaces(project_id, category)
+        matches = self.auto_match_interfaces(project_id, category, use_ai=use_ai_match)
         if not matches:
             return {'comparison_count': 0, 'results': [], 'message': '未找到可对照的接口对'}
 
@@ -445,7 +445,8 @@ class InterfaceComparisonService:
         return {
             'comparison_count': len(results),
             'results': results,
-            'summary': summary_stats
+            'summary': summary_stats,
+            'ai_match_used': bool(use_ai_match),
         }
 
     def _sync_to_interfaces_table(self, project_id, results):

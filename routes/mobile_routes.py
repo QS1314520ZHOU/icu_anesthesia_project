@@ -4,6 +4,7 @@ from flask import Blueprint, render_template, request
 from api_utils import api_response
 from database import DatabasePool
 from services.ai_service import ai_service
+from services.quick_report_service import quick_report_service
 from rag_service import rag_service
 from datetime import date, timedelta
 import json
@@ -307,60 +308,23 @@ def quick_log():
     """快速记录工作日志 —— 支持自然语言输入，AI 自动解析"""
     data = request.json or {}
     raw_text = data.get('content', '')
-    project_id = data.get('project_id')
     
     if not raw_text:
         return api_response(False, message='请输入日志内容')
-    
-    # AI 解析自然语言为结构化日志
-    parse_prompt = f"""请将以下工程师的现场日志文本解析为JSON。
-注意区分：今日工作内容、遇到的问题/阻塞项、需要协调的事项和人员、明日计划。
-如果提到了具体的人名和事项，请在 action_items 中列出。
 
-输入："{raw_text}"
-
-仅输出JSON：
-{{"work_content":"今日工作","issues":"遇到的问题","coordination":"需协调事项（含人名）","tomorrow_plan":"明日计划","action_items":["具体待办1","具体待办2"],"hours":8}}"""
-    
-    parsed_result = ai_service.call_ai_api(
-        "你是JSON解析器，只输出合法JSON，不要其他任何文字。", 
-        parse_prompt, task_type="summary"
-    )
-    
-    # 解析 JSON
-    import json
     try:
-        if '```' in parsed_result:
-            parsed_result = parsed_result.split('```')[1]
-            if parsed_result.startswith('json'):
-                parsed_result = parsed_result[4:]
-        parsed = json.loads(parsed_result.strip())
-    except:
-        parsed = {"work_content": raw_text, "issues": "", "tomorrow_plan": "", "hours": 8, "action_items": []}
-    
-    # 写入数据库
-    from datetime import datetime
-    with DatabasePool.get_connection() as conn:
-        sql = DatabasePool.format_sql('''
-            INSERT INTO work_logs (project_id, member_name, log_date, work_content, 
-                                  issues_encountered, tomorrow_plan, work_type, work_hours)
-            VALUES (?, ?, ?, ?, ?, ?, '现场', ?)
-        ''')
-        conn.execute(sql, (
-            project_id,
-            data.get('engineer_name', ''),
-            datetime.now().strftime('%Y-%m-%d'),
-            parsed.get('work_content', raw_text),
-            parsed.get('issues', ''),
-            parsed.get('tomorrow_plan', ''),
-            parsed.get('hours', 8)
-        ))
-        conn.commit()
-    
-    return api_response(True, data={
-        'parsed': parsed,
-        'message': '日志已保存'
-    })
+        result = quick_report_service.submit(
+            content=raw_text,
+            project_id=data.get('project_id'),
+            engineer_name=data.get('engineer_name', ''),
+            wecom_userid=data.get('wecom_userid', ''),
+            source='mobile',
+        )
+        return api_response(True, data=result, message=result.get('message', '日志已保存'))
+    except ValueError as exc:
+        return api_response(False, message=str(exc), code=400)
+    except Exception as exc:
+        return api_response(False, message=f'日志保存失败：{exc}', code=500)
 @mobile_bp.route('/api/meeting/quick', methods=['POST'])
 def quick_meeting_note():
     """甲方沟通速记 —— AI 自动结构化"""

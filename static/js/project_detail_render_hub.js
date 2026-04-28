@@ -882,6 +882,7 @@ function renderProjectDetail(project) {
                             <div class="panel-title">📝 工作日志</div>
                             <div class="btn-group">
                                 <button class="btn btn-outline btn-sm" onclick="loadWorklogStats()">📊 统计</button>
+                                <button class="btn btn-ai btn-sm" onclick="showQuickReportModal()">一句话上报</button>
                                 <button class="btn btn-primary btn-sm" onclick="showWorklogModal()">+ 填写日志</button>
                                 <button class="btn btn-ai btn-sm" onclick="showAiWorklogModal()">✨ AI 智能填报</button>
                                 <button class="btn btn-outline btn-sm" style="border-color:var(--primary); color:var(--primary);" onclick="showMultiLogImportModal()">📝 批量导入</button>

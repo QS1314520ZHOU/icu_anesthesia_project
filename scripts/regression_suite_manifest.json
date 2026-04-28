@@ -6,6 +6,8 @@
     "scripts/project_detail_smoke.py",
     "scripts/alignment_center_smoke.py",
     "scripts/interface_spec_smoke.py",
+    "scripts/interface_parser_fast_smoke.py",
+    "scripts/quick_report_smoke.py",
     "scripts/core_workbench_smoke.py",
     "scripts/insight_reporting_smoke.py",
     "scripts/advanced_governance_smoke.py",
@@ -14,6 +16,8 @@
     "scripts/auxiliary_surfaces_smoke.py",
     "scripts/platform_admin_share_smoke.py",
     "scripts/collaboration_center_smoke.py",
+    "scripts/module_completion_radar.py",
+    "scripts/release_readiness_check.py",
     "scripts/regression_suite.py"
   ],
   "frontend_syntax_targets": [
@@ -62,6 +66,16 @@
       "command": ["python", "scripts/interface_spec_smoke.py"]
     },
     {
+      "name": "interface_parser_fast",
+      "description": "Fast deterministic interface parser smoke for XML/table-like docs",
+      "command": ["python", "scripts/interface_parser_fast_smoke.py"]
+    },
+    {
+      "name": "quick_report",
+      "description": "One-sentence report flow across desktop, mobile and WeCom",
+      "command": ["python", "scripts/quick_report_smoke.py"]
+    },
+    {
       "name": "core_workbench",
       "description": "Dashboard, task center and main desktop workbench entry points",
       "command": ["python", "scripts/core_workbench_smoke.py"]
@@ -100,6 +114,16 @@
       "name": "collaboration_center",
       "description": "Communications, meeting assistant and collaboration AI surface",
       "command": ["python", "scripts/collaboration_center_smoke.py"]
+    },
+    {
+      "name": "module_completion",
+      "description": "Module completion radar across entry, route, template and regression coverage",
+      "command": ["python", "scripts/module_completion_radar.py"]
+    },
+    {
+      "name": "release_readiness",
+      "description": "Release guardrails for PostgreSQL runtime and high-level readiness artifacts",
+      "command": ["python", "scripts/release_readiness_check.py"]
     }
   ]
 }

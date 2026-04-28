@@ -72,6 +72,44 @@ def build_markdown_report(payload):
         status = "OK" if result["ok"] else "FAIL"
         lines.append(f"| `{result['name']}` | {status} | {result['duration_sec']} |")
 
+    completion = next((item for item in payload["results"] if item["name"] == "module_completion" and item["ok"]), None)
+    if completion and completion["stdout"].strip():
+        try:
+            completion_payload = json.loads(completion["stdout"])
+            modules = completion_payload.get("modules", [])
+        except Exception:
+            modules = []
+        if modules:
+            lines.extend([
+                "",
+                "## Module Completion",
+                "",
+                "| Module | Score | Status |",
+                "| --- | ---: | --- |",
+            ])
+            for module in modules:
+                lines.append(f"| {module.get('label') or module.get('name')} | {module.get('score')} | {module.get('status')} |")
+
+    readiness = next((item for item in payload["results"] if item["name"] == "release_readiness" and item["ok"]), None)
+    if readiness and readiness["stdout"].strip():
+        try:
+            readiness_payload = json.loads(readiness["stdout"])
+            checks = readiness_payload.get("checks", [])
+        except Exception:
+            checks = []
+        if checks:
+            lines.extend([
+                "",
+                "## Release Readiness",
+                "",
+                "| Check | Status | Message |",
+                "| --- | --- | --- |",
+            ])
+            for check in checks:
+                status = "OK" if check.get("ok") else "FAIL"
+                message = str(check.get("message") or "").replace("|", "\\|")
+                lines.append(f"| `{check.get('name')}` | {status} | {message} |")
+
     failing = [item for item in payload["results"] if not item["ok"]]
     if failing:
         lines.append("")

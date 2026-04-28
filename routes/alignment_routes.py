@@ -6,7 +6,12 @@
 import os
 from flask import Blueprint, request, current_app
 from werkzeug.utils import secure_filename
+from services.ai_service import AIService
 from services.alignment_service import alignment_service
+from services.interface_chat_service import interface_chat_service
+from services.interface_parser_service import interface_parser
+from services.builtin_interface_standards import load_builtin_standard_definitions
+from database import DatabasePool
 from utils.response_utils import api_response
 
 alignment_bp = Blueprint('alignment', __name__, url_prefix='/api/alignment')
@@ -235,3 +240,98 @@ def ai_assistant():
 
     result = alignment_service.ai_generate_request(session_id, question)
     return api_response(True, result)
+
+
+@alignment_bp.route('/project-ai-assistant', methods=['POST'])
+def project_ai_assistant():
+    """AI 对接助手 - 基于项目接口库/对照结果直接问答。"""
+    data = request.json or {}
+    project_id = data.get('project_id') or 0
+    question = (data.get('question') or data.get('message') or '').strip()
+    category = data.get('category') or '手麻标准'
+
+    if not question:
+        return api_response(False, error='缺少 question')
+
+    try:
+        _ensure_builtin_standard_loaded(category)
+        result = interface_chat_service.chat(
+            int(project_id), question, category,
+            standard_only=bool(data.get('standard_only'))
+        )
+        return api_response(True, result)
+    except Exception as e:
+        current_app.logger.error("对齐中心项目 AI 助手异常: %s", e, exc_info=True)
+        return api_response(False, error=f'AI 助手响应失败: {str(e)}')
+
+
+@alignment_bp.route('/document-chat', methods=['POST'])
+def document_chat():
+    """上传/粘贴接口文档后的临时问答，不做结构化解析和智能比对。"""
+    data = request.json or {}
+    doc_text = (data.get('doc_text') or '').strip()
+    question = (data.get('question') or data.get('message') or '').strip()
+    vendor_name = (data.get('vendor_name') or '').strip()
+
+    if not doc_text:
+        return api_response(False, error='请先上传文档或粘贴文档文本')
+    if not question:
+        return api_response(False, error='缺少 question')
+
+    clipped_text = doc_text[:60000]
+    system_prompt = (
+        "你是医院信息系统接口文档问答助手。只根据用户提供的接口文档回答，"
+        "不要编造文档里没有的字段、接口名或报文格式。"
+        "如果文档信息不足，要明确说缺少哪部分。"
+        "回答优先给出接口名称、请求方式/地址、入参字段、出参字段、示例报文和注意事项。"
+    )
+    user_content = f"""对方系统/厂商：{vendor_name or '未填写'}
+
+接口文档内容：
+{clipped_text}
+
+用户问题：
+{question}
+"""
+
+    try:
+        answer = AIService.call_ai_api_single_endpoint(
+            system_prompt,
+            user_content,
+            task_type="chat",
+            max_tokens=4096,
+        )
+        return api_response(True, {
+            'answer': answer,
+            'source': 'uploaded_document',
+            'single_endpoint': True,
+            'doc_chars_used': len(clipped_text),
+            'doc_chars_total': len(doc_text),
+        })
+    except Exception as e:
+        current_app.logger.error("接口文档问答失败: %s", e, exc_info=True)
+        return api_response(False, error=str(e), code=502)
+
+
+def _ensure_builtin_standard_loaded(category: str):
+    """Ensure built-in standard specs exist before standard-library chat."""
+    if category not in ('手麻标准', '重症标准'):
+        return
+    with DatabasePool.get_connection() as conn:
+        row = conn.execute(DatabasePool.format_sql('''
+            SELECT COUNT(*) AS c
+            FROM interface_specs
+            WHERE project_id IS NULL
+              AND spec_source IN ('our_standard', 'our', 'standard')
+              AND category = ?
+        '''), (category,)).fetchone()
+        if row and row['c']:
+            return
+
+    parsed = load_builtin_standard_definitions(category, current_app.root_path)
+    if parsed:
+        interface_parser.save_parsed_specs(
+            None, None, parsed, 'our_standard',
+            category=category,
+            raw_text=f'自动加载内置标准: {category}'
+        )

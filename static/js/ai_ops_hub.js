@@ -40,6 +40,79 @@ function showAiWorklogModal() {
     showModal('aiWorklogModal');
 }
 
+function showQuickReportModal() {
+    const input = document.getElementById('quickReportInput');
+    const result = document.getElementById('quickReportResult');
+    const btn = document.getElementById('btnQuickReport');
+    if (input) input.value = '';
+    if (result) {
+        result.style.display = 'none';
+        result.innerText = '';
+        result.style.background = '#ecfdf5';
+        result.style.borderColor = '#bbf7d0';
+        result.style.color = '#065f46';
+    }
+    if (btn) {
+        btn.disabled = false;
+        btn.innerText = '帮我归档';
+    }
+    showModal('quickReportModal');
+    setTimeout(() => input && input.focus(), 80);
+}
+
+async function submitQuickReport() {
+    const input = document.getElementById('quickReportInput');
+    const result = document.getElementById('quickReportResult');
+    const btn = document.getElementById('btnQuickReport');
+    const content = (input?.value || '').trim();
+    if (!content) {
+        showToast('先写一句话，哪怕是“今天无进展”也行', 'warning');
+        return;
+    }
+    if (!currentProjectId) {
+        showToast('请先打开一个项目', 'warning');
+        return;
+    }
+
+    const originalText = btn.innerText;
+    btn.disabled = true;
+    btn.innerText = '正在归档...';
+    try {
+        const res = await api.post('/quick-report', {
+            project_id: currentProjectId,
+            content,
+            engineer_name: window.currentUser?.display_name || window.currentUser?.username || '',
+            source: 'web'
+        });
+        recordAiOpsHistory({
+            type: 'quick_report',
+            title: '一句话上报',
+            detail: res.daily_summary || content
+        });
+        if (result) {
+            result.style.display = 'block';
+            result.innerText = res.daily_summary || res.message || '已保存';
+        }
+        input.value = '';
+        showToast('已归档：日志、问题和计划都处理好了', 'success');
+        if (typeof loadWorklogs === 'function') {
+            await loadWorklogs(currentProjectId);
+        }
+        setTimeout(() => closeModal('quickReportModal'), 1800);
+    } catch (e) {
+        if (result) {
+            result.style.display = 'block';
+            result.style.background = '#fef2f2';
+            result.style.borderColor = '#fecaca';
+            result.style.color = '#991b1b';
+            result.innerText = '归档失败：' + e.message;
+        }
+    } finally {
+        btn.disabled = false;
+        btn.innerText = originalText;
+    }
+}
+
 async function saveWorklogAI() {
     const rawText = document.getElementById('aiWorklogInput').value;
     if (!rawText) {

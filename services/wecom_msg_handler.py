@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from database import DatabasePool
 from services.wecom_service import wecom_service
+from services.quick_report_service import quick_report_service
 from app_config import WECOM_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -113,37 +114,22 @@ class WeComMsgHandler:
     def _handle_quick_log(self, userid: str, content: str) -> str:
         """快速填写工作日志"""
         try:
-            project_id = self._get_user_primary_project(userid)
-            if not project_id:
-                return "❌ 未关联项目，无法记录日志。"
-            
-            member_name = self._get_user_display_name(userid)
-            
-            # 用 AI 解析日志内容
-            parsed = self._ai_parse_log(content)
-            
-            with DatabasePool.get_connection() as conn:
-                conn.execute(DatabasePool.format_sql('''
-                    INSERT INTO work_logs (project_id, member_name, log_date, work_content, 
-                                          issues_encountered, tomorrow_plan, work_type, work_hours)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                '''), (
-                    project_id,
-                    member_name,
-                    datetime.now().strftime('%Y-%m-%d'),
-                    parsed.get('work_content', content),
-                    parsed.get('issues', ''),
-                    parsed.get('tomorrow_plan', ''),
-                    '现场',
-                    parsed.get('hours', 8)
-                ))
-            
+            result = quick_report_service.submit(
+                content=content,
+                wecom_userid=userid,
+                source='wecom',
+            )
+            parsed = result.get('parsed', {})
+            issue_line = f"\n🧯 已生成问题：#{result['created_issue_id']}" if result.get('created_issue_id') else ""
             return (
-                f"✅ **日志已记录**\n\n"
+                f"✅ **已帮你上报好了**\n\n"
                 f"📅 日期：{datetime.now().strftime('%Y-%m-%d')}\n"
+                f"📌 项目：{result.get('project_name') or result.get('project_id')}\n"
                 f"📝 内容：{parsed.get('work_content', content)[:80]}\n"
                 f"⚠️ 问题：{parsed.get('issues', '无') or '无'}\n"
                 f"📋 明日计划：{parsed.get('tomorrow_plan', '待补充') or '待补充'}"
+                f"{issue_line}\n\n"
+                f"🔗 [查看移动端]({WECOM_CONFIG['APP_HOME_URL']}/m/)"
             )
         except Exception as e:
             logger.error("Quick log failed: %s", e)
@@ -286,22 +272,26 @@ class WeComMsgHandler:
     def _handle_smart_route(self, userid: str, content: str) -> str:
         """智能路由：无命令前缀时，AI 判断意图"""
         # 简单规则兜底（避免每条消息都调 AI）
-        if any(kw in content for kw in ['进度', '状态', '多少', '几个', '哪些', '查一下']):
+        if any(kw in content for kw in ['查', '查询', '进度', '状态', '多少', '几个', '哪些', '有没有', '谁负责']):
             return self._handle_query(userid, content)
-        elif any(kw in content for kw in ['今天做了', '完成了', '处理了', '对接了', '调试了']):
+        elif any(kw in content for kw in [
+            '今天做了', '今天', '完成了', '处理了', '对接了', '调试了', '部署了', '培训了',
+            '联调', '测试了', '无进展', '暂无进展', '没进展', '明天', '下午', '上午'
+        ]):
             return self._handle_quick_log(userid, content)
         elif any(kw in content for kw in ['报错', '故障', '不行', '崩了', '挂了', '有问题']):
             return self._handle_quick_issue(userid, content)
         else:
-            # 默认当做查询处理
-            return self._handle_query(userid, content)
+            # 现场人员无前缀发来的短句，默认先当成上报，降低使用门槛。
+            return self._handle_quick_log(userid, content)
     
     def _get_help_text(self) -> str:
         """帮助信息"""
         return (
             "🤖 **ICU-PM 助手**\n\n"
             "📝 **记录日志**\n"
-            "发送：`日志 今天完成了监护仪对接调试，明天处理接口问题`\n\n"
+            "直接发送：`今天完成了监护仪对接调试，明天处理接口问题`\n"
+            "也可发送：`无进展`，系统会自动归档状态。\n\n"
             "🔍 **查询数据**\n"
             "发送：`查询 当前有几个未解决的问题`\n"
             "或直接提问：`xx医院进度多少了`\n\n"

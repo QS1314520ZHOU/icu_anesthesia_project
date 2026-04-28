@@ -1,8 +1,27 @@
 from flask import Blueprint, request
 from services.log_service import log_service
+from services.quick_report_service import quick_report_service
 from utils.response_utils import api_response
 
 log_bp = Blueprint('log', __name__, url_prefix='/api')
+
+
+@log_bp.route('/quick-report', methods=['POST'])
+def quick_report():
+    data = request.json or {}
+    try:
+        result = quick_report_service.submit(
+            content=data.get('content', ''),
+            project_id=data.get('project_id'),
+            engineer_name=data.get('engineer_name', ''),
+            wecom_userid=data.get('wecom_userid', ''),
+            source=data.get('source', 'web'),
+        )
+        return api_response(True, result, result.get('message', '已保存'))
+    except ValueError as exc:
+        return api_response(False, message=str(exc), code=400)
+    except Exception as exc:
+        return api_response(False, message=f'一句话上报失败：{exc}', code=500)
 
 # --- Work Logs ---
 @log_bp.route('/projects/<int:project_id>/worklogs', methods=['GET'])

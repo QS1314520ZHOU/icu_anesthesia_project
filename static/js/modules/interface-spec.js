@@ -12,7 +12,7 @@ const InterfaceSpec = {
     _chatHistory: [],
     _builtinStandardDocs: {
         '手麻标准': '3_2.手术麻醉信息系统对外接口标准文档Ver1.4(1)(1).pdf',
-        '重症标准': '深医重症信息系统接口说明V2.6(1)(1).pdf'
+        '重症标准': '深医重症信息系统接口说明V2.6.docx'
     },
 
     // ==================== 入口 ====================
@@ -541,7 +541,7 @@ const InterfaceSpec = {
                 ? '/interface-specs/parse-standard'
                 : `/projects/${this._currentProjectId}/interface-specs/parse`;
             const res = await api.post(url, { doc_text: docText, spec_source: source, vendor_name: vendorName, category: category });
-            showToast(`✅ AI 解析完成，提取了 ${res.parsed_count || 0} 个接口定义`);
+            showToast(`✅ ${res.cache_hit ? '缓存命中' : '解析完成'}，提取了 ${res.parsed_count || 0} 个接口定义`);
             closeModal('specUploadModal');
             await this.loadAll(true);
         } catch (e) {
@@ -564,9 +564,9 @@ const InterfaceSpec = {
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0 4px 0 0;display:inline-block;vertical-align:middle;"></span> 对照中...'; }
         try {
             const cat = document.getElementById('compareCategory')?.value || this._currentCategory;
-            const res = await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, { category: cat });
+            const res = await api.post(`/projects/${this._currentProjectId}/interface-comparison/run`, { category: cat, use_ai_match: false });
             const s = res.summary || {};
-            showToast(`✅ 对照完成：${res.comparison_count || 0} 对接口，差异 ${s.gap || 0}，需转换 ${s.transform || 0}`);
+            showToast(`✅ 快速对照完成：${res.comparison_count || 0} 对接口，差异 ${s.gap || 0}，需转换 ${s.transform || 0}`);
             await this.loadAll(true);
         } catch (e) {
             showToast(`❌ 对照失败: ${e.message || '请稍后重试'}`);

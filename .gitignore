@@ -26,3 +26,4 @@ scripts/latest_regression_report*.md
 regression_report*.md
 *regression_report*.md
 scripts/*regression_report*.md
+scripts/latest_completion_report.md

@@ -49,7 +49,7 @@ class AlignmentService:
                        COUNT(*) as interface_count,
                        MAX(parsed_at) as last_updated
                 FROM interface_specs
-                WHERE COALESCE(spec_source, 'our') IN ('our', 'standard')
+                WHERE COALESCE(spec_source, 'our') IN ('our', 'standard', 'our_standard')
                 GROUP BY COALESCE(NULLIF(category, ''), '默认标准'),
                          COALESCE(NULLIF(category, ''), 'common')
                 ORDER BY spec_version DESC
@@ -88,7 +88,7 @@ class AlignmentService:
             interfaces = conn.execute(DatabasePool.format_sql('''
                 SELECT * FROM interface_specs
                 WHERE COALESCE(NULLIF(category, ''), '默认标准') = ?
-                  AND COALESCE(spec_source, 'our') IN ('our', 'standard')
+                  AND COALESCE(spec_source, 'our') IN ('our', 'standard', 'our_standard')
                 ORDER BY interface_name, id
             '''), (spec_version,)).fetchall()
 

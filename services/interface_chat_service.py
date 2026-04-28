@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class InterfaceChatService:
 
-    def chat(self, project_id: int, message: str, category: str = '手麻标准') -> dict:
+    def chat(self, project_id: int, message: str, category: str = '手麻标准', standard_only: bool = False) -> dict:
         """
         接口 AI 助手主入口。
         根据用户消息 + 项目接口上下文，返回 AI 回复。
@@ -26,6 +26,15 @@ class InterfaceChatService:
 
         # 2. 检测意图：是否是"生成请求"类指令
         intent = self._detect_intent(message)
+
+        standard_answer = self._answer_from_standard_specs(message, category, intent)
+        if standard_answer:
+            return standard_answer
+        if standard_only:
+            return {
+                'answer': f'标准库里没有直接命中“{message}”。请换一个接口关键词，例如“病人信息”“住院病人”“医嘱读取”“检验结果”。',
+                'intent': 'standard_not_found'
+            }
 
         # 3. 根据意图构造不同的 prompt
         if intent == 'generate_request':
@@ -265,6 +274,134 @@ class InterfaceChatService:
                             )
 
         return '\n'.join(lines)
+
+    def _answer_from_standard_specs(self, message: str, category: str, intent: str) -> dict:
+        """Answer common standard-interface questions without calling AI."""
+        specs = self._find_standard_specs(message, category)
+        if not specs:
+            return {}
+
+        spec = specs[0]
+        fields = spec.get('fields') or []
+
+        wants_request = intent == 'generate_request' or any(k in message for k in ['请求', '报文', '入参', 'xml', 'XML', '调用'])
+        wants_fields = intent == 'field_query' or any(k in message for k in ['字段', '必填', '有哪些'])
+
+        if wants_request:
+            xml = self._build_standard_xml_request(spec, fields)
+            answer = (
+                f"下面是「{spec.get('interface_name','')}」的标准请求消息示例。\n\n"
+                f"接口编码: `{spec.get('transcode','')}`\n\n"
+                f"```xml\n{xml}\n```"
+            )
+            return {'answer': answer, 'code_blocks': [{'language': 'xml', 'code': xml}], 'intent': 'standard_request'}
+
+        if wants_fields:
+            lines = [
+                f"「{spec.get('interface_name','')}」字段如下：",
+                "",
+                "| 字段名 | 中文含义 | 类型 | 必填 | 说明 |",
+                "|---|---|---|---|---|",
+            ]
+            for f in fields[:80]:
+                lines.append(
+                    f"| {f.get('field_name','')} | {f.get('field_name_cn','') or f.get('description','')} | "
+                    f"{f.get('field_type','')} | {'是' if f.get('is_required') else '否'} | {f.get('remark','') or f.get('description','')} |"
+                )
+            return {'answer': '\n'.join(lines), 'intent': 'standard_fields'}
+
+        return {}
+
+    def _find_standard_specs(self, message: str, category: str) -> list:
+        keywords = self._message_keywords(message)
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(DatabasePool.format_sql('''
+                SELECT id, interface_name, transcode, system_type, protocol,
+                       view_name, action_name, endpoint_url, data_direction,
+                       request_sample, response_sample, description
+                FROM interface_specs
+                WHERE project_id IS NULL
+                  AND spec_source IN ('our_standard', 'our', 'standard')
+                  AND category = ?
+            '''), (category,)).fetchall()
+
+            scored = []
+            for row in rows:
+                spec = dict(row)
+                haystack = ' '.join([
+                    spec.get('interface_name') or '',
+                    spec.get('transcode') or '',
+                    spec.get('description') or '',
+                    spec.get('view_name') or '',
+                    spec.get('action_name') or '',
+                ]).lower()
+                score = sum(1 for k in keywords if k and k.lower() in haystack)
+                if '病人' in message or '患者' in message:
+                    if any(k in haystack for k in ['病人', '患者', 'patient', 'zybr']):
+                        score += 5
+                if '医嘱' in message and any(k in haystack for k in ['医嘱', 'zyyz', 'order']):
+                    score += 5
+                if score > 0:
+                    scored.append((score, spec))
+
+            scored.sort(key=lambda item: item[0], reverse=True)
+            result = []
+            for _, spec in scored[:5]:
+                fields = conn.execute(
+                    DatabasePool.format_sql('SELECT * FROM interface_spec_fields WHERE spec_id = ? ORDER BY field_order'),
+                    (spec['id'],)
+                ).fetchall()
+                spec['fields'] = [dict(f) for f in fields]
+                result.append(spec)
+            return result
+
+    def _message_keywords(self, message: str) -> list:
+        base = re.findall(r'[A-Za-z0-9_]+|[\u4e00-\u9fff]{2,}', message)
+        synonyms = []
+        if '病人' in message or '患者' in message or '住院' in message:
+            synonyms.extend(['病人', '患者', '住院', 'patient', 'ZYBR', 'PATIENT'])
+        if '医嘱' in message:
+            synonyms.extend(['医嘱', 'order', 'ZYYZ'])
+        if '手术' in message:
+            synonyms.extend(['手术', 'oper'])
+        return base + synonyms
+
+    def _build_standard_xml_request(self, spec: dict, fields: list) -> str:
+        transcode = spec.get('transcode') or spec.get('action_name') or spec.get('view_name') or ''
+        body_fields = fields[:40]
+        lines = ['<Request>', f'  <transcode>{transcode}</transcode>', '  <Messages>', '    <Message>']
+        for field in body_fields:
+            name = field.get('field_name') or ''
+            if not name:
+                continue
+            sample = field.get('sample_value') or self._sample_for_field(field)
+            label = field.get('field_name_cn') or field.get('description') or ''
+            required = ' 必填' if field.get('is_required') else ''
+            comment = f' <!-- {label}{required} -->' if label or required else ''
+            lines.append(f'      <{name}>{sample}</{name}>{comment}')
+        lines.extend(['    </Message>', '  </Messages>', '</Request>'])
+        return '\n'.join(lines)
+
+    def _sample_for_field(self, field: dict) -> str:
+        name = (field.get('field_name') or '').lower()
+        ftype = (field.get('field_type') or '').lower()
+        if 'date' in ftype or 'time' in name or 'date' in name:
+            return '2026-04-28 08:00:00'
+        if any(k in name for k in ['name', 'xm']):
+            return '张三'
+        if any(k in name for k in ['mrn', 'zyh', '住院']):
+            return 'ZY000001'
+        if any(k in name for k in ['pid', 'patient']):
+            return 'P000001'
+        if 'sex' in name or 'gender' in name:
+            return '男'
+        if 'age' in name:
+            return '45岁'
+        if 'flag' in name or 'status' in name:
+            return '0'
+        if 'number' in ftype or 'int' in ftype:
+            return '1'
+        return '示例值'
 
     def _detect_intent(self, message: str) -> str:
         """简单的意图检测"""

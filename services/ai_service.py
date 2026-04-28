@@ -11,15 +11,18 @@ logger = logging.getLogger(__name__)
 
 class AIService:
     @staticmethod
-    def call_ai_api(system_prompt, user_content, task_type="analysis"):
-        """调用AI API，支持多端点智能自动回退和健康监测"""
-        # 转换任务类型为枚举
+    def _task_enum(task_type):
         task_enum = TaskType.ANALYSIS
         for t in TaskType:
             if t.value == task_type:
                 task_enum = t
                 break
-                
+        return task_enum
+
+    @staticmethod
+    def call_ai_api(system_prompt, user_content, task_type="analysis"):
+        """调用AI API，支持多端点智能自动回退和健康监测"""
+        task_enum = AIService._task_enum(task_type)
         sequence = ai_manager.get_call_sequence(task_enum)
         print(f"[AI] 获取到 {len(sequence)} 个端点序列, task_type={task_type}")
         
@@ -124,6 +127,106 @@ class AIService:
         
         print("[AI] 所有端点和模型均失败，返回 None")
         return None
+
+    @staticmethod
+    def call_ai_api_single_endpoint(system_prompt, user_content, task_type="chat", max_tokens=4096):
+        """
+        调用当前首选端点，不跨端点自动切换。
+
+        用于交互式文档问答：如果当前模型不可用，直接返回清晰错误，避免用户看到
+        “一个 AI 正在答，突然又切到另一个 AI”的体验。
+        """
+        task_enum = AIService._task_enum(task_type)
+        sequence = ai_manager.get_call_sequence(task_enum)
+        if not sequence:
+            raise RuntimeError("当前没有可用的 AI 端点，请先在系统设置里检查 AI 配置。")
+
+        item = sequence[0]
+        endpoint = item["endpoint"]
+        models = item["models"] or []
+        temperature = item["temperature"]
+        if not models:
+            raise RuntimeError(f"AI 端点 {endpoint.name} 没有配置模型。")
+
+        headers = {
+            "Authorization": f"Bearer {endpoint.api_key}",
+            "Content-Type": "application/json"
+        }
+        last_error = ""
+
+        for model in models:
+            try:
+                print(f"[AI:single] 使用 {endpoint.name} / {model}，不跨端点切换...")
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content}
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens
+                }
+                response = requests.post(
+                    endpoint.base_url,
+                    headers=headers,
+                    json={**payload, "stream": True},
+                    timeout=ai_manager.timeout,
+                    stream=True
+                )
+
+                if response.status_code == 200:
+                    full_content = ""
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
+                        line_decode = line.decode('utf-8').strip()
+                        if not line_decode.startswith('data: '):
+                            continue
+                        data_str = line_decode[6:].strip()
+                        if data_str == '[DONE]':
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            choice = data.get('choices', [{}])[0]
+                            content = (
+                                choice.get('delta', {}).get('content', '')
+                                or choice.get('text', '')
+                                or choice.get('message', {}).get('content', '')
+                            )
+                            full_content += content
+                        except Exception:
+                            continue
+                    if full_content.strip():
+                        ai_manager.mark_endpoint_success(endpoint)
+                        return full_content
+                    last_error = "模型返回了空内容"
+                    continue
+
+                if response.status_code == 500 and 'stream=true' not in response.text:
+                    resp2 = requests.post(
+                        endpoint.base_url,
+                        headers=headers,
+                        json={**payload, "stream": False},
+                        timeout=ai_manager.timeout
+                    )
+                    if resp2.status_code == 200:
+                        result = resp2.json()
+                        content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        if content.strip():
+                            ai_manager.mark_endpoint_success(endpoint)
+                            return content
+                    last_error = f"HTTP {resp2.status_code}: {resp2.text[:200] if resp2.text else '空响应'}"
+                    continue
+
+                last_error = f"HTTP {response.status_code}: {response.text[:200] if response.text else '空响应'}"
+            except Exception as e:
+                last_error = str(e)
+
+        ai_manager.mark_endpoint_error(endpoint)
+        raise RuntimeError(
+            f"当前 AI {endpoint.name} 暂时不可用，未自动切换到其他 AI。"
+            f"原因：{last_error or '未知错误'}"
+        )
 
     @staticmethod
     def get_embeddings(text):

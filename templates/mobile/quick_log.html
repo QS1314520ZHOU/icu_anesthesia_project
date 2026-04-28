@@ -144,6 +144,19 @@
             min-height: 20px;
         }
 
+        .result-card {
+            display: none;
+            margin-top: 16px;
+            padding: 14px;
+            border-radius: 14px;
+            background: #ecfdf5;
+            border: 1px solid #bbf7d0;
+            color: #065f46;
+            font-size: 13px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
         .nav-bar {
             position: fixed;
             bottom: 0;
@@ -193,11 +206,12 @@
             <select id="projectSelect" class="form-select">
                 <option value="">加载中...</option>
             </select>
+            <div style="font-size:12px;color:var(--text-light);margin-top:8px;">可以不选，系统会自动归到最近活跃项目。</div>
         </div>
 
         <div class="log-input">
             <textarea id="logContent"
-                placeholder="说说今天干了什么...&#10;&#10;例如：上午把HIS医嘱接口联调通过了，下午培训了ICU护士&#10;护士长反馈字体太小，明天准备改一下界面"></textarea>
+                placeholder="一句话就行，不用填表。&#10;&#10;例如：上午把HIS医嘱接口联调通过了，下午培训ICU护士；护士长反馈字体太小，明天准备改界面&#10;&#10;没进展也可以直接写：今天无进展"></textarea>
             <div class="action-row">
                 <button class="voice-btn" id="voiceBtn" oncontextmenu="return false;"
                     ontouchstart="event.preventDefault(); startVoice();"
@@ -206,6 +220,7 @@
                 <button class="submit-btn" id="submitBtn" onclick="submitLog()">📝 保存日志</button>
             </div>
             <div id="statusMsg" class="status-message"></div>
+            <div id="quickResult" class="result-card"></div>
         </div>
     </div>
 
@@ -420,10 +435,6 @@
             const submitBtn = document.getElementById('submitBtn');
             const statusMsg = document.getElementById('statusMsg');
 
-            if (!projectId) {
-                alert('请选择项目');
-                return;
-            }
             if (!content) {
                 alert('请输入日志内容');
                 return;
@@ -440,18 +451,23 @@
                     body: JSON.stringify({
                         project_id: projectId,
                         content: content,
-                        engineer_name: currentUser ? (currentUser.name || currentUser.userid) : '移动端用户'
+                        engineer_name: currentUser ? (currentUser.name || currentUser.userid) : '移动端用户',
+                        wecom_userid: currentUser ? (currentUser.userid || '') : ''
                     })
                 });
 
                 const res = await response.json();
                 if (res.success) {
+                    const data = res.data || {};
+                    const resultCard = document.getElementById('quickResult');
                     statusMsg.style.color = '#10b981';
-                    statusMsg.innerText = '✅ 日志已成功保存并解析';
+                    statusMsg.innerText = '✅ 已保存，不用再补表';
+                    resultCard.style.display = 'block';
+                    resultCard.innerText = data.daily_summary || data.message || '已生成今日日志';
                     document.getElementById('logContent').value = '';
                     setTimeout(() => {
                         window.location.href = '/m/';
-                    }, 1500);
+                    }, 3500);
                 } else {
                     statusMsg.style.color = '#ef4444';
                     statusMsg.innerText = '❌ 保存失败: ' + res.message;

@@ -336,6 +336,24 @@
             flex-shrink: 0;
         }
 
+        .hint-card {
+            border: 1px solid #e7f5ff;
+            background: #f8fbff;
+            color: #42627a;
+            border-radius: 12px;
+            padding: 12px 14px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .action-row {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin: 20px 0;
+        }
+
         /* 分栏布局 */
         .two-col {
             display: grid;
@@ -491,11 +509,37 @@
                 </div>
             </div>
 
+            <div class="glass-card">
+                <div class="card-title">💬 接口文档问答</div>
+                <div class="hint-card" id="doc-chat-status">
+                    上传或粘贴对方接口文档后，可以先直接提问，不需要等待完整解析。正式字段级对照再点“解析并智能比对”。
+                </div>
+                <div class="chat-box" id="doc-chat-box" style="max-height:360px;margin-top:12px;">
+                    <div class="chat-msg ai">
+                        <div class="bubble">
+                            可以直接问这份文档，例如：<br>
+                            · “病人接口的请求消息怎么写？”<br>
+                            · “住院病人信息接口有哪些字段？”<br>
+                            · “医嘱接口的返回报文是什么？”
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-row">
+                    <input id="doc-chat-input" class="form-control" placeholder="先上传/粘贴文档，然后输入问题..."
+                        onkeydown="if(event.key==='Enter')askUploadedDoc()">
+                    <button class="btn btn-primary" onclick="askUploadedDoc()" id="btn-doc-chat">直接问文档</button>
+                </div>
+            </div>
+
             <!-- 执行按钮 -->
-            <div style="text-align: center; margin: 20px 0;">
+            <div class="action-row">
+                <button class="btn btn-outline" onclick="prepareUploadedDocQa()" id="btn-doc-prepare"
+                    style="padding: 14px 32px; font-size: 16px;">
+                    💬 提取文本并开始问答
+                </button>
                 <button class="btn btn-primary" onclick="runAlignment()" id="btn-run-align"
-                    style="padding: 14px 48px; font-size: 16px;">
-                    🚀 一键智能比对 (AI Sync)
+                    style="padding: 14px 32px; font-size: 16px;">
+                    🚀 解析并智能比对
                 </button>
             </div>
 
@@ -548,6 +592,9 @@
                 <div class="card-title" style="justify-content: space-between;">
                     <span>📚 我方标准接口库</span>
                     <div style="display:flex; gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="loadBuiltinStandard('手麻标准')">加载手麻标准</button>
+                        <button class="btn btn-outline btn-sm" onclick="loadBuiltinStandard('重症标准')">加载重症标准</button>
+                        <button class="btn btn-primary btn-sm" onclick="openSpecChat()">接口 AI 对话</button>
                         <button class="btn btn-outline btn-sm" onclick="showImportSpecModal()">📤 上传文档导入</button>
                         <button class="btn btn-primary btn-sm" onclick="showAddSpecModal()">+ 手动添加</button>
                     </div>
@@ -560,6 +607,26 @@
                             style="flex:1;"></select>
                         <input id="new-version-input" class="form-control" placeholder="输入新版本名称" style="flex:1;">
                         <button class="btn btn-outline btn-sm" onclick="createNewVersion()">创建版本</button>
+                    </div>
+                </div>
+                <div id="builtin-standard-status" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:10px;background:#f8f9ff;color:#495057;font-size:13px;"></div>
+
+                <div id="spec-chat-panel" style="display:none;margin-bottom:16px;border:1.5px solid #e9ecef;border-radius:12px;background:#fafbfc;overflow:hidden;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid #e9ecef;background:#fff;">
+                        <strong>接口 AI 对话</strong>
+                        <button class="btn btn-sm btn-outline" onclick="closeSpecChat()">收起</button>
+                    </div>
+                    <div style="padding:10px 14px;border-bottom:1px solid #e9ecef;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-sm btn-outline" onclick="askSpecPreset('病人接口的请求消息怎么写？')">病人接口请求消息</button>
+                        <button class="btn btn-sm btn-outline" onclick="askSpecPreset('住院病人信息接口有哪些字段？')">病人接口字段</button>
+                        <button class="btn btn-sm btn-outline" onclick="askSpecPreset('医嘱接口的请求消息怎么写？')">医嘱接口请求消息</button>
+                    </div>
+                    <div id="spec-chat-box" class="chat-box" style="border:none;border-radius:0;max-height:360px;margin-bottom:0;">
+                        <div class="chat-msg ai"><div class="bubble">可以直接问手麻/重症标准接口，比如“病人接口的请求消息怎么写？”</div></div>
+                    </div>
+                    <div class="chat-input-row" style="padding:12px 14px;background:#fff;border-top:1px solid #e9ecef;">
+                        <input id="spec-chat-input" class="form-control" placeholder="输入接口问题..." onkeydown="if(event.key==='Enter')askSpecChat()">
+                        <button class="btn btn-primary" onclick="askSpecChat()">发送</button>
                     </div>
                 </div>
 
@@ -650,6 +717,8 @@
         // ================================================================
         let currentSessionId = null;
         let allProjects = [];
+        let currentComparisonMode = false;
+        let uploadedDocQaText = '';
 
         // ================================================================
         //  初始化
@@ -679,11 +748,11 @@
                 const res = await fetch('/api/alignment/specs/versions');
                 const data = await res.json();
                 const versions = data.data || [];
-                const unique = [...new Set(versions.map(v => v.spec_version))];
+                const unique = [...new Set(['手麻标准', '重症标准'].concat(versions.map(v => v.spec_version).filter(Boolean)))];
 
-                const opts = unique.length > 0
-                    ? unique.map(v => `<option value="${v}">${v}</option>`).join('')
-                    : '<option value="">暂无标准 - 请先创建</option>';
+                const countMap = {};
+                versions.forEach(v => { countMap[v.spec_version] = v.interface_count || 0; });
+                const opts = unique.map(v => `<option value="${v}">${v}${countMap[v] ? ` (${countMap[v]}个接口)` : '（可一键加载）'}</option>`).join('');
 
                 document.getElementById('align-spec-version').innerHTML = opts;
                 document.getElementById('spec-version-select').innerHTML = opts;
@@ -759,6 +828,103 @@
             loadSpecInterfaces();
         }
 
+        async function loadBuiltinStandard(category) {
+            const statusEl = document.getElementById('builtin-standard-status');
+            if (statusEl) {
+                statusEl.style.display = 'block';
+                statusEl.style.background = '#eff6ff';
+                statusEl.style.color = '#1d4ed8';
+                statusEl.innerHTML = `<span class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:6px;"></span> 正在加载${category}内置标准...`;
+            }
+
+            try {
+                const res = await fetch('/api/interface-specs/load-builtin-standard', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category, overwrite: true })
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    throw new Error(data.message || '加载失败');
+                }
+
+                await loadSpecVersions();
+                const specSelect = document.getElementById('spec-version-select');
+                const alignSelect = document.getElementById('align-spec-version');
+                if (specSelect) specSelect.value = category;
+                if (alignSelect) alignSelect.value = category;
+                await loadSpecInterfaces();
+
+                if (statusEl) {
+                    statusEl.style.background = '#f0fdf4';
+                    statusEl.style.color = '#166534';
+                    statusEl.innerHTML = `已加载 ${category}：${data.data?.parsed_count || 0} 个接口，来源 ${data.data?.source === 'builtin_code' ? '项目内置文档' : '缓存/数据库'}`;
+                }
+            } catch (e) {
+                if (statusEl) {
+                    statusEl.style.background = '#fef2f2';
+                    statusEl.style.color = '#b91c1c';
+                    statusEl.textContent = `加载${category}失败：${e.message}`;
+                } else {
+                    alert(`加载${category}失败：${e.message}`);
+                }
+            }
+        }
+
+        function openSpecChat() {
+            const panel = document.getElementById('spec-chat-panel');
+            if (panel) panel.style.display = 'block';
+            const input = document.getElementById('spec-chat-input');
+            if (input) setTimeout(() => input.focus(), 50);
+        }
+
+        function closeSpecChat() {
+            const panel = document.getElementById('spec-chat-panel');
+            if (panel) panel.style.display = 'none';
+        }
+
+        function askSpecPreset(question) {
+            openSpecChat();
+            const input = document.getElementById('spec-chat-input');
+            if (input) input.value = question;
+            askSpecChat();
+        }
+
+        async function askSpecChat() {
+            const input = document.getElementById('spec-chat-input');
+            const chatBox = document.getElementById('spec-chat-box');
+            const question = input?.value.trim();
+            if (!question || !chatBox) return;
+
+            chatBox.innerHTML += `<div class="chat-msg user"><div class="bubble">${escapeHtml(question)}</div></div>`;
+            input.value = '';
+            const loadingId = 'spec-ai-' + Date.now();
+            chatBox.innerHTML += `<div class="chat-msg ai" id="${loadingId}"><div class="bubble"><span class="spinner"></span> 正在查接口...</div></div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const projectId = document.getElementById('align-project')?.value || '';
+                const category = document.getElementById('spec-version-select')?.value || document.getElementById('align-spec-version')?.value || '手麻标准';
+                const res = await fetch('/api/alignment/project-ai-assistant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ project_id: projectId, question, category, standard_only: true })
+                });
+                const data = await res.json();
+                document.getElementById(loadingId)?.remove();
+                if (!data.success) throw new Error(data.message || 'AI 对话失败');
+                const answer = data.data?.answer || data.data?.message || '未找到可回答内容';
+                const rendered = answer.replace(/```(\w*)\n([\s\S]*?)```/g,
+                    (match, lang, code) => `<pre><button class="btn btn-copy copy-btn" onclick="copyCode(this)">复制</button>${escapeHtml(code)}</pre>`
+                ).replace(/\n/g, '<br>');
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble">${rendered}</div></div>`;
+            } catch (e) {
+                document.getElementById(loadingId)?.remove();
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble" style="color:#c92a2a;">请求失败：${escapeHtml(e.message)}</div></div>`;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
         function showAddSpecModal() {
             // 简化：用 prompt 快速添加
             const name = prompt('接口名称:');
@@ -819,7 +985,7 @@
             const specVersion = document.getElementById('align-spec-version').value;
             const vendorName = document.getElementById('align-vendor').value;
             const file = document.getElementById('vendor-file').files[0];
-            const rawText = document.getElementById('vendor-raw-text').value;
+            let rawText = document.getElementById('vendor-raw-text').value.trim();
 
             if (!projectId) return alert('请选择项目');
             if (!specVersion) return alert('请选择标准版本');
@@ -827,33 +993,191 @@
 
             const btn = document.getElementById('btn-run-align');
             btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> AI 正在解析对齐，请稍候 (约30-60秒)...';
-
-            const fd = new FormData();
-            fd.append('project_id', projectId);
-            fd.append('spec_version', specVersion);
-            fd.append('vendor_name', vendorName);
-            if (file) fd.append('file', file);
-            if (rawText) fd.append('raw_text', rawText);
+            btn.innerHTML = '<span class="spinner"></span> 正在快速解析接口文档...';
 
             try {
-                const res = await fetch('/api/alignment/run', { method: 'POST', body: fd });
-                const data = await res.json();
-
-                btn.disabled = false;
-                btn.innerHTML = '🚀 一键智能比对 (AI Sync)';
-
-                if (data.data && data.data.success) {
-                    currentSessionId = data.data.session_id;
-                    await loadSessionResult(currentSessionId);
-                } else {
-                    alert(data.data?.message || data.error || '对齐失败');
+                if (file && !rawText) {
+                    rawText = await extractUploadedText(file);
+                    document.getElementById('vendor-raw-text').value = rawText;
                 }
+
+                const parseRes = await apiPost(`/api/projects/${projectId}/interface-specs/parse`, {
+                    doc_text: rawText,
+                    spec_source: 'vendor',
+                    vendor_name: vendorName,
+                    category: specVersion
+                });
+                if (!parseRes.success) throw new Error(parseRes.message || '接口文档解析失败');
+
+                const parseLabel = parseRes.data?.cache_hit ? '已命中缓存' : '解析完成';
+                btn.innerHTML = `<span class="spinner"></span> ${parseLabel}，正在快速对照...`;
+                const compareRes = await apiPost(`/api/projects/${projectId}/interface-comparison/run`, {
+                    category: specVersion,
+                    use_ai_match: false
+                }, 60000);
+                if (!compareRes.success) throw new Error(compareRes.message || '智能对照失败');
+
+                currentSessionId = null;
+                currentComparisonMode = true;
+                await loadProjectComparisonResult(projectId, specVersion, compareRes.data || {});
             } catch (e) {
+                const message = e.name === 'AbortError'
+                    ? '解析超时：AI 服务当前不可用或响应过慢，请先在系统设置里检查可用模型后重试。'
+                    : e.message;
+                alert('请求失败: ' + message);
+            } finally {
                 btn.disabled = false;
-                btn.innerHTML = '🚀 一键智能比对 (AI Sync)';
-                alert('请求失败: ' + e.message);
+                btn.innerHTML = '🚀 解析并智能比对';
             }
+        }
+
+        async function prepareUploadedDocQa() {
+            const file = document.getElementById('vendor-file').files[0];
+            const rawText = document.getElementById('vendor-raw-text').value.trim();
+            const btn = document.getElementById('btn-doc-prepare');
+            const statusEl = document.getElementById('doc-chat-status');
+
+            if (!file && !rawText) return alert('请先上传文档或粘贴文本');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> 正在提取文本...';
+            statusEl.textContent = '正在提取文档文本，只做问答准备，不会进入结构化解析。';
+
+            try {
+                uploadedDocQaText = rawText || await extractUploadedText(file);
+                if (!rawText) document.getElementById('vendor-raw-text').value = uploadedDocQaText;
+                statusEl.innerHTML = `已准备好文档问答：约 ${(uploadedDocQaText.length / 1024).toFixed(1)} KB 文本。本模式只使用当前首选 AI，不会自动切换到其他 AI。`;
+                document.getElementById('doc-chat-input').focus();
+            } catch (e) {
+                statusEl.innerHTML = `<span style="color:#c92a2a;">文档文本提取失败：${escapeHtml(e.message)}</span>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '💬 提取文本并开始问答';
+            }
+        }
+
+        async function askUploadedDoc() {
+            const input = document.getElementById('doc-chat-input');
+            const chatBox = document.getElementById('doc-chat-box');
+            const question = input.value.trim();
+            if (!question) return;
+
+            let rawText = document.getElementById('vendor-raw-text').value.trim();
+            if (!uploadedDocQaText && rawText) uploadedDocQaText = rawText;
+            if (!uploadedDocQaText) {
+                await prepareUploadedDocQa();
+            }
+            if (!uploadedDocQaText) return;
+
+            chatBox.innerHTML += `<div class="chat-msg user"><div class="bubble">${escapeHtml(question)}</div></div>`;
+            input.value = '';
+            chatBox.innerHTML += `<div class="chat-msg ai" id="doc-ai-typing"><div class="bubble"><span class="spinner"></span> 正在只根据这份文档回答...</div></div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const res = await apiPost('/api/alignment/document-chat', {
+                    doc_text: uploadedDocQaText,
+                    question,
+                    vendor_name: document.getElementById('align-vendor').value
+                }, 90000);
+                if (!res.success) throw new Error(res.message || '文档问答失败');
+                document.getElementById('doc-ai-typing')?.remove();
+                const answer = res.data?.answer || '没有从文档中找到明确答案';
+                const rendered = renderChatAnswer(answer);
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble">${rendered}</div></div>`;
+            } catch (e) {
+                document.getElementById('doc-ai-typing')?.remove();
+                chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble" style="color:#c92a2a;">请求失败：${escapeHtml(e.message)}</div></div>`;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function extractUploadedText(file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            const res = await fetch('/api/extract-text', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (!data.success || !data.data?.text) {
+                throw new Error(data.message || '文件文本提取失败');
+            }
+            document.getElementById('vendor-file-name').textContent =
+                `📎 ${file.name} · 已提取 ${(data.data.length / 1024).toFixed(1)} KB 文本`;
+            return data.data.text;
+        }
+
+        async function apiPost(url, payload, timeoutMs = 180000) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return res.json();
+        }
+
+        async function loadProjectComparisonResult(projectId, category, summaryData = {}) {
+            const res = await fetch(`/api/projects/${projectId}/interface-comparisons?category=${encodeURIComponent(category)}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.message || '加载对照结果失败');
+
+            const comparisons = data.data || [];
+            document.getElementById('alignment-result-area').style.display = 'block';
+
+            const total = comparisons.length;
+            const matched = comparisons.filter(c => Number(c.gap_count || 0) === 0 && c.vendor_spec_id).length;
+            const missing = comparisons.filter(c => !c.vendor_spec_id).length;
+            const partial = Math.max(0, total - matched - missing);
+            const score = total ? Math.round(((matched * 100 + partial * 60) / total) * 10) / 10 : 0;
+            const color = score >= 80 ? '#2b8a3e' : score >= 50 ? '#e67700' : '#c92a2a';
+
+            document.getElementById('align-summary').innerHTML = `
+        <div style="font-size:14px; margin-bottom:8px;">已解析对方文档，并复用原智能对照引擎完成字段级比对。${summaryData.summary ? escapeHtml(summaryData.summary) : ''}</div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:24px; font-weight:700; color:${color};">${score}%</span>
+            <div style="flex:1;"><div class="score-bar"><div class="score-fill" style="width:${score}%; background:${color};"></div></div></div>
+        </div>
+    `;
+
+            document.getElementById('align-stats').innerHTML = `
+        <div style="background:#d3f9d8; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#2b8a3e;">${matched}</div>
+            <div style="font-size:12px; color:#2b8a3e;">完全匹配</div>
+        </div>
+        <div style="background:#fff3bf; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#e67700;">${partial}</div>
+            <div style="font-size:12px; color:#e67700;">存在差异</div>
+        </div>
+        <div style="background:#ffe3e3; padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:700; color:#c92a2a;">${missing}</div>
+            <div style="font-size:12px; color:#c92a2a;">对方缺失</div>
+        </div>
+    `;
+
+            const tbody = document.querySelector('#align-table tbody');
+            if (!comparisons.length) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#868e96;padding:32px;">暂无对照结果，请确认已加载我方标准并重新上传解析。</td></tr>';
+            } else {
+                tbody.innerHTML = comparisons.map(c => {
+                    const gap = Number(c.gap_count || 0);
+                    const status = !c.vendor_spec_id ? 'missing' : gap > 0 ? 'partial' : 'matched';
+                    const badge = `<span class="badge badge-${status}">${({ matched: '✅ 匹配', partial: '⚠️ 差异', missing: '❌ 缺失' })[status]}</span>`;
+                    const conf = c.match_confidence ? `${Math.round(Number(c.match_confidence) * 100)}%` : '-';
+                    return `<tr>
+            <td><strong>${escapeHtml(c.our_name || '-')}</strong><br><small style="color:#868e96;">${escapeHtml(c.system_type || '')} ${escapeHtml(c.our_transcode || '')}</small></td>
+            <td>${escapeHtml(c.vendor_name || '-')}<br><small style="color:#868e96;">${escapeHtml(c.vendor_company || c.vendor_transcode || '')}</small></td>
+            <td>${badge}</td>
+            <td>${conf}</td>
+            <td style="font-size:12px; max-width:260px;">${escapeHtml(c.summary || c.comparison_result || (gap ? `存在 ${gap} 项字段差异` : '-'))}</td>
+            <td><button class="btn btn-sm btn-outline" onclick="askPresetQuestion(decodeURIComponent('${encodeURIComponent(c.our_name || '')}'))">问接口</button></td>
+        </tr>`;
+                }).join('');
+            }
+
+            resetChatWelcome();
+            document.getElementById('alignment-result-area').scrollIntoView({ behavior: 'smooth' });
         }
 
         async function loadSessionResult(sessionId) {
@@ -955,7 +1279,7 @@
         async function askAssistant() {
             const input = document.getElementById('chat-input');
             const question = input.value.trim();
-            if (!question || !currentSessionId) return;
+            if (!question) return;
 
             const chatBox = document.getElementById('chat-box');
             chatBox.innerHTML += `<div class="chat-msg user"><div class="bubble">${escapeHtml(question)}</div></div>`;
@@ -965,19 +1289,22 @@
             chatBox.scrollTop = chatBox.scrollHeight;
 
             try {
-                const res = await fetch('/api/alignment/ai-assistant', {
+                const projectId = document.getElementById('align-project').value;
+                const category = document.getElementById('align-spec-version').value || '手麻标准';
+                const endpoint = currentSessionId ? '/api/alignment/ai-assistant' : '/api/alignment/project-ai-assistant';
+                const payload = currentSessionId
+                    ? { session_id: currentSessionId, question }
+                    : { project_id: projectId, question, category };
+                const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_id: currentSessionId, question })
+                    body: JSON.stringify(payload)
                 });
                 const data = await res.json();
                 document.getElementById('ai-typing')?.remove();
 
-                const answer = data.data?.answer || '无法回答';
-                // 简单渲染 Markdown 代码块
-                const rendered = answer.replace(/```(\w*)\n([\s\S]*?)```/g,
-                    (match, lang, code) => `<pre><button class="btn btn-copy copy-btn" onclick="copyCode(this)">复制</button>${escapeHtml(code)}</pre>`
-                ).replace(/\n/g, '<br>');
+                const answer = data.data?.answer || data.data?.message || '无法回答';
+                const rendered = renderChatAnswer(answer);
 
                 chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble">${rendered}</div></div>`;
                 chatBox.scrollTop = chatBox.scrollHeight;
@@ -985,6 +1312,33 @@
                 document.getElementById('ai-typing')?.remove();
                 chatBox.innerHTML += `<div class="chat-msg ai"><div class="bubble" style="color:#c92a2a;">请求失败: ${e.message}</div></div>`;
             }
+        }
+
+        function askPresetQuestion(interfaceName) {
+            const input = document.getElementById('chat-input');
+            input.value = interfaceName
+                ? `${interfaceName} 的请求消息怎么写？`
+                : '病人接口的请求消息怎么写？';
+            askAssistant();
+        }
+
+        function resetChatWelcome() {
+            const chatBox = document.getElementById('chat-box');
+            if (!chatBox) return;
+            chatBox.innerHTML = `<div class="chat-msg ai">
+                <div class="bubble">
+                    对照已完成。可以直接问接口问题，例如：<br>
+                    · “病人接口的请求消息怎么写？”<br>
+                    · “住院病人信息接口有哪些必填字段？”<br>
+                    · “把医嘱接口生成 XML 请求报文”
+                </div>
+            </div>`;
+        }
+
+        function renderChatAnswer(answer) {
+            return String(answer || '').replace(/```(\w*)\n([\s\S]*?)```/g,
+                (match, lang, code) => `<pre><button class="btn btn-copy copy-btn" onclick="copyCode(this)">复制</button>${escapeHtml(code)}</pre>`
+            ).replace(/\n/g, '<br>');
         }
 
         function copyCode(btn) {
@@ -1062,6 +1416,8 @@
                 if (e.dataTransfer.files.length) {
                     document.getElementById('vendor-file').files = e.dataTransfer.files;
                     document.getElementById('vendor-file-name').textContent = '📎 ' + e.dataTransfer.files[0].name;
+                    uploadedDocQaText = '';
+                    document.getElementById('doc-chat-status').textContent = '已选择新文档，点击“提取文本并开始问答”后即可直接提问。';
                 }
             });
         }
@@ -1070,6 +1426,8 @@
             document.getElementById('vendor-file')?.addEventListener('change', function () {
                 if (this.files[0]) {
                     document.getElementById('vendor-file-name').textContent = '📎 ' + this.files[0].name;
+                    uploadedDocQaText = '';
+                    document.getElementById('doc-chat-status').textContent = '已选择新文档，点击“提取文本并开始问答”后即可直接提问。';
                 }
             });
             document.getElementById('import-spec-file')?.addEventListener('change', function () {

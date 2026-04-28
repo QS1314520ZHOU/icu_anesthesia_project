@@ -2692,7 +2692,7 @@
                 </div>
             </div>
             <div class="sidebar-footer"
-                style="padding: 0; border-top: 1px solid var(--gray-200); display: flex; flex-direction: column;">
+                style="padding: 0; border-top: 1px solid var(--gray-200); display: flex; flex-direction: column; min-height: 0;">
 
                 <!-- 功能菜单折叠头 -->
                 <div onclick="toggleFunctionMenu()"
@@ -2703,7 +2703,7 @@
 
                 <!-- 折叠内容 -->
                 <div id="functionMenuContent"
-                    style="display: none; padding: 12px; gap: 8px; flex-direction: column; background: white; border-bottom: 1px solid var(--gray-200);">
+                    style="display: none; padding: 12px; gap: 8px; flex-direction: column; background: white; border-bottom: 1px solid var(--gray-200); max-height: min(50vh, 420px); overflow-y: auto; overscroll-behavior: contain;">
                     <button class="btn btn-outline btn-full" onclick="toggleHealthDashboard()"
                         style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none;">💚
                         健康度仪表盘</button>
@@ -3541,6 +3541,34 @@
                 <button class="btn btn-outline" onclick="closeModal('aiWorklogModal')">取消</button>
                 <button class="btn btn-outline" onclick="showAiOpsHistory()">🕘 查看历史</button>
                 <button class="btn btn-ai" id="btnAiParse" onclick="parseAiWorklog()">🚀 智能识别并填报</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 一句话上报模态框 -->
+    <div class="modal" id="quickReportModal">
+        <div class="modal-content" style="max-width: 680px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #0f172a, #334155); color: white;">
+                <h3>一句话上报</h3>
+                <button class="modal-close" onclick="closeModal('quickReportModal')"
+                    style="color:white;background:rgba(255,255,255,0.2);">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 16px; padding: 12px; background: #fef9c3; border-radius: 10px; font-size: 13px; color: #854d0e;">
+                    不想填表就写一句话：系统会自动保存日志、拆出问题、生成明日计划。没进展也可以写“今天无进展”。
+                </div>
+                <div class="form-group">
+                    <label>今天现场发生了什么</label>
+                    <textarea id="quickReportInput" rows="5"
+                        placeholder="例如：今天联调HIS医嘱接口通过，护士长反馈字体偏小，明天调整界面并继续测闭环。"></textarea>
+                </div>
+                <div id="quickReportResult"
+                    style="display:none;white-space:pre-wrap;line-height:1.8;background:#ecfdf5;border:1px solid #bbf7d0;color:#065f46;border-radius:12px;padding:14px;font-size:13px;">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('quickReportModal')">取消</button>
+                <button class="btn btn-ai" id="btnQuickReport" onclick="submitQuickReport()">帮我归档</button>
             </div>
         </div>
     </div>
@@ -5547,7 +5575,8 @@
         function toggleFunctionMenu() {
             const menuContent = document.getElementById('functionMenuContent');
             const icon = document.getElementById('menuToggleIcon');
-            if (menuContent.style.display === 'none') {
+            const isHidden = menuContent.style.display === 'none' || !menuContent.style.display;
+            if (isHidden) {
                 menuContent.style.display = 'flex';
                 icon.style.transform = 'rotate(90deg)';
                 icon.innerText = '▾';

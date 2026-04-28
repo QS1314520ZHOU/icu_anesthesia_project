@@ -37,6 +37,8 @@ MODULE_REQUIREMENTS = [
     "async loadVendorSpecs(",
     "async loadComparisons(",
     "async runComparison(",
+    "use_ai_match: false",
+    "cache_hit",
     "async showFieldDetail(",
     "openChatModal: function",
     "exportFieldMappings()",

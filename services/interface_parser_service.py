@@ -5,7 +5,8 @@
 import re
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import hashlib
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from database import DatabasePool
 from services.ai_service import ai_service
 
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 class InterfaceParserService:
+    CHUNK_TIMEOUT_SECONDS = 90
+    MAX_WORKERS = 2
+    CACHE_VERSION = "vendor-fast-v1"
 
     # ===== 我方已知的标准 transcode（用于辅助识别和校验）=====
     OUR_KNOWN_TRANSCODES = {
@@ -33,6 +37,11 @@ class InterfaceParserService:
         用 AI 将文档全文解析为结构化接口定义列表。
         使用线程池并行处理分段，显著提升大文档解析速度。
         """
+        local_parsed = self._parse_document_locally(doc_text, spec_source, vendor_name)
+        if local_parsed:
+            logger.info("本地快速解析命中，共提取 %s 个接口定义", len(local_parsed))
+            return local_parsed
+
         chunks = self._split_by_interface_section(doc_text)
         all_interfaces = []
 
@@ -41,9 +50,8 @@ class InterfaceParserService:
 
         logger.info(f"开始并行解析文档，共 {len(chunks)} 个分段")
         
-        # 使用并发执行提升速度
-        # 限制最大线程数为 5，避免瞬时并发过高导致 AI 端点限流或超时
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # 接口解析是重 AI 调用，限制并发避免端点失败时形成长时间重试风暴。
+        with ThreadPoolExecutor(max_workers=self.MAX_WORKERS) as executor:
             # 提交任务
             future_to_chunk = {
                 executor.submit(self._parse_single_chunk, chunk, spec_source, vendor_name): i 
@@ -56,9 +64,11 @@ class InterfaceParserService:
             for future in concurrent.futures.as_completed(future_to_chunk):
                 chunk_index = future_to_chunk[future]
                 try:
-                    parsed_result = future.result()
+                    parsed_result = future.result(timeout=self.CHUNK_TIMEOUT_SECONDS)
                     if parsed_result:
                         results[chunk_index] = parsed_result
+                except TimeoutError:
+                    logger.error("分段 %s 解析超时", chunk_index)
                 except Exception as e:
                     logger.error(f"分段 {chunk_index} 解析异常: {e}")
 
@@ -67,8 +77,163 @@ class InterfaceParserService:
                 if res:
                     all_interfaces.extend(res)
 
-        logger.info(f"文档解析完成，共提取 {len(all_interfaces)} 个接口定义")
+        if not all_interfaces:
+            logger.warning("文档解析完成，但未提取到接口定义。可能是 AI 端点不可用或文档格式未识别。")
+        else:
+            logger.info(f"文档解析完成，共提取 {len(all_interfaces)} 个接口定义")
         return all_interfaces
+
+    def get_cached_parse(self, project_id, doc_text: str, spec_source: str, vendor_name: str = None, category: str = None):
+        """Return existing parsed specs for the same document fingerprint."""
+        fingerprint = self.document_fingerprint(doc_text, spec_source, vendor_name, category)
+        with DatabasePool.get_connection() as conn:
+            rows = conn.execute(DatabasePool.format_sql('''
+                SELECT id, interface_name, transcode, system_type
+                FROM interface_specs
+                WHERE project_id = ?
+                  AND spec_source = ?
+                  AND COALESCE(category, '') = COALESCE(?, '')
+                  AND raw_text = ?
+                ORDER BY id
+            '''), (project_id, spec_source, category, fingerprint)).fetchall()
+        return [dict(row) for row in rows]
+
+    def document_fingerprint(self, doc_text: str, spec_source: str, vendor_name: str = None, category: str = None) -> str:
+        normalized = re.sub(r'\s+', ' ', doc_text or '').strip()
+        digest = hashlib.sha1(normalized.encode('utf-8')).hexdigest()
+        return f"parse-cache:{self.CACHE_VERSION}:{spec_source}:{category or ''}:{vendor_name or ''}:{digest}"
+
+    def _parse_document_locally(self, doc_text: str, spec_source: str, vendor_name: str = None) -> list:
+        """Fast deterministic parser for obvious XML/JSON/interface-table documents."""
+        text = (doc_text or '').strip()
+        if not text:
+            return []
+
+        interfaces = []
+        for chunk in self._split_by_interface_section(text):
+            parsed = self._parse_chunk_locally(chunk, spec_source, vendor_name)
+            if parsed:
+                interfaces.append(parsed)
+
+        # Only trust the fast path when it found meaningful fields.
+        return [item for item in interfaces if item.get('fields')]
+
+    def _parse_chunk_locally(self, chunk: str, spec_source: str, vendor_name: str = None):
+        title = self._guess_interface_title(chunk)
+        transcode = self._guess_transcode(chunk)
+        fields = self._extract_fields_locally(chunk)
+        if not fields:
+            return None
+        request_sample = self._extract_sample(chunk, ('请求', '入参', 'request', 'Request'))
+        response_sample = self._extract_sample(chunk, ('返回', '响应', '出参', 'response', 'Response'))
+        return {
+            'interface_name': title or transcode or '接口定义',
+            'transcode': transcode or '',
+            'system_type': '第三方' if spec_source == 'vendor' else '手麻/重症',
+            'protocol': self._guess_protocol(chunk),
+            'description': title or '',
+            'endpoint_url': self._guess_endpoint(chunk),
+            'action_name': '',
+            'view_name': self._guess_view_name(chunk),
+            'data_direction': 'pull',
+            'request_sample': request_sample,
+            'response_sample': response_sample,
+            'fields': fields,
+        }
+
+    def _guess_interface_title(self, chunk: str) -> str:
+        for line in chunk.splitlines()[:8]:
+            clean = line.strip().strip('#').strip()
+            clean = re.sub(r'^\d+([\.、]\d+)*[\.、]?\s*', '', clean)
+            if 2 <= len(clean) <= 40 and re.search(r'接口|信息|字典|医嘱|病人|患者|报告|申请|结果', clean):
+                return clean
+        return ''
+
+    def _guess_transcode(self, chunk: str) -> str:
+        patterns = [
+            r'<transcode>\s*([A-Za-z0-9_./-]+)\s*</transcode>',
+            r'\b(VI_[A-Z0-9_]+)\b',
+            r'\b([A-Z][A-Z0-9_]{4,})\b',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, chunk, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return ''
+
+    def _guess_protocol(self, chunk: str) -> str:
+        lower = chunk.lower()
+        if '<soap' in lower or 'webservice' in lower or 'web service' in lower:
+            return 'WebService'
+        if 'hl7' in lower or 'msh|' in lower:
+            return 'HL7'
+        if 'http://' in lower or 'https://' in lower or 'rest' in lower:
+            return 'RESTful'
+        if re.search(r'\b(v_|view)\w+', chunk, flags=re.IGNORECASE):
+            return 'View'
+        if '<' in chunk and '>' in chunk:
+            return 'XML'
+        if '{' in chunk and '}' in chunk:
+            return 'JSON'
+        return ''
+
+    def _guess_endpoint(self, chunk: str) -> str:
+        match = re.search(r'https?://[^\s\'"<>]+', chunk)
+        return match.group(0) if match else ''
+
+    def _guess_view_name(self, chunk: str) -> str:
+        match = re.search(r'\b(V_[A-Za-z0-9_]+)\b', chunk)
+        return match.group(1) if match else ''
+
+    def _extract_sample(self, chunk: str, labels) -> str:
+        lines = chunk.splitlines()
+        for idx, line in enumerate(lines):
+            if any(label.lower() in line.lower() for label in labels):
+                sample = '\n'.join(lines[idx:idx + 40]).strip()
+                return sample[:2000]
+        return ''
+
+    def _extract_fields_locally(self, chunk: str) -> list:
+        fields = []
+        seen = set()
+
+        for name in re.findall(r'<([A-Za-z_][A-Za-z0-9_]*)>(?:[^<]{0,80})</\1>', chunk):
+            if name.lower() in {'xml', 'body', 'request', 'response', 'data', 'rows', 'row'}:
+                continue
+            self._append_local_field(fields, seen, name, '', '', '', '')
+
+        table_like = re.split(r'\n+', chunk)
+        for line in table_like:
+            parts = [p.strip() for p in re.split(r'\t+|\s{2,}|\|', line.strip()) if p.strip()]
+            if len(parts) < 2:
+                continue
+            name = parts[0]
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]{1,40}$', name):
+                continue
+            cn = parts[1] if len(parts) > 1 and re.search(r'[\u4e00-\u9fff]', parts[1]) else ''
+            field_type = next((p for p in parts[1:4] if re.search(r'varchar|char|int|date|time|number|float|decimal|C|N|D', p, re.I)), '')
+            desc = parts[-1] if len(parts) > 2 else ''
+            required = any('必填' in p or '非空' in p or '是' == p for p in parts)
+            self._append_local_field(fields, seen, name, cn, field_type, desc, '', required)
+
+        return fields[:300]
+
+    def _append_local_field(self, fields, seen, name, cn='', field_type='', desc='', sample='', required=False):
+        key = name.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        fields.append({
+            'field_name': name,
+            'field_name_cn': cn,
+            'field_type': field_type or 'varchar',
+            'field_length': '',
+            'is_required': bool(required),
+            'is_primary_key': key in {'id', 'pid', 'patient_id', 'mrn', 'zyh'},
+            'description': desc or cn,
+            'remark': '',
+            'sample_value': sample,
+        })
 
     def _split_by_interface_section(self, text: str) -> list:
         """
@@ -156,7 +321,12 @@ class InterfaceParserService:
 
         result = ai_service.call_ai_api(system_prompt, user_content, task_type="code")
 
+        if not result:
+            raise RuntimeError("AI 服务暂时不可用：所有已配置模型均未返回有效内容，请检查 AI 配置或稍后重试。")
+
         if result:
+            if result.strip().startswith('AI服务暂时不可用'):
+                raise RuntimeError(result.strip())
             # 1. 提取最外层的 JSON 数组
             json_match = re.search(r'\[[\s\S]*\]', result)
             if json_match:

@@ -15,6 +15,11 @@ REQUIRED_TEMPLATE_IDS = [
     "vendor-upload-zone",
     "vendor-file",
     "vendor-raw-text",
+    "doc-chat-status",
+    "doc-chat-box",
+    "doc-chat-input",
+    "btn-doc-chat",
+    "btn-doc-prepare",
     "btn-run-align",
     "alignment-result-area",
     "align-summary",
@@ -37,14 +42,27 @@ REQUIRED_ROUTE_FRAGMENTS = [
     "/results/<int:result_id>/confirm",
     "/field-maps/<int:map_id>",
     "/ai-assistant",
+    "/project-ai-assistant",
+    "/document-chat",
 ]
 
 REQUIRED_TEMPLATE_CALLS = [
     "/api/alignment/specs/versions",
     "/api/alignment/specs/import",
-    "/api/alignment/run",
+    "/api/extract-text",
+    "/interface-specs/parse",
+    "/interface-comparison/run",
     "/api/alignment/sessions",
-    "/api/alignment/ai-assistant",
+    "/api/alignment/project-ai-assistant",
+    "/api/alignment/document-chat",
+    "prepareUploadedDocQa()",
+    "askUploadedDoc()",
+    "use_ai_match: false",
+    "cache_hit",
+]
+
+REQUIRED_SERVICE_CALLS = [
+    "call_ai_api_single_endpoint",
 ]
 
 
@@ -90,6 +108,16 @@ def main():
         failed = True
         print("  result: FAIL")
         print(f"  missing: {missing_calls}")
+    else:
+        print("  result: OK")
+
+    print("[ALIGNMENT] service_calls")
+    service_text = read(ROOT / "services/ai_service.py")
+    missing_service_calls = [item for item in REQUIRED_SERVICE_CALLS if item not in route_text + service_text]
+    if missing_service_calls:
+        failed = True
+        print("  result: FAIL")
+        print(f"  missing: {missing_service_calls}")
     else:
         print("  result: OK")
 
