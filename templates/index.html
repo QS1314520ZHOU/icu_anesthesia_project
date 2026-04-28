@@ -2704,6 +2704,9 @@
                 <!-- 折叠内容 -->
                 <div id="functionMenuContent"
                     style="display: none; padding: 12px; gap: 8px; flex-direction: column; background: white; border-bottom: 1px solid var(--gray-200); max-height: min(50vh, 420px); overflow-y: auto; overscroll-behavior: contain;">
+                    <button class="btn btn-danger btn-full" onclick="showActionInbox()">📥 行动收件箱</button>
+                    <button class="btn btn-ai btn-full" onclick="showAiWorkbench()">🤖 AI 工作台</button>
+                    <button class="btn btn-outline btn-full" onclick="showConfigCenter()">🛠️ 配置中心</button>
                     <button class="btn btn-outline btn-full" onclick="toggleHealthDashboard()"
                         style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none;">💚
                         健康度仪表盘</button>
@@ -5794,6 +5797,7 @@
                         <div id="meetingResultActions" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:14px;">
                             <button class="btn btn-primary btn-sm" onclick="showMeetingSaveDraftPanel()"
                                 style="background:linear-gradient(135deg,#0f766e,#14b8a6);border:none;">编辑后保存到沟通记录</button>
+                            <button class="btn btn-warning btn-sm" onclick="materializeMeetingActions()">生成任务/问题</button>
                             <button class="btn btn-outline btn-sm" onclick="copyMeetingAssistantResult()">复制 Markdown</button>
                         </div>
                         <div id="meetingSaveDraftPanel" style="display:none;margin-bottom:14px;padding:16px;border-radius:16px;background:linear-gradient(180deg,#f8fffb 0%,#ffffff 100%);border:1px solid #cceee3;">

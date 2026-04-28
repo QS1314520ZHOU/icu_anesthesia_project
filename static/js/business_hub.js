@@ -430,7 +430,7 @@
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
                         <h2 class="detail-title">💰 经营看板</h2>
-                        <p class="detail-meta">总览财务经营、月度产值、成本结构与净利润变化</p>
+                        <p class="detail-meta">经营口径：按月度产值、直接成本、人力成本、税费、管理成本计算净利润和净利率</p>
                         ${businessSummary ? `<div style="margin-top:6px;font-size:12px;color:#64748b;">当前筛选：${businessSummary}</div>` : ''}
                     </div>
                     <div class="btn-group">
@@ -460,7 +460,7 @@
                 </div>
 
                 <div class="panel" style="margin-bottom:20px;">
-                    <div class="panel-header"><div class="panel-title">财务总览</div></div>
+                    <div class="panel-header"><div class="panel-title">财务数据快照（只读联动）</div></div>
                     <div class="panel-body">
                         <div class="dashboard-grid">
                             <div class="stat-card"><div class="stat-icon blue">📄</div><div class="stat-value">${fmtWan(s.contract_total)}</div><div class="stat-label">合同总额</div></div>
@@ -510,7 +510,8 @@
                                 `).join('')}
                             </div>
                             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">
-                                <div style="font-weight:700;margin-bottom:8px;color:#0f172a;">🔎 财务联动校验</div>
+                                    <div style="font-weight:700;margin-bottom:8px;color:#0f172a;">🔎 财务联动校验</div>
+                                    <div style="font-size:12px;color:#64748b;line-height:1.7;margin-bottom:8px;">财务口径来自合同、回款、报销和人力成本；经营口径来自项目月报。这里仅做差异提醒，不混用指标。</div>
                                 <div style="font-size:12px;color:#64748b;line-height:1.8;">
                                     <div>经营累计回款：<strong>${fmtMoney(validation.business_collected_total)}</strong></div>
                                     <div>财务收入累计：<strong>${fmtMoney(validation.financial_revenue_total)}</strong></div>
@@ -550,7 +551,7 @@
                 </div>
 
                 <div class="panel" style="margin-bottom:20px;">
-                    <div class="panel-header"><div class="panel-title">财务与经营趋势</div></div>
+                    <div class="panel-header"><div class="panel-title">财务快照与经营月报趋势</div></div>
                     <div class="panel-body">
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
                             <div id="businessFinanceTrendChart" style="height:320px;"></div>
@@ -684,7 +685,7 @@
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
                         <h2 class="detail-title">💰 经营看板</h2>
-                        <p class="detail-meta">总览财务经营、月度产值、成本结构与净利润变化</p>
+                        <p class="detail-meta">经营口径：按月度产值、直接成本、人力成本、税费、管理成本计算净利润和净利率</p>
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-outline" onclick="showFinancialOverview()">📉 财务总览</button>

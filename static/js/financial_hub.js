@@ -43,7 +43,7 @@
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
                         <h2 class="detail-title">📉 财务总览</h2>
-                        <p class="detail-meta">聚焦合同、回款、报销、人力成本、毛利与财务异常</p>
+                        <p class="detail-meta">财务口径：合同额、回款、未回款、报销、人力成本和毛利；经营净利润请到经营看板查看</p>
                         ${financialSummary ? `<div style="margin-top:6px;font-size:12px;color:#64748b;">当前筛选：${financialSummary}</div>` : ''}
                     </div>
                     <div class="btn-group">
@@ -66,6 +66,9 @@
                 <div class="panel" style="margin-bottom:20px;">
                     <div class="panel-header"><div class="panel-title">财务预测与异常提示</div></div>
                     <div class="panel-body">
+                        <div style="margin-bottom:12px;padding:12px 14px;border-radius:12px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:13px;line-height:1.7;">
+                            财务总览只回答“钱有没有回来、成本有没有异常、毛利是否健康”；经营看板回答“每月产值和净利润是否达标”。两套口径联动，但不混用。
+                        </div>
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:14px;">
                             <div style="padding:14px;border-radius:12px;background:#ecfeff;border:1px solid #a5f3fc;">
                                 <div style="font-size:12px;color:#0f766e;">预测下月回款</div>
@@ -183,7 +186,7 @@
                 <div class="detail-header" style="margin-bottom:20px;">
                     <div>
                         <h2 class="detail-title">📉 财务总览</h2>
-                        <p class="detail-meta">聚焦合同、回款、报销、人力成本、毛利与财务异常</p>
+                        <p class="detail-meta">财务口径：合同额、回款、未回款、报销、人力成本和毛利；经营净利润请到经营看板查看</p>
                     </div>
                     <div class="btn-group">
                         <button class="btn btn-outline" onclick="showBusinessOverview()">💰 经营看板</button>

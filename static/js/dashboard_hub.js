@@ -127,7 +127,7 @@
             </div>
 
             <div class="dashboard-grid">
-                <div class="stat-card">
+                <div class="stat-card" onclick="showProjectComparison()" style="cursor:pointer;">
                     <div class="stat-icon blue">📊</div>
                     <div class="stat-value">${statsData.stats.total_projects}</div>
                     <div class="stat-label">项目总数</div>
@@ -160,6 +160,16 @@
                 </div>
                 <div class="panel-body">
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;">
+                            <div onclick="showActionInbox()" style="cursor:pointer;padding:16px;border-radius:16px;background:linear-gradient(135deg,#fff7ed,#ffedd5);border:1px solid #fed7aa;">
+                                <div style="font-size:28px;margin-bottom:10px;">📥</div>
+                                <div style="font-weight:800;color:#9a3412;margin-bottom:6px;">行动收件箱</div>
+                                <div style="font-size:13px;color:#475569;">统一进入预警、提醒、审批，不再来回找入口</div>
+                            </div>
+                            <div onclick="showAiWorkbench()" style="cursor:pointer;padding:16px;border-radius:16px;background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1px solid #ddd6fe;">
+                                <div style="font-size:28px;margin-bottom:10px;">🤖</div>
+                                <div style="font-weight:800;color:#5b21b6;margin-bottom:6px;">AI 工作台</div>
+                                <div style="font-size:13px;color:#475569;">项目问答、接口助手、简报和 AI 操作统一入口</div>
+                            </div>
                             <div onclick="showApprovalCenter()" style="cursor:pointer;padding:16px;border-radius:16px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #bfdbfe;">
                                 <div style="font-size:28px;margin-bottom:10px;">📋</div>
                                 <div style="font-weight:800;color:#1e3a8a;margin-bottom:6px;">审批中心</div>

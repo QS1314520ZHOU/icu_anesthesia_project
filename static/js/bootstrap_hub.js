@@ -21,6 +21,55 @@ function hideAllViews() {
     });
 }
 
+function showActionInbox() {
+    const html = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
+            <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showWarningCenter();">
+                <div style="font-size:24px;margin-bottom:8px;">⚠️</div>
+                <div style="font-weight:800;">预警</div>
+                <div style="font-size:12px;color:#64748b;margin-top:6px;">风险、延期、接口滞后等需要关注的异常</div>
+            </button>
+            <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showReminderCenter();">
+                <div style="font-size:24px;margin-bottom:8px;">🔔</div>
+                <div style="font-weight:800;">提醒</div>
+                <div style="font-size:12px;color:#64748b;margin-top:6px;">里程碑、待跟进、即将到期事项</div>
+            </button>
+            <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showApprovalCenter();">
+                <div style="font-size:24px;margin-bottom:8px;">📋</div>
+                <div style="font-weight:800;">审批</div>
+                <div style="font-size:12px;color:#64748b;margin-top:6px;">变更、离场、费用等待处理审批</div>
+            </button>
+        </div>
+        <div style="margin-top:14px;padding:12px;border-radius:14px;background:#f8fafc;color:#64748b;font-size:13px;line-height:1.7;">
+            这里先作为统一行动收件箱入口，保留现有成熟列表和操作能力，后续可进一步合并成同一张待办表。
+        </div>
+    `;
+    showGenericModal('行动收件箱', html);
+}
+
+function showAiWorkbench() {
+    const html = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;">
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showAskAiModal();">🔮 项目数据问答<br><span style="font-size:12px;color:#64748b;">查项目、问题、接口、日志</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();openDashboardBriefingModal();">📋 AI 决策简报<br><span style="font-size:12px;color:#64748b;">看今日重点和管理建议</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showActionInbox();">🧭 行动建议<br><span style="font-size:12px;color:#64748b;">从预警/提醒/审批进入</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();window.location.href='/alignment';">🧩 接口 AI 助手<br><span style="font-size:12px;color:#64748b;">问接口、生成报文、对齐字段</span></button>
+        </div>
+    `;
+    showGenericModal('AI 工作台', html);
+}
+
+function showConfigCenter() {
+    const html = `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;">
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();adminSettings.open();">🛠️ 系统设置<br><span style="font-size:12px;color:#64748b;">AI、企微、权限、地图、存储</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showWecomConfigPanel();">📤 企微推送配置<br><span style="font-size:12px;color:#64748b;">日报、提醒、审批推送</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showAiOpsHistory();">🕘 AI 操作历史<br><span style="font-size:12px;color:#64748b;">查看 AI 操作记录</span></button>
+        </div>
+    `;
+    showGenericModal('配置中心', html);
+}
+
 function ensureAiHealthPolling() {
     updateAiHealthUI();
     if (window.__aiHealthTimer) return;

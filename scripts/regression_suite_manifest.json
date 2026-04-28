@@ -8,6 +8,8 @@
     "scripts/interface_spec_smoke.py",
     "scripts/interface_parser_fast_smoke.py",
     "scripts/quick_report_smoke.py",
+    "scripts/ux_closure_smoke.py",
+    "scripts/product_clarity_smoke.py",
     "scripts/core_workbench_smoke.py",
     "scripts/insight_reporting_smoke.py",
     "scripts/advanced_governance_smoke.py",
@@ -29,6 +31,7 @@
     "static/js/report_hub.js",
     "static/js/gantt_hub.js",
     "static/js/map_hub.js",
+    "static/js/map.js",
     "static/js/business_hub.js",
     "static/js/financial_hub.js",
     "static/js/auth_hub.js",
@@ -74,6 +77,16 @@
       "name": "quick_report",
       "description": "One-sentence report flow across desktop, mobile and WeCom",
       "command": ["python", "scripts/quick_report_smoke.py"]
+    },
+    {
+      "name": "ux_closure",
+      "description": "Navigation consolidation, mobile first-screen actions and meeting action materialization",
+      "command": ["python", "scripts/ux_closure_smoke.py"]
+    },
+    {
+      "name": "product_clarity",
+      "description": "Terminology boundaries, discoverability and actionable empty states",
+      "command": ["python", "scripts/product_clarity_smoke.py"]
     },
     {
       "name": "core_workbench",

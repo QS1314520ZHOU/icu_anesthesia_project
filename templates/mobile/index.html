@@ -69,6 +69,32 @@
             margin-bottom: 24px;
         }
 
+        .field-actions {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 22px;
+        }
+
+        .field-action {
+            background: white;
+            border: 1px solid #f1f5f9;
+            border-radius: 16px;
+            padding: 12px 8px;
+            text-align: center;
+            color: inherit;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 700;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+
+        .field-action span {
+            display: block;
+            font-size: 22px;
+            margin-bottom: 6px;
+        }
+
         .one-line-card {
             background: linear-gradient(135deg, #0f172a, #1e293b);
             color: white;
@@ -229,6 +255,13 @@
             <textarea id="homeQuickReport" placeholder="例：今天联调HIS医嘱接口通过，护士长反馈字体小，明天改界面。没进展也直接写：今天无进展"></textarea>
             <button id="homeQuickBtn" onclick="submitHomeQuickReport()">帮我归档</button>
             <div id="homeQuickResult" class="one-line-result"></div>
+        </div>
+
+        <div class="field-actions">
+            <a href="/m/quick-log" class="field-action"><span>📝</span>日志</a>
+            <a href="/m/quick-log?mode=issue" class="field-action"><span>⚠️</span>问题</a>
+            <a href="/m/meeting-note" class="field-action"><span>🤝</span>会议</a>
+            <a href="/m/" class="field-action" onclick="alert('移动审批入口已在企微审批卡片中处理，后续会收敛到这里'); return false;"><span>✅</span>审批</a>
         </div>
 
         <div class="quick-actions">

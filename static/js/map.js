@@ -213,6 +213,41 @@ async function initDeliveryMap() {
             };
         }).filter(Boolean);
 
+        const activeLayerHasData = window.currentMapLayer === 'members'
+            ? filteredScatterData.length > 0
+            : filteredMapData.length > 0;
+        const emptyMapGraphic = activeLayerHasData ? [] : [{
+            type: 'group',
+            left: 'center',
+            top: 'middle',
+            children: [
+                {
+                    type: 'text',
+                    style: {
+                        text: window.currentMapLayer === 'members'
+                            ? '暂无人员地理数据'
+                            : '暂无项目地理数据',
+                        fill: '#e2e8f0',
+                        fontSize: 24,
+                        fontWeight: 800,
+                        textAlign: 'center'
+                    }
+                },
+                {
+                    type: 'text',
+                    top: 36,
+                    style: {
+                        text: window.currentMapLayer === 'members'
+                            ? '请在成员档案维护 current_city / 坐标，或检查企微同步。'
+                            : '请在项目中维护 hospital_name / 城市 / 地址，地图会自动解析省市坐标。',
+                        fill: '#94a3b8',
+                        fontSize: 13,
+                        textAlign: 'center'
+                    }
+                }
+            ]
+        }];
+
         const mapStateHint = document.getElementById('mapStateHint');
         const mapSummaryCards = document.getElementById('mapSummaryCards');
         if (mapStateHint) {
@@ -242,6 +277,7 @@ async function initDeliveryMap() {
                 top: 30,
                 textStyle: { color: '#f8fafc', fontSize: 20, fontWeight: 800, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 10 }
             },
+            graphic: emptyMapGraphic,
             tooltip: {
                 trigger: 'item',
                 backgroundColor: 'rgba(15, 23, 42, 0.85)',

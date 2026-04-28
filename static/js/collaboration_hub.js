@@ -1032,6 +1032,44 @@ async function saveMeetingToCommunication() {
     }
 }
 
+async function materializeMeetingActions() {
+    const payload = window.latestMeetingAssistantResult;
+    if (!currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+    if (!payload?.parsed) {
+        showToast('请先生成会议提取结果', 'warning');
+        return;
+    }
+
+    const actionCount = payload.parsed.actions?.length || 0;
+    const riskCount = payload.parsed.risks?.length || 0;
+    if (!actionCount && !riskCount) {
+        showToast('没有可生成的待办或风险', 'warning');
+        return;
+    }
+    if (!confirm(`将生成 ${actionCount} 个任务、${riskCount} 个问题，确定继续？`)) {
+        return;
+    }
+
+    try {
+        const res = await api.post(`/collab/projects/${currentProjectId}/meeting-actions/materialize`, {
+            actions: payload.parsed.actions || [],
+            risks: payload.parsed.risks || [],
+            create_tasks: true,
+            create_issues: true
+        });
+        showToast(`已生成 ${res.created_tasks || 0} 个任务、${res.created_issues || 0} 个问题`, 'success');
+        closeModal('meetingAssistantModal');
+        if (typeof loadProjectDetail === 'function') {
+            await loadProjectDetail(currentProjectId, true);
+        }
+    } catch (e) {
+        showToast('生成任务/问题失败: ' + e.message, 'danger');
+    }
+}
+
 function buildMeetingCommunicationSummary(payload, title = 'AI会议助手提取纪要') {
     const parsed = payload?.parsed || {};
     const lines = [`【${title}】`];
