@@ -6,6 +6,99 @@ function hasPermission(permission) {
     return permissions.includes('*') || permissions.includes(permission);
 }
 
+function getResolvedDesktopHomeRole() {
+    if (typeof window.getDesktopHomeRole === 'function') {
+        return window.getDesktopHomeRole();
+    }
+    const role = String(currentUser?.role || '').toLowerCase();
+    if (role === 'admin') return 'admin';
+    if (role === 'project_manager' || role === 'pm' || role === 'manager' || role === 'pmo') return 'pm';
+    return 'delivery';
+}
+
+function setElementVisibility(id, visible) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = visible ? '' : 'none';
+}
+
+function applyRoleNavigationLayout() {
+    if (!currentUser) return;
+    const homeRole = getResolvedDesktopHomeRole();
+
+    const isAdmin = homeRole === 'admin';
+    const isPm = homeRole === 'pm';
+    const isDelivery = homeRole === 'delivery';
+
+    setElementVisibility('headerPmoBtn', isAdmin || isPm);
+    setElementVisibility('headerReportBtn', isAdmin || isPm);
+    setElementVisibility('headerBriefingBtn', isAdmin || isPm);
+    setElementVisibility('headerGanttBtn', isAdmin || isPm);
+
+    setElementVisibility('menuConfigCenterBtn', isAdmin);
+    setElementVisibility('menuBusinessBtn', isAdmin);
+    setElementVisibility('menuFinancialBtn', isAdmin);
+    setElementVisibility('menuWecomConfigBtn', isAdmin);
+
+    setElementVisibility('menuPerformanceBtn', isAdmin);
+
+    setElementVisibility('menuProjectComparisonBtn', isAdmin || isPm || isDelivery);
+    setElementVisibility('menuApprovalBtn', isAdmin || isPm || isDelivery);
+    setElementVisibility('menuResourceBtn', true);
+    setElementVisibility('menuDeliveryMapBtn', true);
+    setElementVisibility('menuAlignmentBtn', true);
+    setElementVisibility('menuTaskCenterBtn', true);
+    setElementVisibility('menuActionInboxBtn', true);
+    setElementVisibility('menuAiWorkbenchBtn', true);
+    setElementVisibility('menuWarningCenterBtn', true);
+    setElementVisibility('menuReminderCenterBtn', true);
+    setElementVisibility('menuHealthDashboardBtn', isAdmin || isPm || isDelivery);
+    setElementVisibility('menuAssetBtn', isAdmin || isPm);
+    setElementVisibility('menuKbBtn', true);
+    setElementVisibility('menuFormGeneratorBtn', isAdmin || isPm);
+
+    if (isDelivery) {
+        setElementVisibility('menuAssetBtn', false);
+        setElementVisibility('menuFormGeneratorBtn', false);
+    }
+
+    const dashboardBtnText = document.querySelector('#headerDashboardBtn .btn-text');
+    const ganttBtnText = document.querySelector('#headerGanttBtn .btn-text');
+    const reportBtnText = document.querySelector('#headerReportBtn .btn-text');
+    const pmoBtnText = document.querySelector('#headerPmoBtn .btn-text');
+    const briefingBtnText = document.querySelector('#headerBriefingBtn .btn-text');
+
+    if (dashboardBtnText) {
+        dashboardBtnText.textContent = isAdmin ? '仪表盘' : isPm ? 'PM 首页' : '我的首页';
+    }
+    if (ganttBtnText) {
+        ganttBtnText.textContent = isAdmin ? '总览' : isPm ? '排期总览' : '项目总览';
+    }
+    if (reportBtnText) {
+        reportBtnText.textContent = '周报';
+    }
+    if (pmoBtnText) {
+        pmoBtnText.textContent = 'PMO 决策舱';
+    }
+    if (briefingBtnText) {
+        briefingBtnText.textContent = isAdmin ? '晨会简报' : '管理简报';
+    }
+
+    const sidebarTitle = document.querySelector('.sidebar-header h2');
+    if (sidebarTitle) {
+        sidebarTitle.textContent = isAdmin ? '项目列表' : isPm ? '我的优先项目' : '交付项目列表';
+    }
+
+    const sidebarFilter = document.querySelector('.sidebar-filter');
+    if (sidebarFilter) {
+        sidebarFilter.title = isAdmin
+            ? '全局项目筛选'
+            : isPm
+                ? '默认优先展示你负责的项目'
+                : '默认优先展示当前交付重点项目';
+    }
+}
+
 function applyPermissionGuards() {
     const guarded = [
         { selector: '#adminSettingsBtn', permission: '*', mode: 'show' },
@@ -111,7 +204,7 @@ function showFullPageLogin() {
 
 function initializeAuthenticatedShellAfterLogin() {
     if (typeof window.initializeAuthenticatedShell === 'function') {
-        window.initializeAuthenticatedShell({ triggerReminderCheck: true });
+        window.initializeAuthenticatedShell({ triggerReminderCheck: true, openDefaultHome: true });
     }
 }
 
@@ -193,6 +286,7 @@ function updateUserUI() {
         if (userManagementBtn) {
             userManagementBtn.style.display = currentUser.role === 'admin' ? 'block' : 'none';
         }
+        applyRoleNavigationLayout();
         applyPermissionGuards();
     } else {
         if (loginBtnText) loginBtnText.textContent = '登录';

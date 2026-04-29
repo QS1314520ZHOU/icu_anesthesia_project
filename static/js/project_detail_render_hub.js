@@ -22,7 +22,7 @@ function renderDependencies(deps, pid) {
 
 function renderStages(stages) {
     if (!stages || stages.length === 0) {
-        return '<div class="empty-state"><p>暂无阶段计划</p><div class="empty-state-hint">可点击右上角“添加阶段”建立项目实施节奏。</div></div>';
+        return '<div class="empty-state"><p>暂无阶段计划</p></div>';
     }
     return stages.map(s => `
         ${(() => {
@@ -63,7 +63,7 @@ function renderStages(stages) {
 
 function renderMilestones(milestones) {
     if (!milestones || milestones.length === 0) {
-        return '<div class="empty-state"><p>暂无里程碑</p><div class="empty-state-hint">建议为关键交付节点设置里程碑，便于提醒与风险预警。</div></div>';
+        return '<div class="empty-state"><p>暂无里程碑</p></div>';
     }
     return milestones.map(m => `
         <div class="milestone-item">
@@ -79,7 +79,7 @@ function renderMilestones(milestones) {
 
 function renderMembers(members) {
     if (!members || members.length === 0) {
-        return '<div class="empty-state"><p>暂无成员</p><div class="empty-state-hint">请先补录项目成员，后续资源、工时和地图视图会联动展示。</div></div>';
+        return '<div class="empty-state"><p>暂无成员</p></div>';
     }
     const grouped = getMemberIdentitySummary(members);
     const summary = `
@@ -128,7 +128,7 @@ function renderMembers(members) {
                 <span class="badge ${tone || 'badge-gray'}">${items.length}</span>
             </div>
             <div style="padding:12px;display:grid;gap:10px;">
-                ${items.length ? items.map(renderMemberCard).join('') : '<div class="empty-state-hint">暂无成员</div>'}
+                ${items.length ? items.map(renderMemberCard).join('') : '<div>暂无成员</div>'}
             </div>
         </div>
     `;
@@ -172,7 +172,7 @@ function renderMemberPerformanceIdentity(member) {
 
 function renderContacts(contacts) {
     if (!contacts || contacts.length === 0) {
-        return '<div class="empty-state"><p>暂无联系人</p><div class="empty-state-hint">补充甲方联系人后，可用于沟通记录、提醒与满意度回访。</div></div>';
+        return '<div class="empty-state"><p>暂无联系人</p></div>';
     }
     return contacts.map(c => `
         <div class="contact-item">
@@ -186,12 +186,9 @@ function renderContacts(contacts) {
 }
 
 function renderInterfaces(interfaces) {
-    if (!interfaces || interfaces.length === 0) return '<div class="empty-state"><p>暂无接口数据</p><div class="empty-state-hint">可手工新增接口，或使用模板/批量导入快速初始化。</div></div>';
+    if (!interfaces || interfaces.length === 0) return '<div class="empty-state"><p>暂无接口数据</p></div>';
     const statusMap = { '待开发': 'badge-gray', '开发中': 'badge-info', '联调中': 'badge-warning', '已完成': 'badge-success' };
     return `
-        <div style="background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1; padding:8px 16px; border-radius:8px; margin-bottom:12px; font-size:13px; display:flex; align-items:center; gap:8px;">
-            <i class="fas fa-info-circle"></i> 此处仅用于手工记录接口开发状态，详细文档对照请前往 <b>📑 智能对照</b> 模块（右侧 V2.0 版）。
-        </div>
         <div class="table-container">
             <table class="table">
                 <thead><tr><th>系统</th><th>接口名称</th><th>状态</th><th>操作</th></tr></thead>
@@ -218,7 +215,7 @@ function renderInterfaces(interfaces) {
 }
 
 function renderIssues(issues) {
-    if (!issues || issues.length === 0) return '<div class="empty-state"><p>暂无问题记录</p><div class="empty-state-hint">建议及时记录现场问题，便于 AI 分析、催办和知识沉淀。</div></div>';
+    if (!issues || issues.length === 0) return '<div class="empty-state"><p>暂无问题记录</p></div>';
     const severityMap = { '高': 'badge-danger', '中': 'badge-warning', '低': 'badge-info' };
     const statusMap = { '待处理': 'badge-danger', '处理中': 'badge-warning', '已解决': 'badge-success' };
     return `
@@ -261,7 +258,7 @@ function renderIssues(issues) {
 }
 
 function renderDepartures(departures) {
-    if (!departures || departures.length === 0) return '<div class="empty-state"><p>暂无离场记录</p><div class="empty-state-hint">当项目进入暂停、返场或交接阶段时，可在此记录完整离场流程。</div></div>';
+    if (!departures || departures.length === 0) return '<div class="empty-state"><p>暂无离场记录</p></div>';
     return departures.map(d => `
         <div class="departure-card type-${d.departure_type}">
             <div class="departure-header">
@@ -963,7 +960,6 @@ function renderProjectDetail(project) {
                             </div>
                         </div>
                         <div class="panel-body">
-                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">建议在每次客户沟通后及时录入；会议助手也已并入这里，方便从会议纪要直接生成并沉淀沟通记录。</div>
                             <div id="communicationsList">
                                 <div class="loading-spinner"><div class="spinner"></div></div>
                             </div>
@@ -984,7 +980,6 @@ function renderProjectDetail(project) {
                             </div>
                         </div>
                         <div class="panel-body">
-                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">通过依赖关系可识别关键路径和延期蝴蝶效应，建议为关键任务补全前后置关系。</div>
                             <div id="dependenciesContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
                         </div>
                     </div>
@@ -1003,7 +998,6 @@ function renderProjectDetail(project) {
                             </div>
                         </div>
                         <div class="panel-body">
-                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">站会助手会聚合当前项目日志、问题和阶段进度，帮助快速形成每日同步材料。</div>
                             <div id="standupContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
                         </div>
                     </div>
@@ -1022,7 +1016,6 @@ function renderProjectDetail(project) {
                             </div>
                         </div>
                         <div class="panel-body">
-                            <div style="margin-bottom:12px;font-size:13px;color:#64748b;">可通过周期快照查看项目偏差趋势，并使用 AI 偏差诊断识别停滞阶段和异常拐点。</div>
                             <div id="deviationContainer"><div class="loading-spinner"><div class="spinner"></div></div></div>
                         </div>
                     </div>

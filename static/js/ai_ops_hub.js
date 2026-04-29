@@ -98,6 +98,9 @@ async function submitQuickReport() {
         if (typeof loadWorklogs === 'function') {
             await loadWorklogs(currentProjectId);
         }
+        if (typeof window.refreshImplementationWorkbenchAfterSave === 'function') {
+            await window.refreshImplementationWorkbenchAfterSave();
+        }
         setTimeout(() => closeModal('quickReportModal'), 1800);
     } catch (e) {
         if (result) {
@@ -272,7 +275,7 @@ async function generateChaser(index) {
         });
     }
 
-    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div> AI 正在生成催办话术（思考模型较慢，请耐心等待）...</div>';
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
 
     try {
         const timeout = new Promise((_, reject) =>

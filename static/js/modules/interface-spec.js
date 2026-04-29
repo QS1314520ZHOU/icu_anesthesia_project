@@ -129,14 +129,12 @@ const InterfaceSpec = {
                     <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#f5f3ff,#ffffff);border:1px solid #ddd6fe;">
                         <div style="font-size:12px;color:#64748b;">步骤 3</div>
                         <div style="margin-top:6px;font-size:17px;font-weight:800;color:#0f172a;">生成差异报告</div>
-                        <div style="margin-top:6px;font-size:12px;color:#64748b;">查看字段缺口、转换规则和对接建议</div>
                     </div>
                 </div>
                 <div style="text-align:center;">
                     <button class="btn btn-ai" onclick="InterfaceSpec.runComparisonFromDash()" style="padding:16px 48px;border-radius:30px;font-size:18px;font-weight:700;box-shadow:0 10px 25px -5px rgba(99,102,241,0.4);">
                         🔍 一键智能比对 (AI Sync)
                     </button>
-                    <div style="margin-top:16px;font-size:13px;color:var(--gray-400);">AI 将自动分析两份文档，提取字段对应关系并标注差异点</div>
                 </div>
             </div>`;
     },
@@ -799,7 +797,7 @@ const InterfaceSpec = {
             '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.quickChat(\'列出所有接口的字段映射关系表\')">📋 字段映射</button>' +
             '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.quickChat(\'给出接口对接方案和建议步骤\')">📊 对接方案</button>' +
             '<button class="btn btn-outline btn-xs" onclick="InterfaceSpec.clearChatHistory()" style="margin-left:auto;color:var(--gray-400);">🗑️ 清空</button></div>' +
-            '<div id="modalChatMessages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;"><div style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;">接口 AI 助手</div><div style="font-size:12px;margin-top:6px;">可帮您生成报文、查询映射、排查问题</div></div></div>' +
+            '<div id="modalChatMessages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;"><div style="text-align:center;padding:30px;color:var(--gray-400);"><div style="font-size:40px;margin-bottom:12px;">🤖</div><div style="font-size:14px;">接口 AI 助手</div></div></div>' +
             '<div style="padding:12px 16px;border-top:1px solid var(--gray-100);display:flex;gap:8px;flex-shrink:0;">' +
             '<input id="modalChatInput" type="text" class="form-control" placeholder="输入问题..." style="flex:1;border-radius:20px;padding:10px 16px;" onkeydown="if(event.key===\'Enter\')InterfaceSpec.sendChatMessage()">' +
             '<button class="btn btn-primary" onclick="InterfaceSpec.sendChatMessage()" style="border-radius:20px;padding:10px 20px;">发送</button></div></div>';

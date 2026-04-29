@@ -532,12 +532,10 @@ async function showGlobalBriefingPanel() {
                 <div style="width:54px;height:54px;border-radius:18px;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:26px;">🧠</div>
                 <div>
                     <div style="font-size:22px;font-weight:900;">AI 正在生成晨会简报</div>
-                    <div style="margin-top:4px;font-size:13px;color:rgba(255,255,255,0.82);">聚合活跃项目、阻塞风险与里程碑变化，生成适合晨会讨论的管理摘要。</div>
                 </div>
             </div>
             <div style="margin-top:22px;padding:22px;border-radius:20px;background:rgba(255,255,255,0.1);backdrop-filter:blur(8px);text-align:center;">
                 <div class="spinner" style="margin:0 auto 14px;"></div>
-                <div style="color:rgba(255,255,255,0.9);font-size:14px;">正在整理项目脉搏和关键行动建议...</div>
             </div>
         </div>
     `;
@@ -636,13 +634,6 @@ async function showWecomConfigPanel() {
                 <div style="display:flex;gap:8px;justify-content:flex-end;">
                     <button class="btn btn-outline btn-sm" onclick="testWecomPush()">🔔 测试推送</button>
                     <button class="btn btn-primary btn-sm" onclick="saveWecomConfig()">💾 保存</button>
-                </div>
-                <div style="margin-top:16px;padding:12px;background:var(--gray-50);border-radius:8px;font-size:12px;color:var(--gray-500);line-height:1.6;">
-                    <strong>📌 自动推送说明：</strong><br>
-                    • 每个工作日 08:30 自动推送全局晨会简报<br>
-                    • 包含所有活跃项目概况、风险预警和管理建议<br>
-                    • AI 智能生成，数据不足时自动降级为纯数据摘要<br>
-                    • 也可手动点击"推送到企业微信"立即发送
                 </div>
             </div>
         `;

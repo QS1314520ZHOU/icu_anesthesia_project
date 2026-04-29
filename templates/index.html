@@ -2622,6 +2622,267 @@
             align-items: center;
             gap: 3px;
         }
+
+        .mobile-shell {
+            display: none;
+            min-height: calc(100vh - 60px);
+            background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+        }
+
+        .mobile-page {
+            display: none;
+            padding: 16px 16px 88px;
+        }
+
+        .mobile-page.active {
+            display: block;
+        }
+
+        .mobile-hero {
+            padding: 18px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 55%, #06b6d4 100%);
+            color: white;
+            box-shadow: 0 18px 40px rgba(37, 99, 235, 0.22);
+            margin-bottom: 16px;
+        }
+
+        .mobile-hero-title {
+            font-size: 22px;
+            font-weight: 800;
+            line-height: 1.25;
+        }
+
+        .mobile-hero-subtitle {
+            margin-top: 8px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.86);
+            line-height: 1.7;
+        }
+
+        .mobile-card {
+            background: white;
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            border-radius: 18px;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+            padding: 16px;
+            margin-bottom: 14px;
+        }
+
+        .mobile-section-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--gray-800);
+            margin-bottom: 12px;
+        }
+
+        .mobile-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .mobile-kpi {
+            border-radius: 16px;
+            padding: 14px;
+            background: linear-gradient(135deg, #ffffff, #f8fafc);
+            border: 1px solid var(--gray-200);
+        }
+
+        .mobile-kpi-label {
+            font-size: 11px;
+            color: var(--gray-500);
+        }
+
+        .mobile-kpi-value {
+            margin-top: 8px;
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--gray-900);
+        }
+
+        .mobile-kpi-desc {
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--gray-600);
+        }
+
+        .mobile-action-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .mobile-action-btn {
+            border: 1px solid var(--gray-200);
+            border-radius: 18px;
+            padding: 16px 14px;
+            text-align: left;
+            cursor: pointer;
+            color: #0f172a;
+            background: white;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        }
+
+        .mobile-action-icon {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .mobile-action-title {
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        .mobile-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .mobile-project-card,
+        .mobile-task-card,
+        .mobile-record-card {
+            border-radius: 18px;
+            background: white;
+            border: 1px solid var(--gray-200);
+            padding: 14px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        }
+
+        .mobile-project-card.active {
+            border-color: #2563eb;
+            background: linear-gradient(135deg, #eff6ff, #ffffff);
+        }
+
+        .mobile-project-title,
+        .mobile-task-title,
+        .mobile-record-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: var(--gray-900);
+            line-height: 1.4;
+        }
+
+        .mobile-project-meta,
+        .mobile-task-meta,
+        .mobile-record-meta {
+            margin-top: 6px;
+            font-size: 12px;
+            color: var(--gray-500);
+            line-height: 1.6;
+        }
+
+        .mobile-project-progress {
+            margin-top: 10px;
+            height: 6px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            overflow: hidden;
+        }
+
+        .mobile-project-progress-bar {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #2563eb, #06b6d4);
+        }
+
+        .mobile-pill-row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .mobile-pill {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .mobile-inline-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .mobile-inline-actions .btn {
+            flex: 1;
+            min-width: 88px;
+            justify-content: center;
+        }
+
+        .mobile-project-switch {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            margin-bottom: 14px;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .mobile-project-chip {
+            border: 1px solid var(--gray-200);
+            border-radius: 999px;
+            background: white;
+            color: var(--gray-700);
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .mobile-project-chip.active {
+            background: #0f172a;
+            border-color: #0f172a;
+            color: white;
+        }
+
+        .mobile-bottom-nav {
+            display: none;
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 120;
+            background: rgba(255, 255, 255, 0.96);
+            backdrop-filter: blur(14px);
+            border-top: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .mobile-nav-btn {
+            border: none;
+            background: transparent;
+            color: var(--gray-500);
+            padding: 8px 4px;
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .mobile-nav-btn.active {
+            background: #eff6ff;
+            color: #2563eb;
+        }
+
+        .mobile-empty {
+            text-align: center;
+            color: var(--gray-500);
+            padding: 28px 16px;
+            font-size: 13px;
+        }
     </style>
 </head>
 
@@ -2641,16 +2902,16 @@
             <button class="header-btn"
                 style="background:rgba(255,255,255,0.15); border:none; color:white; border-radius:50%; width:34px; height:34px; padding:0; justify-content:center;"
                 onclick="toggleTheme()" title="切换深色/浅色模式">🌓</button>
-            <button class="header-btn" onclick="showDashboard()">📊 <span class="btn-text">仪表盘</span></button>
-            <button class="header-btn" onclick="showGlobalGanttModal()">📅 <span class="btn-text">总览</span></button>
-            <button class="header-btn" onclick="generateAllReport()">📋 <span class="btn-text">周报</span></button>
-            <button class="header-btn" onclick="window.location.href='/tasks-center'"
+            <button id="headerDashboardBtn" class="header-btn" onclick="showDashboard()">📊 <span class="btn-text">仪表盘</span></button>
+            <button id="headerGanttBtn" class="header-btn" onclick="showGlobalGanttModal()">📅 <span class="btn-text">总览</span></button>
+            <button id="headerReportBtn" class="header-btn" onclick="generateAllReport()">📋 <span class="btn-text">周报</span></button>
+            <button id="headerTaskCenterBtn" class="header-btn" onclick="window.location.href='/tasks-center'"
                 style="background:linear-gradient(135deg,rgba(14,116,144,0.45),rgba(2,132,199,0.45));">🗂️ <span
                     class="btn-text">任务中心</span></button>
-            <button class="header-btn" onclick="openPmoDashboard()"
+            <button id="headerPmoBtn" class="header-btn" onclick="openPmoDashboard()"
                 style="background:linear-gradient(135deg,rgba(16,185,129,0.4),rgba(5,150,105,0.4));">🧭 <span
                     class="btn-text">PMO 决策舱</span></button>
-            <button class="header-btn" onclick="showGlobalBriefingPanel()"
+            <button id="headerBriefingBtn" class="header-btn" onclick="showGlobalBriefingPanel()"
                 style="background:linear-gradient(135deg,rgba(139,92,246,0.4),rgba(99,102,241,0.4));">📋 <span
                     class="btn-text">晨会简报</span></button>
             <button class="header-btn" onclick="showNotificationsModal()">
@@ -2704,32 +2965,32 @@
                 <!-- 折叠内容 -->
                 <div id="functionMenuContent"
                     style="display: none; padding: 12px; gap: 8px; flex-direction: column; background: white; border-bottom: 1px solid var(--gray-200); max-height: min(50vh, 420px); overflow-y: auto; overscroll-behavior: contain;">
-                    <button class="btn btn-danger btn-full" onclick="showActionInbox()">📥 行动收件箱</button>
-                    <button class="btn btn-ai btn-full" onclick="showAiWorkbench()">🤖 AI 工作台</button>
-                    <button class="btn btn-outline btn-full" onclick="showConfigCenter()">🛠️ 配置中心</button>
-                    <button class="btn btn-outline btn-full" onclick="toggleHealthDashboard()"
+                    <button id="menuActionInboxBtn" class="btn btn-danger btn-full" onclick="showActionInbox()">📥 行动收件箱</button>
+                    <button id="menuAiWorkbenchBtn" class="btn btn-ai btn-full" onclick="showAiWorkbench()">🤖 AI 工作台</button>
+                    <button id="menuConfigCenterBtn" class="btn btn-outline btn-full" onclick="showConfigCenter()">🛠️ 配置中心</button>
+                    <button id="menuHealthDashboardBtn" class="btn btn-outline btn-full" onclick="toggleHealthDashboard()"
                         style="background: linear-gradient(135deg, #10b981, #059669); color: white; border: none;">💚
                         健康度仪表盘</button>
-                    <button class="btn btn-outline btn-full" onclick="showWarningCenter()"
+                    <button id="menuWarningCenterBtn" class="btn btn-outline btn-full" onclick="showWarningCenter()"
                         style="background: linear-gradient(135deg, #ef4444, #f97316); color: white; border: none;">⚠️
                         智能预警 <span id="warningBadge" class="notification-badge" style="display:none;">0</span></button>
-                    <button class="btn btn-warning btn-full" onclick="showReminderCenter()">🔔 提醒中心 <span
+                    <button id="menuReminderCenterBtn" class="btn btn-warning btn-full" onclick="showReminderCenter()">🔔 提醒中心 <span
                             id="reminderBadge" class="notification-badge" style="display:none;">0</span></button>
-                    <button class="btn btn-outline btn-full" onclick="window.location.href='/tasks-center'">🗂️ 任务中心</button>
-                    <button class="btn btn-info btn-full" onclick="showDeliveryMap()">🗺️ 交付地图</button>
-                    <button class="btn btn-outline btn-full" onclick="showResourceOverview()">👥 资源排班</button>
-                    <button class="btn btn-outline btn-full" onclick="showBusinessOverview()">💰 经营看板</button>
-                    <button class="btn btn-outline btn-full" onclick="showFinancialOverview()">📉 财务总览</button>
-                    <button class="btn btn-outline btn-full" onclick="window.location.href='/alignment'">🧩 对齐中心</button>
-                    <button class="btn btn-primary btn-full" onclick="showKBView()">📚 知识库</button>
-                    <button class="btn btn-success btn-full" onclick="showAssetView()">📦 硬件资产</button>
-                    <button class="btn btn-purple btn-full" onclick="showPerformanceAnalytics()">🏅 绩效分析</button>
-                    <button class="btn btn-outline btn-full" onclick="showApprovalCenter()">📋 审批中心</button>
-                    <button class="btn btn-ai btn-full" onclick="showProjectComparison()">📊 项目对比</button>
-                    <button class="btn btn-primary btn-full" onclick="showFormGeneratorView()"
+                    <button id="menuTaskCenterBtn" class="btn btn-outline btn-full" onclick="window.location.href='/tasks-center'">🗂️ 任务中心</button>
+                    <button id="menuDeliveryMapBtn" class="btn btn-info btn-full" onclick="showDeliveryMap()">🗺️ 交付地图</button>
+                    <button id="menuResourceBtn" class="btn btn-outline btn-full" onclick="showResourceOverview()">👥 资源排班</button>
+                    <button id="menuBusinessBtn" class="btn btn-outline btn-full" onclick="showBusinessOverview()">💰 经营看板</button>
+                    <button id="menuFinancialBtn" class="btn btn-outline btn-full" onclick="showFinancialOverview()">📉 财务总览</button>
+                    <button id="menuAlignmentBtn" class="btn btn-outline btn-full" onclick="window.location.href='/alignment'">🧩 对齐中心</button>
+                    <button id="menuKbBtn" class="btn btn-primary btn-full" onclick="showKBView()">📚 知识库</button>
+                    <button id="menuAssetBtn" class="btn btn-success btn-full" onclick="showAssetView()">📦 硬件资产</button>
+                    <button id="menuPerformanceBtn" class="btn btn-purple btn-full" onclick="showPerformanceAnalytics()">🏅 绩效分析</button>
+                    <button id="menuApprovalBtn" class="btn btn-outline btn-full" onclick="showApprovalCenter()">📋 审批中心</button>
+                    <button id="menuProjectComparisonBtn" class="btn btn-ai btn-full" onclick="showProjectComparison()">📊 项目对比</button>
+                    <button id="menuFormGeneratorBtn" class="btn btn-primary btn-full" onclick="showFormGeneratorView()"
                         style="background: linear-gradient(135deg, #6366f1, #a855f7); color: white; border: none;">📝
                         Form Generator</button>
-                    <button class="btn btn-outline btn-full" onclick="showWecomConfigPanel()"
+                    <button id="menuWecomConfigBtn" class="btn btn-outline btn-full" onclick="showWecomConfigPanel()"
                         style="background:linear-gradient(135deg,#25d366,#128c7e);color:white;border:none;">📤
                         企微推送配置</button>
                 </div>
@@ -3627,8 +3888,6 @@
                     <div>
                         <h3 style="margin: 0; font-size: 1.4rem; font-weight: 700; letter-spacing: -0.02em;">AI 项目智能助手
                         </h3>
-                        <p style="margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; font-weight: 400;">使用自然语言探索您的项目数据
-                        </p>
                     </div>
                 </div>
                 <button class="modal-close" onclick="closeModal('askAiModal')"
@@ -3643,21 +3902,9 @@
                             style="flex: 1; height: 60px; font-size: 17px; border: none; background: transparent; padding-right: 20px; color: #1e293b; outline: none; font-weight: 500;">
                         <button class="btn" onclick="submitAiQuestion()"
                             style="height: 52px; border-radius: 16px; background: #0f172a; color: white; border: none; padding: 0 28px; font-weight: 600; display: flex; align-items: center; gap: 10px; transition: all 0.3s; box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2);">
-                            <span>分析并执行</span>
+                            <span>执行</span>
                             <span style="font-size: 14px;">⚡</span>
                         </button>
-                    </div>
-                    <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                        <span style="font-size: 11px; color: #94a3b8; margin-right: 4px;">热门检索：</span>
-                        <span class="badge"
-                            style="cursor:pointer; background:#f1f5f9; color:#64748b; border:none; padding:4px 12px; font-weight:500;"
-                            onclick="setAiQuestion('显示当前所有正在进行的项目进展')">项目进展</span>
-                        <span class="badge"
-                            style="cursor:pointer; background:#f1f5f9; color:#64748b; border:none; padding:4px 12px; font-weight:500;"
-                            onclick="setAiQuestion('列出风险分高于 80 的所有事项')">高风险监控</span>
-                        <span class="badge"
-                            style="cursor:pointer; background:#f1f5f9; color:#64748b; border:none; padding:4px 12px; font-weight:500;"
-                            onclick="setAiQuestion('分析下个月即将到期的交付节点')">到期提醒</span>
                     </div>
                 </div>
 
@@ -3666,7 +3913,6 @@
                         style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px;">
                         <div>
                             <span id="aiResultCount" style="color: #0f172a; font-size: 15px; font-weight: 700;"></span>
-                            <span style="color: #94a3b8; font-size: 13px; margin-left: 8px;">查询已完成</span>
                         </div>
                         <button class="btn btn-xs btn-outline" onclick="toggleAiSql()" id="btnToggleSql"
                             style="font-size: 12px; border-radius: 10px; border-color: #e2e8f0; color: #64748b; display: flex; align-items: center; gap: 6px;">
@@ -4845,10 +5091,6 @@
                             <option value="read">已读</option>
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
-                        <label>搜索</label>
-                        <input id="notificationKeyword" type="text" placeholder="搜索标题 / 内容 / 项目" oninput="showNotificationsModal()">
-                    </div>
                 </div>
                 <div id="notificationSummary" style="margin-bottom:12px;font-size:12px;color:#64748b;"></div>
                 <div id="notificationsList"></div>
@@ -5758,13 +6000,8 @@
                 <div style="display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,0.95fr);gap:18px;">
                     <div
                         style="background:white;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 12px 35px rgba(15,23,42,0.06);padding:20px;">
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;">
-                            <div>
-                                <div style="font-size:16px;font-weight:800;color:#0f172a;">会议原文</div>
-                                <div style="margin-top:4px;font-size:13px;color:#64748b;">支持会议转写、聊天速记、录音整理稿。建议保留说话顺序和责任人姓名。</div>
-                            </div>
-                            <div
-                                style="padding:8px 10px;border-radius:12px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:700;">AI 提取</div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:14px;">
+                            <div style="font-size:16px;font-weight:800;color:#0f172a;">会议原文</div>
                         </div>
                         <textarea id="meetingTranscript" placeholder="粘贴会议转写文本、需求讨论记录或客户沟通速记..."
                             style="width:100%;height:260px;padding:16px 18px;border:1px solid #cbd5e1;border-radius:16px;font-family:inherit;font-size:14px;line-height:1.7;background:#fcfdff;resize:vertical;"></textarea>
@@ -5773,16 +6010,13 @@
                                 style="background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;box-shadow:0 10px 24px rgba(37,99,235,0.25);">提取纪要与待办</button>
                             <button class="btn btn-outline" onclick="clearMeetingAssistant()"
                                 style="border-color:#cbd5e1;color:#475569;background:white;">清空内容</button>
-                            <div style="font-size:12px;color:#94a3b8;">提取后可直接保存到项目沟通记录</div>
+                            <div id="meetingAssistantProjectHint" style="display:none;padding:6px 10px;border-radius:999px;background:#ecfeff;color:#0f766e;font-size:12px;font-weight:700;"></div>
                         </div>
                     </div>
                     <div
                         style="background:white;border:1px solid #dbeafe;border-radius:20px;box-shadow:0 12px 35px rgba(15,23,42,0.06);padding:20px;display:flex;flex-direction:column;min-height:420px;">
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;">
-                            <div>
-                                <div style="font-size:16px;font-weight:800;color:#0f172a;">提取结果</div>
-                                <div style="margin-top:4px;font-size:13px;color:#64748b;">纪要摘要、待办与风险会分区展示，方便继续处理。</div>
-                            </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:14px;">
+                            <div style="font-size:16px;font-weight:800;color:#0f172a;">提取结果</div>
                             <div id="meetingResultMeta"
                                 style="display:none;padding:8px 10px;border-radius:12px;background:#ecfeff;color:#0f766e;font-size:12px;font-weight:700;">已生成</div>
                         </div>
@@ -5790,8 +6024,7 @@
                             style="flex:1;display:flex;align-items:center;justify-content:center;border:1px dashed #cbd5e1;border-radius:18px;background:radial-gradient(circle at top,#eff6ff 0%,#ffffff 70%);padding:28px;text-align:center;color:#64748b;">
                             <div>
                                 <div style="font-size:38px;margin-bottom:10px;">🗂️</div>
-                                <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:8px;">提取结果会显示在这里</div>
-                                <div style="font-size:13px;line-height:1.8;">建议结果生成后直接保存为沟通记录，后续还能继续做 AI 沟通分析。</div>
+                                <div style="font-size:16px;font-weight:700;color:#0f172a;">提取结果会显示在这里</div>
                             </div>
                         </div>
                         <div id="meetingResultActions" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:14px;">

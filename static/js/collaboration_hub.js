@@ -6,7 +6,6 @@ let latestCommunicationAnalysisContext = null;
 let latestAiRetrospectiveMarkdown = '';
 let latestAiTaskSuggestionsExportText = '';
 let communicationFilterState = {
-    keyword: '',
     method: '',
     tag: ''
 };
@@ -127,7 +126,6 @@ async function showAiRetrospective(projectId) {
                     ${renderModalActionBar([
                         '<button class="btn btn-outline btn-sm" onclick="copyAiRetrospective()">📋 复制报告</button>'
                     ])}
-                    <h2 style="margin-bottom:16px;">📊 AI项目复盘报告</h2>
                     <div class="markdown-content">${renderAiMarkdown(res.report)}</div>
                 </div>
             `;
@@ -153,10 +151,9 @@ async function showAiTaskSuggestions(projectId) {
         latestAiTaskSuggestionsExportText = buildAiTaskSuggestionsExportText(suggestionItems, res?.raw_response || '', res?.message || '暂无建议');
 
         if (suggestionItems.length) {
-            let html = '<div style="padding:20px;"><h2 style="margin-bottom:16px;">🎯 AI任务分配建议</h2>';
-            html = `<div style="padding:20px;">${renderModalActionBar([
+            let html = `<div style="padding:20px;">${renderModalActionBar([
                 '<button class="btn btn-outline btn-sm" onclick="copyAiTaskSuggestions()">📋 复制建议</button>'
-            ])}<h2 style="margin-bottom:16px;">🎯 AI任务分配建议</h2>`;
+            ])}`;
             html += suggestionItems.map(item => `
                 <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:10px;background:#fff;">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:6px;">
@@ -175,7 +172,6 @@ async function showAiTaskSuggestions(projectId) {
                     ${renderModalActionBar([
                         '<button class="btn btn-outline btn-sm" onclick="copyAiTaskSuggestions()">📋 复制建议</button>'
                     ])}
-                    <h2 style="margin-bottom:16px;">🎯 AI任务分配建议 (文本模式)</h2>
                     <div class="markdown-content" style="line-height:1.7;color:#374151;">${renderAiMarkdown(res.raw_response)}</div>
                 </div>
             `;
@@ -257,16 +253,13 @@ function deriveCommTags(record) {
 }
 
 function syncCommunicationFilterState() {
-    communicationFilterState.keyword = (document.getElementById('commSearchInput')?.value || '').trim();
     communicationFilterState.method = document.getElementById('commMethodFilter')?.value || '';
     communicationFilterState.tag = document.getElementById('commTagFilter')?.value || '';
 }
 
 function applyCommunicationFilterState() {
-    const search = document.getElementById('commSearchInput');
     const method = document.getElementById('commMethodFilter');
     const tag = document.getElementById('commTagFilter');
-    if (search) search.value = communicationFilterState.keyword;
     if (method) method.value = communicationFilterState.method;
     if (tag) tag.value = communicationFilterState.tag;
 }
@@ -297,17 +290,7 @@ function renderCommunications(records, projectId) {
     const latestDate = records[0]?.contact_date || '未知';
 
     container.innerHTML = `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px;">
-            <div style="padding:12px;border-radius:12px;background:#f5f3ff;"><div style="font-size:12px;color:#6b7280;">沟通总数</div><div style="font-size:24px;font-weight:800;color:#6d28d9;">${records.length}</div></div>
-            <div style="padding:12px;border-radius:12px;background:#ecfeff;"><div style="font-size:12px;color:#6b7280;">沟通方式</div><div style="font-size:13px;font-weight:700;color:#0f766e;">${Object.entries(methodStats).map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' / ')}</div></div>
-            <div style="padding:12px;border-radius:12px;background:#fff7ed;"><div style="font-size:12px;color:#6b7280;">高频标签</div><div style="font-size:13px;font-weight:700;color:#c2410c;">${escapeHtml(topTags.join(' / ') || '沟通')}</div></div>
-            <div style="padding:12px;border-radius:12px;background:#eef2ff;"><div style="font-size:12px;color:#6b7280;">最近沟通</div><div style="font-size:13px;font-weight:700;color:#4338ca;">${escapeHtml(latestDate)}</div></div>
-        </div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px;">
-            <div class="form-group" style="margin-bottom:0;flex:1;min-width:220px;">
-                <label>搜索沟通</label>
-                <input id="commSearchInput" type="text" placeholder="搜索联系人 / 摘要 / 方式" oninput="filterCommunicationTimeline()">
-            </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:14px;justify-content:flex-end;">
             <div class="form-group" style="margin-bottom:0;min-width:160px;">
                 <label>方式筛选</label>
                 <select id="commMethodFilter" onchange="filterCommunicationTimeline()">
@@ -326,7 +309,6 @@ function renderCommunications(records, projectId) {
             <button class="btn btn-outline btn-sm" onclick="loadCommunications(${Number(projectId)})">刷新</button>
             <button class="btn btn-outline btn-sm" onclick="resetCommunicationFilters()">清空筛选</button>
         </div>
-        <div style="margin-bottom:12px;font-size:13px;color:#64748b;">沟通时间线按倒序排列，可快速查看联系人、方式、标签和关键摘要。</div>
         <div id="communicationTimeline">
         ${records.map(r => {
             const tags = deriveCommTags(r);
@@ -438,6 +420,9 @@ async function saveCommunication() {
         closeModal('communicationModal');
         currentEditingCommunicationId = null;
         await loadCommunications(currentProjectId);
+        if (typeof window.refreshImplementationWorkbenchAfterSave === 'function') {
+            await window.refreshImplementationWorkbenchAfterSave();
+        }
         showToast('沟通记录已保存', 'success');
     } catch (e) {
         showToast('沟通记录保存失败: ' + e.message, 'danger');
@@ -472,19 +457,16 @@ async function deleteCommunication(recordId, projectId) {
 
 function filterCommunicationTimeline(shouldSync = true) {
     if (shouldSync) syncCommunicationFilterState();
-    const keyword = (communicationFilterState.keyword || '').trim().toLowerCase();
     const method = communicationFilterState.method || '';
     const tag = communicationFilterState.tag || '';
     const cards = document.querySelectorAll('#communicationTimeline .comm-card');
     let visible = 0;
     cards.forEach(card => {
-        const search = card.dataset.search || '';
         const tags = card.dataset.tags || '';
         const cardMethod = card.dataset.method || '';
-        const matchKeyword = !keyword || search.includes(keyword);
         const matchMethod = !method || cardMethod === method;
         const matchTag = !tag || tags.split(',').includes(tag);
-        const ok = matchKeyword && matchMethod && matchTag;
+        const ok = matchMethod && matchTag;
         card.style.display = ok ? '' : 'none';
         if (ok) visible += 1;
     });
@@ -500,7 +482,6 @@ function filterCommunicationTimeline(shouldSync = true) {
 
 function resetCommunicationFilters() {
     communicationFilterState = {
-        keyword: '',
         method: '',
         tag: ''
     };
@@ -621,7 +602,7 @@ async function analyzeCommunications() {
             target.innerHTML = _renderAiError('AI 未返回有效分析结果');
             return;
         }
-        target.innerHTML = _renderAiReport('沟通记录智能分析报告', '基于所有沟通记录的 AI 深度分析', analysis, '#8b5cf6', '#6366f1');
+        target.innerHTML = _renderAiReport('沟通记录智能分析报告', '', analysis, '#8b5cf6', '#6366f1');
     } catch (e) {
         target.innerHTML = _renderAiError(e.message);
     }
@@ -652,7 +633,6 @@ async function analyzeUploadedFile(input) {
                     <div style="font-size:17px;font-weight:700;">AI 文件分析</div>
                     <div style="font-size:12px;opacity:0.85;margin-top:2px;">${escapeHtml(file.name)}</div>
                 </div>
-                <div style="color:rgba(255,255,255,0.85);font-size:12px;">提取文本 → AI分析 → 生成报告</div>
             </div>
             <div style="padding:24px;"><div class="loading-spinner"><div class="spinner"></div><p>AI 正在解析上传文件...</p></div></div>
         </div>
@@ -675,7 +655,7 @@ async function analyzeUploadedFile(input) {
             target.innerHTML = _renderAiError('AI 未返回有效文件分析结果');
             return;
         }
-        target.innerHTML = _renderAiReport('沟通文件智能分析报告', `基于上传文件的 AI 深度分析 · ${escapeHtml(file.name)}`, analysis, '#0ea5e9', '#2563eb');
+        target.innerHTML = _renderAiReport('沟通文件智能分析报告', escapeHtml(file.name), analysis, '#0ea5e9', '#2563eb');
     } catch (e) {
         target.innerHTML = _renderAiError(e.message);
     } finally {
@@ -705,10 +685,6 @@ function _renderAiReport(title, subtitle, markdown, colorFrom, colorTo) {
             </div>
             <div style="padding:24px 28px;line-height:1.85;font-size:14px;color:#1f2937;" class="report-detail-content comm-ai-report">
                 ${htmlContent}
-            </div>
-            <div style="padding:12px 24px;background:#f9fafb;border-top:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-size:11px;color:#9ca3af;">分析时间: ${new Date().toLocaleString()}</span>
-                <span style="font-size:11px;color:#9ca3af;">AI 分析仅供参考，请结合实际情况判断</span>
             </div>
         </div>
     `;
@@ -762,6 +738,18 @@ function showMeetingAssistant() {
     hideMeetingSaveDraftPanel();
     if (meta) meta.style.display = 'none';
     if (issueSelect) issueSelect.value = '';
+    const projectHint = document.getElementById('meetingAssistantProjectHint');
+    if (projectHint) {
+        if (currentProjectId && currentProject?.project_name) {
+            projectHint.textContent = `当前会默认沉淀到项目：${currentProject.project_name}`;
+            projectHint.style.display = 'inline-flex';
+        } else if (currentProjectId) {
+            projectHint.textContent = `当前会默认沉淀到项目 ID：${currentProjectId}`;
+            projectHint.style.display = 'inline-flex';
+        } else {
+            projectHint.style.display = 'none';
+        }
+    }
     window.latestMeetingAssistantResult = null;
     openModal('meetingAssistantModal');
 }
@@ -922,29 +910,15 @@ function renderMeetingAssistantResult(payload) {
     const actionItems = parsed.actions || [];
     const riskItems = parsed.risks || [];
     const renderedSections = [
-        renderMeetingSectionCard('纪要摘要', '提炼本次会议的关键共识与结论', summaryItems, '#dbeafe', '#1d4ed8', '🧭'),
-        renderMeetingSectionCard('待办事项', '建议会后立即推进或确认的任务', actionItems, '#dcfce7', '#15803d', '✅'),
-        renderMeetingSectionCard('风险提醒', '可能影响交付、范围或协同效率的事项', riskItems, '#fee2e2', '#dc2626', '⚠️')
+        renderMeetingSectionCard('纪要摘要', summaryItems, '#dbeafe', '#1d4ed8', '🧭'),
+        renderMeetingSectionCard('待办事项', actionItems, '#dcfce7', '#15803d', '✅'),
+        renderMeetingSectionCard('风险提醒', riskItems, '#fee2e2', '#dc2626', '⚠️')
     ].join('');
 
     const markdownPreview = renderAiMarkdown(payload?.rawMarkdown || '');
 
     return `
         <div style="display:grid;gap:14px;">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
-                <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #dbeafe;">
-                    <div style="font-size:12px;color:#64748b;">摘要要点</div>
-                    <div style="margin-top:6px;font-size:28px;font-weight:800;color:#1d4ed8;">${summaryItems.length}</div>
-                </div>
-                <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#ecfdf5,#ffffff);border:1px solid #d1fae5;">
-                    <div style="font-size:12px;color:#64748b;">待办数量</div>
-                    <div style="margin-top:6px;font-size:28px;font-weight:800;color:#15803d;">${actionItems.length}</div>
-                </div>
-                <div style="padding:16px;border-radius:16px;background:linear-gradient(135deg,#fff7ed,#ffffff);border:1px solid #fed7aa;">
-                    <div style="font-size:12px;color:#64748b;">风险提醒</div>
-                    <div style="margin-top:6px;font-size:28px;font-weight:800;color:#ea580c;">${riskItems.length}</div>
-                </div>
-            </div>
             <div style="display:grid;gap:12px;">${renderedSections}</div>
             <details style="border:1px solid #e2e8f0;border-radius:16px;background:#fafcff;">
                 <summary style="cursor:pointer;padding:14px 16px;font-weight:700;color:#334155;">查看原始 Markdown 结果</summary>
@@ -954,7 +928,7 @@ function renderMeetingAssistantResult(payload) {
     `;
 }
 
-function renderMeetingSectionCard(title, subtitle, items, borderColor, accentColor, icon) {
+function renderMeetingSectionCard(title, items, borderColor, accentColor, icon) {
     const content = items.length
         ? `<div style="display:grid;gap:10px;">${items.map((item, index) => `
             <div style="display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;background:#ffffff;border:1px solid #e2e8f0;">
@@ -968,10 +942,7 @@ function renderMeetingSectionCard(title, subtitle, items, borderColor, accentCol
         <section style="border:1px solid ${borderColor};border-radius:18px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);padding:16px;">
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
                 <div style="width:38px;height:38px;border-radius:14px;background:${borderColor};display:flex;align-items:center;justify-content:center;font-size:18px;">${icon}</div>
-                <div>
-                    <div style="font-size:17px;font-weight:800;color:#0f172a;">${title}</div>
-                    <div style="font-size:12px;color:#64748b;">${subtitle}</div>
-                </div>
+                <div style="font-size:17px;font-weight:800;color:#0f172a;">${title}</div>
             </div>
             ${content}
         </section>
@@ -1021,6 +992,9 @@ async function saveMeetingToCommunication() {
         focusProjectCommunicationsTab();
         if (typeof loadCommunications === 'function') {
             await loadCommunications(currentProjectId);
+        }
+        if (typeof window.refreshImplementationWorkbenchAfterSave === 'function') {
+            await window.refreshImplementationWorkbenchAfterSave();
         }
     } catch (e) {
         showToast('保存到沟通记录失败: ' + e.message, 'danger');

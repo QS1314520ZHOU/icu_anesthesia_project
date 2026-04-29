@@ -88,6 +88,10 @@ function showWorklogModal() {
     document.getElementById('worklogModalTitle').textContent = '📝 填写工作日志';
     document.getElementById('worklogForm').reset();
     document.getElementById('logDate').value = new Date().toISOString().split('T')[0];
+    const memberInput = document.getElementById('logMemberName');
+    if (memberInput && !memberInput.value) {
+        memberInput.value = String(currentUser?.display_name || currentUser?.username || '').trim();
+    }
     showModal('worklogModal', { reset: false });
 }
 
@@ -500,6 +504,9 @@ async function saveWorklog() {
         closeModal('worklogModal');
     }, currentEditingLogId ? '日志已更新' : '日志已保存', async () => {
         await loadWorklogs(currentProjectId);
+        if (typeof window.refreshImplementationWorkbenchAfterSave === 'function') {
+            await window.refreshImplementationWorkbenchAfterSave();
+        }
     });
 }
 
@@ -614,20 +621,29 @@ let isSavingIssue = false;
 function showIssueModal() {
     document.getElementById('issueForm')?.reset();
     const ownerSelect = document.getElementById('issueOwnerMemberId');
+    const currentDisplayName = String(currentUser?.display_name || currentUser?.username || '').trim();
     if (ownerSelect) {
         const members = Array.isArray(currentProject?.members) ? currentProject.members : [];
         ownerSelect.innerHTML = `<option value="">未指定</option>${members.map(member => `
             <option value="${member.id}">${member.name}${member.role ? ` (${member.role})` : ''}</option>
         `).join('')}`;
-        ownerSelect.value = '';
+        const preferredOwner = members.find(member => String(member.name || '').trim() === currentDisplayName);
+        ownerSelect.value = preferredOwner ? String(preferredOwner.id) : '';
     }
     const blocker = document.getElementById('issueExternalBlocker');
-    if (blocker) blocker.checked = false;
+    if (blocker) blocker.checked = !!window.issueModalDefaults?.externalBlocker;
     const pushWecom = document.getElementById('issuePushWecom');
     if (pushWecom) pushWecom.checked = true;
     const rootCause = document.getElementById('issueRootCauseType');
     if (rootCause) rootCause.value = '';
+    const issueType = document.getElementById('issueType');
+    if (issueType && window.issueModalDefaults?.issueType) issueType.value = window.issueModalDefaults.issueType;
+    const issueSeverity = document.getElementById('issueSeverity');
+    if (issueSeverity && window.issueModalDefaults?.severity) issueSeverity.value = window.issueModalDefaults.severity;
+    const issueDesc = document.getElementById('issueDesc');
+    if (issueDesc && window.issueModalDefaults?.description) issueDesc.value = window.issueModalDefaults.description;
     showModal('issueModal', { reset: false });
+    window.issueModalDefaults = null;
 }
 
 async function saveIssue() {
@@ -654,6 +670,9 @@ async function saveIssue() {
             document.getElementById('issueDesc').value = '';
         }, '问题已保存', async () => {
             await syncCurrentProjectDetailState(['issues']);
+            if (typeof window.refreshImplementationWorkbenchAfterSave === 'function') {
+                await window.refreshImplementationWorkbenchAfterSave();
+            }
         });
     } finally {
         isSavingIssue = false;
@@ -981,7 +1000,7 @@ async function showIssuePushReceipts(issueId) {
                     <div style="margin-top:6px;color:var(--gray-500);">${item.result_message || ''}</div>
                 </div>
             </div>
-        `).join('') : '<div class="empty-state"><p>暂无推送回执</p><div class="empty-state-hint">执行过企业微信推送后，这里会显示推送结果。</div></div>';
+        `).join('') : '<div class="empty-state"><p>暂无推送回执</p></div>';
         showGenericModal('企微推送回执', html);
     } catch (e) {
         showToast(`加载推送回执失败: ${e.message}`, 'danger');
@@ -1015,7 +1034,7 @@ async function loadWorklogs(pid) {
     const container = document.getElementById('worklogsContainer');
     if (!container) return;
     if (!logs || !logs.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无工作日志</p><div class="empty-state-hint">可填写日志或使用 AI 智能填报补齐今日工作内容。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无工作日志</p></div>';
         return;
     }
     container.innerHTML = logs.slice(0, 20).map(l => `
@@ -1072,7 +1091,7 @@ async function loadDocuments(pid) {
     const container = document.getElementById('documentsContainer');
     if (!container) return;
     if (!docs || !docs.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无文档</p><div class="empty-state-hint">可上传需求、接口、部署等文档，后续会联动知识库与对照中心。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无文档</p></div>';
         return;
     }
     container.innerHTML = `
@@ -1104,7 +1123,7 @@ async function loadExpenses(pid) {
     const container = document.getElementById('expensesContainer');
     if (!container) return;
     if (!expenses || !expenses.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无费用记录</p><div class="empty-state-hint">录入费用后可进入审批、财务看板和经营分析。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无费用记录</p></div>';
         return;
     }
     const icons = { '差旅': '✈️', '住宿': '🏨', '餐饮': '🍽️', '交通': '🚗', '采购': '🛒', '其他': '📦' };
@@ -1133,7 +1152,7 @@ async function loadChanges(pid) {
     const container = document.getElementById('changesContainer');
     if (!container) return;
     if (!changes || !changes.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无变更记录</p><div class="empty-state-hint">当需求、范围、人员或时间调整时，可在此登记变更并进入审批流。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无变更记录</p></div>';
         return;
     }
     const statusMap = { '待审批': 'badge-warning', '已批准': 'badge-success', '已驳回': 'badge-danger', '已执行': 'badge-info' };
@@ -1163,7 +1182,7 @@ async function loadAcceptances(pid) {
     const container = document.getElementById('acceptancesContainer');
     if (!container) return;
     if (!acceptances || !acceptances.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无验收记录</p><div class="empty-state-hint">建议在阶段验收和上线节点录入验收结果，便于项目收尾追踪。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无验收记录</p></div>';
         return;
     }
     const statusMap = { '待验收': 'badge-warning', '验收中': 'badge-info', '已通过': 'badge-success', '未通过': 'badge-danger' };
@@ -1225,7 +1244,7 @@ async function loadSatisfaction(pid) {
         }
 
         if (!records.length) {
-            html += '<div class="empty-state"><p>暂无满意度记录</p><div class="empty-state-hint">可在交付、试运行和验收阶段记录客户反馈，形成长期满意度画像。</div></div>';
+            html += '<div class="empty-state"><p>暂无满意度记录</p></div>';
         } else {
             html += records.map(r => `
                 <div style="border:1px solid var(--gray-200);border-radius:10px;padding:14px;margin-bottom:10px;">
@@ -1257,7 +1276,7 @@ async function loadDevices(pid) {
     const container = document.getElementById('devicesContainer');
     if (!container) return;
     if (!devices || !devices.length) {
-        container.innerHTML = '<div class="empty-state"><p>暂无设备数据</p><div class="empty-state-hint">录入设备后可持续跟踪连接状态、协议类型和现场运行情况。</div></div>';
+        container.innerHTML = '<div class="empty-state"><p>暂无设备数据</p></div>';
         return;
     }
 

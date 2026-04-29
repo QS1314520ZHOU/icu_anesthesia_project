@@ -27,21 +27,15 @@ function showActionInbox() {
             <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showWarningCenter();">
                 <div style="font-size:24px;margin-bottom:8px;">⚠️</div>
                 <div style="font-weight:800;">预警</div>
-                <div style="font-size:12px;color:#64748b;margin-top:6px;">风险、延期、接口滞后等需要关注的异常</div>
             </button>
             <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showReminderCenter();">
                 <div style="font-size:24px;margin-bottom:8px;">🔔</div>
                 <div style="font-weight:800;">提醒</div>
-                <div style="font-size:12px;color:#64748b;margin-top:6px;">里程碑、待跟进、即将到期事项</div>
             </button>
             <button class="btn btn-outline" style="padding:18px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showApprovalCenter();">
                 <div style="font-size:24px;margin-bottom:8px;">📋</div>
                 <div style="font-weight:800;">审批</div>
-                <div style="font-size:12px;color:#64748b;margin-top:6px;">变更、离场、费用等待处理审批</div>
             </button>
-        </div>
-        <div style="margin-top:14px;padding:12px;border-radius:14px;background:#f8fafc;color:#64748b;font-size:13px;line-height:1.7;">
-            这里先作为统一行动收件箱入口，保留现有成熟列表和操作能力，后续可进一步合并成同一张待办表。
         </div>
     `;
     showGenericModal('行动收件箱', html);
@@ -50,10 +44,10 @@ function showActionInbox() {
 function showAiWorkbench() {
     const html = `
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;">
-            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showAskAiModal();">🔮 项目数据问答<br><span style="font-size:12px;color:#64748b;">查项目、问题、接口、日志</span></button>
-            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();openDashboardBriefingModal();">📋 AI 决策简报<br><span style="font-size:12px;color:#64748b;">看今日重点和管理建议</span></button>
-            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showActionInbox();">🧭 行动建议<br><span style="font-size:12px;color:#64748b;">从预警/提醒/审批进入</span></button>
-            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();window.location.href='/alignment';">🧩 接口 AI 助手<br><span style="font-size:12px;color:#64748b;">问接口、生成报文、对齐字段</span></button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showAskAiModal();">🔮 项目数据问答</button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();openDashboardBriefingModal();">📋 AI 决策简报</button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();showActionInbox();">🧭 行动建议</button>
+            <button class="btn btn-outline" style="padding:16px;text-align:left;border-radius:16px;" onclick="closeGenericModal();window.location.href='/alignment';">🧩 接口 AI 助手</button>
         </div>
     `;
     showGenericModal('AI 工作台', html);
@@ -76,6 +70,14 @@ function ensureAiHealthPolling() {
     window.__aiHealthTimer = setInterval(updateAiHealthUI, 60000);
 }
 
+window.openRoleHome = async function (options = {}) {
+    if (!currentUser) return;
+
+    if (typeof window.showGlobalDashboardHome === 'function') {
+        await window.showGlobalDashboardHome();
+    }
+};
+
 window.initializeAuthenticatedShell = function (options = {}) {
     if (!currentUser) return;
 
@@ -86,6 +88,10 @@ window.initializeAuthenticatedShell = function (options = {}) {
 
     if (options.triggerReminderCheck) {
         checkReminders({ silent: true });
+    }
+
+    if (options.openDefaultHome) {
+        window.openRoleHome({ forceDashboard: !!options.forceDashboard });
     }
 };
 
@@ -176,14 +182,13 @@ async function loadSimilarProjects(projectId) {
     try {
         const projects = await api.get(`/projects/${projectId}/similar`, { silent: true });
         if (!projects || !projects.length) {
-            container.innerHTML = '<div class="empty-state"><p>暂无相似项目</p><div class="empty-state-hint">当项目特征和交付规模更完整时，系统会推荐更多相似案例。</div></div>';
+            container.innerHTML = '<div class="empty-state"><p>暂无相似项目</p></div>';
             return;
         }
         container.innerHTML = projects.map(item => `
             <div style="padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff;margin-bottom:10px;cursor:pointer;" onclick="loadProjectDetail(${item.id})">
                 <div style="font-weight:700;color:#111827;">${item.project_name || '未命名项目'}</div>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">${item.hospital_name || '-'}</div>
-                <div style="font-size:12px;color:#475569;margin-top:8px;">相似度参考项目，可用于复用经验和风险预判。</div>
             </div>
         `).join('');
     } catch (e) {
@@ -244,40 +249,217 @@ function showAddProjectModal() {
     openModal('projectModal');
 }
 
+function getSidebarRoleHome() {
+    if (typeof window.getDesktopHomeRole === 'function') {
+        return window.getDesktopHomeRole();
+    }
+    const role = String(currentUser?.role || '').toLowerCase();
+    if (role === 'admin') return 'admin';
+    if (role === 'project_manager' || role === 'pm' || role === 'manager' || role === 'pmo') return 'pm';
+    return 'delivery';
+}
+
+function rankProjectsForRole(projects) {
+    const roleHome = getSidebarRoleHome();
+    const currentDisplayName = String(currentUser?.display_name || currentUser?.username || '').trim();
+    const list = Array.isArray(projects) ? [...projects] : [];
+    const statusPriority = {
+        '进行中': 5,
+        '试运行': 4,
+        '验收中': 3,
+        '暂停': 2,
+        '离场待返': 1
+    };
+
+    return list.sort((a, b) => {
+        const progressA = Number(a.progress || 0);
+        const progressB = Number(b.progress || 0);
+        const riskA = Number(a.risk_score || 0);
+        const riskB = Number(b.risk_score || 0);
+        const overdueA = Number(a.overdue_count || 0);
+        const overdueB = Number(b.overdue_count || 0);
+        const statusA = statusPriority[a.status] || 0;
+        const statusB = statusPriority[b.status] || 0;
+
+        if (roleHome === 'pm') {
+            const mineA = currentDisplayName && String(a.project_manager || '').trim() === currentDisplayName ? 1 : 0;
+            const mineB = currentDisplayName && String(b.project_manager || '').trim() === currentDisplayName ? 1 : 0;
+            if (mineA !== mineB) return mineB - mineA;
+            if (overdueA !== overdueB) return overdueB - overdueA;
+            if (riskA !== riskB) return riskB - riskA;
+            if (statusA !== statusB) return statusB - statusA;
+            return progressB - progressA;
+        }
+
+        if (roleHome === 'delivery') {
+            if (statusA !== statusB) return statusB - statusA;
+            if (riskA !== riskB) return riskB - riskA;
+            if (overdueA !== overdueB) return overdueB - overdueA;
+            return progressB - progressA;
+        }
+
+        if (statusA !== statusB) return statusB - statusA;
+        if (riskA !== riskB) return riskB - riskA;
+        return progressB - progressA;
+    });
+}
+
+function renderProjectCard(project) {
+    const active = Number(currentProjectId) === Number(project.id);
+    const progress = Number(project.progress || 0);
+    const progressColor = progress >= 100 ? '#10b981' : progress >= 70 ? '#3b82f6' : progress >= 30 ? '#f59e0b' : '#94a3b8';
+    const riskScore = Number(project.risk_score || 0);
+    const overdueCount = Number(project.overdue_count || 0);
+    const metaBadges = [
+        overdueCount > 0 ? `<span class="badge" style="background:#fee2e2;color:#b91c1c;">逾期 ${overdueCount}</span>` : '',
+        riskScore >= 50 ? `<span class="badge" style="background:#fef2f2;color:#dc2626;">高风险</span>` : riskScore >= 20 ? `<span class="badge" style="background:#fff7ed;color:#d97706;">中风险</span>` : ''
+    ].filter(Boolean).join(' ');
+
+    return `
+        <div class="project-card ${active ? 'active' : ''} status-${project.status || ''}" onclick="loadProjectDetail(${project.id})">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <div>
+                    <div style="font-weight:700;color:var(--gray-800);margin-bottom:4px;">${project.project_name || '未命名项目'}</div>
+                    <div style="font-size:12px;color:var(--gray-500);">${project.hospital_name || '-'}</div>
+                </div>
+                <span class="badge" style="background:${STATUS_COLORS[project.status] || '#e5e7eb'}20;color:${STATUS_COLORS[project.status] || '#64748b'};">${project.status || '未知'}</span>
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--gray-500);display:flex;justify-content:space-between;gap:8px;">
+                <span>经理：${project.project_manager || '未指定'}</span>
+                <span style="color:${progressColor};font-weight:700;">${progress}%</span>
+            </div>
+            ${metaBadges ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">${metaBadges}</div>` : ''}
+            <div class="progress-mini" style="margin-top:8px;background:#eef2f7;border-radius:999px;height:6px;overflow:hidden;">
+                <div class="progress-mini-bar" style="width:${progress}%;height:100%;background:${progressColor};"></div>
+            </div>
+        </div>
+    `;
+}
+
+function getProjectGroupStorageKey(title) {
+    return `sidebar_project_group_${getSidebarRoleHome()}_${title}`;
+}
+
+function getProjectGroupInitKey() {
+    return `sidebar_project_group_init_${getSidebarRoleHome()}`;
+}
+
+function ensureDefaultProjectGroupState(groups = []) {
+    if (!Array.isArray(groups) || !groups.length) return;
+    const initKey = getProjectGroupInitKey();
+    if (localStorage.getItem(initKey) === 'true') return;
+
+    groups.forEach((group, index) => {
+        if (!group?.title || !group?.projects?.length) return;
+        localStorage.setItem(getProjectGroupStorageKey(group.title), String(index === 0));
+    });
+    localStorage.setItem(initKey, 'true');
+}
+
+function isProjectGroupExpanded(title) {
+    const raw = localStorage.getItem(getProjectGroupStorageKey(title));
+    if (raw === null) return true;
+    return raw === 'true';
+}
+
+window.toggleProjectGroup = function (title) {
+    const expanded = !isProjectGroupExpanded(title);
+    localStorage.setItem(getProjectGroupStorageKey(title), String(expanded));
+    renderProjectList();
+};
+
+window.setAllProjectGroupsExpanded = function (expanded, titles = []) {
+    (titles || []).forEach(title => {
+        if (!title) return;
+        localStorage.setItem(getProjectGroupStorageKey(title), String(!!expanded));
+    });
+    renderProjectList();
+};
+
+window.currentProjectGroupTitles = window.currentProjectGroupTitles || [];
+
+function renderProjectGroup(title, hint, projects) {
+    if (!projects || !projects.length) return '';
+    const containsActive = projects.some(project => Number(project.id) === Number(currentProjectId));
+    const expanded = containsActive ? true : isProjectGroupExpanded(title);
+    const safeTitle = String(title).replace(/'/g, "\\'");
+    return `
+        <div style="margin-bottom:14px;">
+            <div onclick="toggleProjectGroup('${safeTitle}')" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${expanded ? '8px' : '0'};padding:8px 10px;border-radius:10px;background:#f8fafc;cursor:pointer;border:1px solid #e2e8f0;">
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                    <span style="font-size:12px;color:#64748b;transform:rotate(${expanded ? '90deg' : '0deg'});transition:transform 0.2s;">▸</span>
+                    <div style="font-size:12px;font-weight:800;color:#334155;letter-spacing:0.2px;">${title}</div>
+                    <span class="badge" style="background:#e2e8f0;color:#475569;">${projects.length}</span>
+                </div>
+                <div style="font-size:11px;color:#94a3b8;">${hint}</div>
+            </div>
+            <div style="display:${expanded ? 'flex' : 'none'};flex-direction:column;gap:10px;">
+                ${projects.map(renderProjectCard).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderProjectGroupToolbar(groupTitles = []) {
+    const titles = (groupTitles || []).filter(Boolean);
+    if (titles.length <= 1) return '';
+    window.currentProjectGroupTitles = titles;
+    return `
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;">
+            <button class="btn btn-outline btn-xs" style="padding:4px 10px;" onclick='setAllProjectGroupsExpanded(true, window.currentProjectGroupTitles)'>全部展开</button>
+            <button class="btn btn-outline btn-xs" style="padding:4px 10px;" onclick='setAllProjectGroupsExpanded(false, window.currentProjectGroupTitles)'>全部收起</button>
+        </div>
+    `;
+}
+
 function renderProjectList() {
     const list = document.getElementById('projectList');
     if (!list) return;
     const statusFilter = document.getElementById('statusFilter')?.value || '';
-    const projects = (allProjects || []).filter(project => !statusFilter || project.status === statusFilter);
+    const projects = rankProjectsForRole(
+        (allProjects || []).filter(project => !statusFilter || project.status === statusFilter)
+    );
+    const roleHome = getSidebarRoleHome();
+    const currentDisplayName = String(currentUser?.display_name || currentUser?.username || '').trim();
 
     if (!projects.length) {
         list.innerHTML = '<div class="empty-state"><p>暂无项目</p><div class="empty-state-hint">可点击“新建”创建项目，或调整左侧状态筛选。</div></div>';
         return;
     }
 
-    list.innerHTML = projects.map(project => {
-        const active = Number(currentProjectId) === Number(project.id);
-        const progress = Number(project.progress || 0);
-        const progressColor = progress >= 100 ? '#10b981' : progress >= 70 ? '#3b82f6' : progress >= 30 ? '#f59e0b' : '#94a3b8';
-        return `
-            <div class="project-card ${active ? 'active' : ''} status-${project.status || ''}" onclick="loadProjectDetail(${project.id})">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                    <div>
-                        <div style="font-weight:700;color:var(--gray-800);margin-bottom:4px;">${project.project_name || '未命名项目'}</div>
-                        <div style="font-size:12px;color:var(--gray-500);">${project.hospital_name || '-'}</div>
-                    </div>
-                    <span class="badge" style="background:${STATUS_COLORS[project.status] || '#e5e7eb'}20;color:${STATUS_COLORS[project.status] || '#64748b'};">${project.status || '未知'}</span>
-                </div>
-                <div style="margin-top:10px;font-size:12px;color:var(--gray-500);display:flex;justify-content:space-between;">
-                    <span>经理：${project.project_manager || '未指定'}</span>
-                    <span style="color:${progressColor};font-weight:700;">${progress}%</span>
-                </div>
-                <div class="progress-mini" style="margin-top:8px;background:#eef2f7;border-radius:999px;height:6px;overflow:hidden;">
-                    <div class="progress-mini-bar" style="width:${progress}%;height:100%;background:${progressColor};"></div>
-                </div>
-            </div>
+    if (roleHome === 'pm') {
+        const mine = projects.filter(project => currentDisplayName && String(project.project_manager || '').trim() === currentDisplayName);
+        const others = projects.filter(project => !(currentDisplayName && String(project.project_manager || '').trim() === currentDisplayName));
+        const groupTitles = ['我负责的项目', '其他协同项目'].filter(title => (title === '我负责的项目' ? mine.length : others.length));
+        ensureDefaultProjectGroupState([
+            { title: '我负责的项目', projects: mine },
+            { title: '其他协同项目', projects: others }
+        ]);
+        list.innerHTML = `
+            ${renderProjectGroupToolbar(groupTitles)}
+            ${renderProjectGroup('我负责的项目', '优先关注', mine)}
+            ${renderProjectGroup('其他协同项目', '同样可进入', others)}
         `;
-    }).join('');
+        return;
+    }
+
+    if (roleHome === 'delivery') {
+        const activeDelivery = projects.filter(project => ['进行中', '试运行', '验收中'].includes(project.status));
+        const others = projects.filter(project => !['进行中', '试运行', '验收中'].includes(project.status));
+        const groupTitles = ['当前交付重点', '其他项目'].filter(title => (title === '当前交付重点' ? activeDelivery.length : others.length));
+        ensureDefaultProjectGroupState([
+            { title: '当前交付重点', projects: activeDelivery },
+            { title: '其他项目', projects: others }
+        ]);
+        list.innerHTML = `
+            ${renderProjectGroupToolbar(groupTitles)}
+            ${renderProjectGroup('当前交付重点', '现场优先', activeDelivery)}
+            ${renderProjectGroup('其他项目', '次级关注', others)}
+        `;
+        return;
+    }
+
+    list.innerHTML = projects.map(renderProjectCard).join('');
 }
 
 function filterProjects() {
@@ -490,7 +672,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkAuth();
 
     if (currentUser) {
-        window.initializeAuthenticatedShell({ triggerReminderCheck: true });
+        window.initializeAuthenticatedShell({ triggerReminderCheck: true, openDefaultHome: true });
     } else {
         ensureAiHealthPolling();
     }

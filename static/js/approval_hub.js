@@ -79,9 +79,6 @@
                         </div>
                         <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 0 12px 0;flex-wrap:wrap;">
                             <button class="btn btn-warning btn-sm" onclick="batchRemindApprovals()">⏰ 批量催办</button>
-                            <input type="text" value="${window.approvalPendingSearch}" placeholder="搜索项目 / 标题 / 申请人"
-                                oninput="searchApprovalPending(this.value)"
-                                style="width:320px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
                             <button class="btn btn-outline btn-sm" onclick="resetApprovalPendingFilters()">清空筛选</button>
                         </div>
                         <table class="table">
@@ -223,21 +220,16 @@
                                 <div style="font-size:12px;color:#64748b;">已撤销</div>
                             </div>
                         </div>
-                        <div style="display:flex;justify-content:space-between;gap:8px;padding:0 0 12px 0;flex-wrap:wrap;">
-                            <input type="text" value="${window.approvalTrackingSearch}" placeholder="搜索项目名 / 标题 / 审批单号 / 申请人"
-                                oninput="searchApprovalTracking(this.value)"
-                                style="flex:1;min-width:240px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
-                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                                <select onchange="filterApprovalTracking(this.value)" style="width:180px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
-                                    <option value="">全部状态</option>
-                                    <option value="审批中" ${window.approvalTrackingStatusFilter === '审批中' ? 'selected' : ''}>审批中</option>
-                                    <option value="已批准" ${window.approvalTrackingStatusFilter === '已批准' ? 'selected' : ''}>已批准</option>
-                                    <option value="已报销" ${window.approvalTrackingStatusFilter === '已报销' ? 'selected' : ''}>已报销</option>
-                                    <option value="已驳回" ${window.approvalTrackingStatusFilter === '已驳回' ? 'selected' : ''}>已驳回</option>
-                                    <option value="已撤销" ${window.approvalTrackingStatusFilter === '已撤销' ? 'selected' : ''}>已撤销</option>
-                                </select>
-                                <button class="btn btn-outline btn-sm" onclick="resetApprovalTrackingFilters()">清空筛选</button>
-                            </div>
+                        <div style="display:flex;justify-content:flex-end;gap:8px;padding:0 0 12px 0;flex-wrap:wrap;">
+                            <select onchange="filterApprovalTracking(this.value)" style="width:180px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
+                                <option value="">全部状态</option>
+                                <option value="审批中" ${window.approvalTrackingStatusFilter === '审批中' ? 'selected' : ''}>审批中</option>
+                                <option value="已批准" ${window.approvalTrackingStatusFilter === '已批准' ? 'selected' : ''}>已批准</option>
+                                <option value="已报销" ${window.approvalTrackingStatusFilter === '已报销' ? 'selected' : ''}>已报销</option>
+                                <option value="已驳回" ${window.approvalTrackingStatusFilter === '已驳回' ? 'selected' : ''}>已驳回</option>
+                                <option value="已撤销" ${window.approvalTrackingStatusFilter === '已撤销' ? 'selected' : ''}>已撤销</option>
+                            </select>
+                            <button class="btn btn-outline btn-sm" onclick="resetApprovalTrackingFilters()">清空筛选</button>
                         </div>
                         <table class="table">
                             <thead>

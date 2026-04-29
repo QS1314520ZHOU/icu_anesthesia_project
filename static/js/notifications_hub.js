@@ -16,10 +16,8 @@ function buildNotificationQuery() {
     const params = new URLSearchParams();
     const type = document.getElementById('notificationTypeFilter')?.value || '';
     const readStatus = document.getElementById('notificationReadFilter')?.value || '';
-    const keyword = document.getElementById('notificationKeyword')?.value.trim() || '';
     if (type) params.set('type', type);
     if (readStatus) params.set('read_status', readStatus);
-    if (keyword) params.set('keyword', keyword);
     params.set('limit', '100');
     return params.toString();
 }

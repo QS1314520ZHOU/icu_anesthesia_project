@@ -150,9 +150,7 @@
             const searchSummary = [type, window.reminderSearch].filter(Boolean).join(' / ');
             const searchHtml = `
                 ${searchSummary ? `<div style="margin-bottom:12px;font-size:12px;color:#64748b;">当前筛选：${searchSummary}</div>` : ''}
-                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-                    <input type="text" value="${window.reminderSearch}" placeholder="搜索项目 / 标题 / 描述" oninput="searchReminders(this.value)"
-                        style="flex:1;min-width:220px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:14px;">
                     <button class="btn btn-outline btn-sm" onclick="resetReminderSearch()">清空筛选</button>
                 </div>
             `;

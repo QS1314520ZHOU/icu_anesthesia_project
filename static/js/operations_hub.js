@@ -76,7 +76,7 @@ async function loadPmoSummary() {
     const container = document.getElementById('pmoAiSummary');
     if (!container) return;
 
-    container.innerHTML = '<div class="loading-spinner"></div><p style="text-align:center; color:#64748b; font-size:13px; margin-top:10px;">AI 正在串联全线项目数据，请稍候...</p>';
+    container.innerHTML = '<div class="loading-spinner"></div>';
 
     try {
         const data = await api.get('/pmo/summary');
@@ -180,7 +180,6 @@ function showDemandAnalysisModal() {
                             <div style="width:56px; height:56px; border-radius:18px; display:flex; align-items:center; justify-content:center; font-size:28px; background:rgba(255,255,255,0.14); box-shadow:inset 0 1px 0 rgba(255,255,255,0.18);">🧬</div>
                             <div>
                                 <h3 style="margin:0; font-size:20px; font-weight:800; letter-spacing:0.2px;">AI 需求变更影响评估</h3>
-                                <div style="margin-top:6px; font-size:12px; color:rgba(226,232,240,0.88);">从交付节奏、资源占用、连锁风险到决策建议，输出一份可直接讨论的评估报告</div>
                             </div>
                         </div>
                         <button class="modal-close" onclick="closeModal('demandAnalysisModal')" style="width:48px;height:48px;border-radius:16px;background:rgba(255,255,255,0.12);color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);font-size:28px;line-height:1;">&times;</button>
@@ -222,7 +221,6 @@ function showDemandAnalysisModal() {
                                 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px;">
                                     <div>
                                         <div style="font-size:16px; font-weight:800; color:#0f172a;">评估输出面板</div>
-                                        <div style="font-size:12px; color:#64748b; margin-top:4px;">AI 会将结果组织成适合讨论的简报，而不是一整页黑字堆叠</div>
                                     </div>
                                     <div style="padding:7px 12px; border-radius:999px; background:#e0f2fe; color:#0369a1; font-size:11px; font-weight:800;">AI Ready</div>
                                 </div>
@@ -232,7 +230,6 @@ function showDemandAnalysisModal() {
                                 <div id="demandAnalysisEmpty" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:440px; text-align:center; color:#94a3b8; padding:32px;">
                                     <div style="width:88px; height:88px; border-radius:28px; display:flex; align-items:center; justify-content:center; font-size:42px; margin-bottom:18px; background:linear-gradient(135deg,#eef2ff,#e0f2fe); box-shadow:inset 0 1px 0 rgba(255,255,255,0.7);">🛰️</div>
                                     <div style="font-size:22px; font-weight:800; color:#334155;">等待开始评估</div>
-                                    <div style="margin-top:10px; max-width:480px; line-height:1.8; font-size:14px;">输入变更描述后，AI 会输出核心影响、蝴蝶效应、延期风险、资源成本和决策建议。</div>
                                 </div>
                             </div>
                         </div>
@@ -264,7 +261,6 @@ async function runDemandAnalysis() {
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:420px; text-align:center;">
             <div class="loading-spinner"><div class="spinner"></div></div>
             <div style="margin-top:18px; font-size:18px; font-weight:800; color:#0f172a;">AI 正在计算影响链路</div>
-            <div style="margin-top:8px; font-size:13px; color:#64748b;">分析交付冲击、资源占用、蝴蝶效应与决策建议，请稍候...</div>
         </div>
     `;
 

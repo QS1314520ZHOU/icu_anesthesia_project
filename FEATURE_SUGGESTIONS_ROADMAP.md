@@ -17,6 +17,7 @@ It is organized by domain so product, frontend, backend, and QA can move in para
 ## Dashboard / Workbench
 
 - `P0`
+  - shift the default implementation experience from management-style reporting to an implementation-first workbench
   - add a unified action center that merges warnings, reminders, approvals, and AI suggestions
   - make today-focus cards jump directly into the exact tab or modal they refer to
 - `P1`
@@ -83,11 +84,17 @@ It is organized by domain so product, frontend, backend, and QA can move in para
 ## Report / AI Analysis / Task Center
 
 - `P0`
+  - make implementation logs, blockers, and meeting notes reusable across daily report, weekly report, warning center, and project detail without second reporting
   - improve task-center source traceability so each async task points back to its triggering screen
   - standardize AI result copy / export / archive behavior
 - `P1`
   - add report diff view between two generations
   - add queue tags for AI analysis, reporting, extraction, and maintenance jobs
+
+## Implementation-First Workbench
+
+- detailed strategy doc:
+  - `IMPLEMENTATION_WORKBENCH_STRATEGY.md`
 - `P2`
   - recommend the next best async action from current project state
 

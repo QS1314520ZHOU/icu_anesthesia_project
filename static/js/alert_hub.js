@@ -92,9 +92,7 @@
                 </div>
             </div>
             ${[window.warningSeverityFilter, window.warningSearch].filter(Boolean).join(' / ') ? `<div style="margin-bottom:12px;font-size:12px;color:#64748b;">当前筛选：${[window.warningSeverityFilter, window.warningSearch].filter(Boolean).join(' / ')}</div>` : ''}
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-                <input type="text" value="${window.warningSearch}" placeholder="搜索项目名 / 预警内容" oninput="searchWarnings(this.value)"
-                    style="flex:1;min-width:220px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;justify-content:flex-end;">
                 <select onchange="filterWarnings(this.value)" style="width:180px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;">
                     <option value="">全部等级</option>
                     <option value="high" ${window.warningSeverityFilter === 'high' ? 'selected' : ''}>高危</option>
